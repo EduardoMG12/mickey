@@ -40,7 +40,8 @@ noticeable lag, whatever each one runs.
 
 - **One binary: `mickey`.** The same program runs on every peer, built for
   Linux and for Windows. In M0 roles are fixed per run (`mickey send` on
-  Linux, `mickey receive` on Windows); later every peer can be both.
+  Linux, `mickey receive` on Windows). The goal is **symmetric peers**: every
+  peer can be the source or a target, whichever keyboard you touch.
 - **Backends per platform.** Capture and emit are the only platform-specific
   parts. The core (focus, layout, pressed keys, hotkeys) and the protocol are
   plain, testable Rust.
@@ -193,9 +194,10 @@ A keyboard sent over the network is a keylogger unless it is protected.
   packets drop). M0 uses TCP; revisit in M1 with numbers. *(needs exploration)*
 - **Encryption in M1.** TLS (`rustls`) vs Noise (`snow`) vs QUIC (`quinn`).
   *(needs exploration)*
-- **Symmetric peers.** Should every peer be able to act as the source (use
-  the Windows keyboard to drive Linux too), or is the Linux machine always the
-  source? M2 assumes symmetric. *(user decision)*
+- ~~**Symmetric peers.** Should every peer be able to act as the source, or is
+  the Linux machine always the source?~~ *(resolved: symmetric. Every peer can
+  drive every other one: the Windows keyboard can control Linux too. Linux
+  becomes a target in M1 (`uinput`), Windows becomes a source in M2.)*
 
 ## Discoveries
 
