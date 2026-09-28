@@ -18,7 +18,7 @@ be understood line by line.
 - **Works on any desktop.** X11, GNOME, KDE, Hyprland, Sway: on Linux the
   hard part is the compositor, not the distro, and Mickey has a backend
   for each, plus a kernel-level fallback (`evdev`/`uinput`) that works
-  everywhere. Windows later.
+  everywhere. Windows too, from the first milestone.
 - **Feels local.** Moving the mouse on a remote screen should add no latency
   you can notice. Hard budgets, measured.
 - **Safe on a shared network.** Everything you type crosses the network, so
@@ -29,9 +29,9 @@ be understood line by line.
 
 | Milestone | What you get | Status |
 |---|---|---|
-| **M0: It crosses** | Press a hotkey, and this PC's keyboard and mouse drive another Linux PC; press it again to come back ([PRD](docs/prds/0001-m0-hotkey-switch.md)) | next |
-| **M1: Screens have edges** | Cursor crosses screen edges instead of using a hotkey; 3+ machines in a layout; encryption and pairing | planned |
-| **M2: Any desktop** | Native backends: X11, Wayland portals (GNOME/KDE), wlroots (Hyprland/Sway); Windows | planned |
+| **M0: It crosses** | Press a hotkey, and a Linux PC's keyboard and mouse drive a Windows PC; press it again to come back ([PRD](docs/prds/0001-m0-hotkey-switch.md)) | next |
+| **M1: Screens have edges** | 3+ PCs in a layout: the cursor leaves your screen and enters the neighbor you configured, and back; Linux targets; encryption and pairing | planned |
+| **M2: Any desktop** | Native backends: X11, Wayland portals (GNOME/KDE), wlroots; Windows as the source | planned |
 | Later | Shared clipboard, file drag and drop, automatic discovery (mDNS), GUI/tray, macOS | ideas |
 
 ## Architecture at a glance

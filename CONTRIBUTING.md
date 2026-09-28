@@ -99,7 +99,7 @@ interesting → answer the challenge → approve → merge.*
 - Unit tests next to the code (`#[cfg(test)] mod tests`) for pure logic
   (protocol encoding, layout, hotkey state machine).
 - Integration tests in `tests/` drive two Mickey instances on localhost with
-  a fake capture and a fake emitter, so CI never needs `/dev/uinput`.
+  a fake capture and a fake emitter, so CI never needs real input devices.
 - Manual verification steps for real input (two machines, or one machine and
   a uinput device) go in the PR description.
 - CI runs on every PR and must be green before merge:
