@@ -38,9 +38,9 @@ noticeable lag, whatever each one runs.
 
 ## Architecture
 
-- **One binary: `mickey`.** The same program runs on every peer. In M0 roles
-  are fixed per run (`mickey send` / `mickey receive`); later every peer can be
-  both.
+- **One binary: `mickey`.** The same program runs on every peer, built for
+  Linux and for Windows. In M0 roles are fixed per run (`mickey send` on
+  Linux, `mickey receive` on Windows); later every peer can be both.
 - **Backends per platform.** Capture and emit are the only platform-specific
   parts. The core (focus, layout, pressed keys, hotkeys) and the protocol are
   plain, testable Rust.
@@ -48,7 +48,7 @@ noticeable lag, whatever each one runs.
   positions* (`KEY_A` = the key where A sits on a US layout); the target
   applies its own keyboard layout. Mouse motion is raw relative deltas; the
   target's own acceleration applies. Non-Linux backends translate to/from
-  evdev codes.
+  evdev codes (e.g. Windows scan codes).
 - **All `unsafe` lives in `platform/`.** Everything else is safe Rust and never
   sees a file descriptor ioctl or an OS handle.
 
@@ -56,11 +56,12 @@ noticeable lag, whatever each one runs.
 
 | Platform | Capture | Emit | Milestone |
 |---|---|---|---|
-| Linux, any compositor (fallback) | `evdev` read + `EVIOCGRAB` | `uinput` | M0 |
-| Hyprland / Sway (wlroots) | layer-shell edge surface + pointer constraints | `uinput` or virtual-pointer/keyboard protocols | M2 |
+| Linux, any compositor (fallback) | `evdev` read + `EVIOCGRAB`: **M0** | `uinput`: M1 | M0 / M1 |
+| Windows | low-level hooks / Raw Input: M2 | `SendInput`: **M0** | M0 / M2 |
+| Hyprland (owner's desktop) | cursor position for edge detection: M1 | — | M1 |
+| Sway / other wlroots | layer-shell edge surface + pointer constraints | virtual-pointer/keyboard protocols | M2 |
 | GNOME 45+ / KDE 6.1+ | InputCapture portal + libei | RemoteDesktop portal + libei | M2 |
 | X11 | XInput2 + grab | XTest | M2 |
-| Windows | low-level hooks / Raw Input | `SendInput` | M2+ |
 | macOS | `CGEventTap` | `CGEventPost` | later |
 
 `evdev`/`uinput` work on every Linux desktop because they sit below the
@@ -81,7 +82,7 @@ mickey/
 │           ├── event.rs    # InputEvent: our own type, no OS types
 │           ├── protocol.rs # encode/decode events on the wire
 │           ├── focus.rs    # hotkey + focus state machine, pressed keys
-│           └── platform/   # all unsafe: evdev, uinput, later X11/portals/Windows
+│           └── platform/   # all unsafe: linux/ (evdev, uinput), windows/ (SendInput)
 ├── docs/prds/              # product requirement docs
 ├── CLAUDE.md               # rules for AI assistants
 ├── CONTRIBUTING.md         # rules for humans (and AI)
@@ -93,7 +94,7 @@ before.
 
 ### Installed layout
 
-| What | Linux | Windows (later) |
+| What | Linux | Windows |
 |---|---|---|
 | Config (`config.toml`): peers, layout, hotkey | `$XDG_CONFIG_HOME/mickey/` (`~/.config/…`) | `%APPDATA%\mickey\` |
 | Pairing keys (from M1) | `$XDG_DATA_HOME/mickey/` | `%APPDATA%\mickey\` |
@@ -137,18 +138,21 @@ A keyboard sent over the network is a keylogger unless it is protected.
 
 ### Platforms (in order)
 
-1. The owner's machines (Linux; see Open Questions).
-2. Linux in general, native backends for the main desktops.
-3. Windows.
+1. **Linux → Windows**: the owner's Arch + Hyprland machine drives a Windows
+   PC (M0).
+2. **Several PCs at once**: screens in a layout, the cursor leaves one screen
+   and enters the configured neighbor, Linux and Windows peers mixed (M1).
+3. Linux in general (native backends for the main desktops) and Windows as the
+   source (M2).
 4. macOS (only if someone needs it).
 
 ### Milestones
 
 | # | Name | PRD | Summary |
 |---|---|---|---|
-| M0 | It crosses | [0001](0001-m0-hotkey-switch.md) | Linux → Linux, `evdev` + `uinput`, hotkey switches focus, plaintext TCP |
-| M1 | Screens have edges | 0002 (todo) | Edge crossing, 3+ peers in a layout, any peer can be the source, encryption and pairing |
-| M2 | Any desktop | 0003 (todo) | Native backends (wlroots, portals, X11), Windows |
+| M0 | It crosses | [0001](0001-m0-hotkey-switch.md) | Linux → Windows: `evdev` capture, `SendInput` emit, hotkey switches focus, plaintext TCP |
+| M1 | Screens have edges | 0002 (todo) | Layout of 3+ peers; cursor crosses to the configured neighbor and back; Linux targets (`uinput`); encryption and pairing |
+| M2 | Any desktop | 0003 (todo) | Native backends (wlroots, portals, X11); Windows as the source |
 
 ### Later (unordered, not committed)
 
@@ -167,21 +171,31 @@ A keyboard sent over the network is a keylogger unless it is protected.
 - Distro-specific code paths. If something needs a distro check, the design is
   wrong.
 - Abstractions built for a second use case that does not exist yet (the
-  capture/emit traits appear when the second backend does, in M2).
+  emit trait appears when the second emit backend, `uinput`, does in M1).
 
 ## Open Questions
 
-- **The owner's three machines.** OS, distro, desktop/compositor and X11 vs
-  Wayland of each. Known so far: machine 1 is Arch + Hyprland (Wayland). This
-  decides which M2 backends come first. *(user decision)*
+- **The owner's three machines.** Known so far: machine 1 is Arch + Hyprland
+  (Wayland) and is the source; one machine runs Windows (10 or 11?). The
+  third: OS and desktop? This decides which M1/M2 backends come first.
+  *(user decision)*
+- **Edge detection on Hyprland (M1).** The source must know when its cursor
+  hits a screen edge. Hyprland's IPC (`cursorpos`) is simple but
+  Hyprland-only; a wlroots layer-shell surface on the edge works on Sway too.
+  *(needs exploration)*
+- **Coming back (M1).** While focus is on Windows, who notices the cursor hit
+  the edge that leads home: the target (reads its own cursor position after
+  each move and tells the source) or the source (tracks a virtual cursor)?
+  Leaning toward the target: it knows its real cursor, acceleration included.
+  *(needs exploration)*
 - **Protocol transport.** TCP for everything (simple, ordered, no lost key
   releases) vs UDP for motion + TCP for keys (lower worst-case latency when
   packets drop). M0 uses TCP; revisit in M1 with numbers. *(needs exploration)*
 - **Encryption in M1.** TLS (`rustls`) vs Noise (`snow`) vs QUIC (`quinn`).
   *(needs exploration)*
 - **Symmetric peers.** Should every peer be able to act as the source (use
-  any machine's keyboard to drive the others), or is one fixed source enough?
-  *(user decision)*
+  the Windows keyboard to drive Linux too), or is the Linux machine always the
+  source? M2 assumes symmetric. *(user decision)*
 
 ## Discoveries
 
