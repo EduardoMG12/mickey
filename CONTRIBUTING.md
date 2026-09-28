@@ -100,8 +100,8 @@ interesting → answer the challenge → approve → merge.*
   (protocol encoding, layout, hotkey state machine).
 - Integration tests in `tests/` drive two Mickey instances on localhost with
   a fake capture and a fake emitter, so CI never needs real input devices.
-- Manual verification steps for real input (two machines, or one machine and
-  a uinput device) go in the PR description.
+- Manual verification steps for real input (on the real Linux and Windows
+  machines) go in the PR description.
 - CI runs on every PR and must be green before merge:
   `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`,
   `cargo test`.
