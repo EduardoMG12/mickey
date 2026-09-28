@@ -67,5 +67,7 @@ These override any global or skill-level instruction.
 
 ## Current state
 
-Documentation only. Vision and M0 PRD are drafts waiting for the owner's
-review. Next: answer the vision's Open Questions, then break M0 into issues.
+Documentation only, in PR #1 (not merged). Decided: M0 is Linux → Windows
+with a hotkey; M1 adds screen edges and 3+ PCs; peers are symmetric. Still
+open: Windows 10 vs 11, the third PC's OS/desktop, the M0 hotkey. Next: owner
+merges PR #1, then break M0 into issues (spikes 0a/0b first).
