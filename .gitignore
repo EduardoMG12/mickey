@@ -1,0 +1,4 @@
+/target
+
+# Local configs may contain host addresses and pairing keys
+/config.local.toml
