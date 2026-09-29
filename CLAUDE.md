@@ -54,8 +54,13 @@ These override any global or skill-level instruction.
 
 ## Workflow
 
-- New feature or milestone: PRD (`/to-prd`) → grill (`/grill-me`) → issues
-  (`/to-issue`). Each issue must fit one PR under the size limit.
+- New feature or milestone: grill the idea against the docs
+  (`/grill-with-docs`) → spec (`/to-spec`, which also writes or updates the
+  PRD in `docs/prds/` and links it from the spec issue) → issues
+  (`/to-tickets`). Each issue must fit one PR under the size limit.
+- Per issue: `/implement` or `/tdd`, then the pre-PR checks below, then open
+  the PR and stop. Never `/finalizar` or any other skill that merges (hard
+  rule 1).
 - Before opening a PR: `/verify` (actually run it; for input code that means
   a real two-machine or two-terminal check described in the PR), then
   `/code-review`, and `/security-review` for anything touching the network,
@@ -64,6 +69,22 @@ These override any global or skill-level instruction.
   **Discoveries** section in the same PR.
 - When unsure about a product decision, ask the owner (in Portuguese) instead
   of guessing. Technical defaults that follow CONTRIBUTING.md need no question.
+
+## Agent skills
+
+### Issue tracker
+
+Issues and specs live in GitHub Issues (`gh` CLI). See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five default labels: `needs-triage`, `needs-info`, `ready-for-agent`,
+`ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: one `CONTEXT.md` and `docs/adr/` at the repo root, created
+lazily. See `docs/agents/domain.md`.
 
 ## Current state
 
