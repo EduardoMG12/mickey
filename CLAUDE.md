@@ -88,7 +88,10 @@ lazily. See `docs/agents/domain.md`.
 
 ## Current state
 
-Documentation only, in PR #1 (not merged). Decided: M0 is Linux → Windows
-with a hotkey; M1 adds screen edges and 3+ PCs; peers are symmetric. Still
-open: Windows 10 vs 11, the third PC's OS/desktop, the M0 hotkey. Next: owner
-merges PR #1, then break M0 into issues (spikes 0a/0b first).
+Documentation only, in PRs #1 → #2 → #3 (stacked, not merged). Decided: M0 is
+Linux → Windows 10 with the hotkey Right Ctrl + Right Shift (on release);
+M1a adds screen edges, 3+ PCs and a configurable hotkey; M1b adds a setup GUI;
+peers are symmetric; the hotkey stays as the way home after edges exist.
+Glossary in `CONTEXT.md`. Open for the M1a grill: Ubuntu KDE on Wayland or
+X11, and whether the layout places peers or monitors. Next: owner merges the
+PRs, then `/to-spec` + `/to-tickets` for M0 (spikes 0a/0b first).
