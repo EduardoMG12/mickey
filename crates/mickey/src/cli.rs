@@ -9,6 +9,9 @@ usage:
                                      without --to, uses the peers in config.toml
   mickey status [--waybar]           show where the focus is and which PCs are online;
                                      --waybar keeps printing JSON lines for a Waybar module
+  mickey go <name>                   send the keyboard and mouse to that PC
+  mickey home                        bring them back to this PC
+  mickey switcher                    show the switcher window
   mickey id                          show this machine's fingerprint
   mickey forget <fingerprint>        stop trusting a paired machine
 ";
@@ -20,6 +23,8 @@ pub enum Command {
     Status {
         waybar: bool,
     },
+    /// An order for the running source: `go <name>`, `home` or `switcher`.
+    Order(String),
     Forget {
         fingerprint: String,
     },
@@ -37,6 +42,10 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
         [] => Ok(Command::Help),
         [help] if help == "-h" || help == "--help" || help == "help" => Ok(Command::Help),
         [command] if command == "id" => Ok(Command::Id),
+        [command] if command == "home" || command == "switcher" => {
+            Ok(Command::Order(command.clone()))
+        }
+        [command, name] if command == "go" => Ok(Command::Order(format!("go {name}"))),
         [command] if command == "status" => Ok(Command::Status { waybar: false }),
         [command, flag] if command == "status" && flag == "--waybar" => {
             Ok(Command::Status { waybar: true })
@@ -76,6 +85,11 @@ mod tests {
         assert_eq!(parse(&[]), Ok(Command::Help));
         assert_eq!(parse(&args("--help")), Ok(Command::Help));
         assert_eq!(parse(&args("id")), Ok(Command::Id));
+        assert_eq!(parse(&args("home")), Ok(Command::Order("home".into())));
+        assert_eq!(
+            parse(&["go".into(), "Windows A".into()]),
+            Ok(Command::Order("go Windows A".into()))
+        );
         assert_eq!(
             parse(&args("status")),
             Ok(Command::Status { waybar: false })

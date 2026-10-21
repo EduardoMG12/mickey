@@ -104,6 +104,18 @@ glance where you are typing:
 #custom-mickey.off    { opacity: 0.5; }
 ```
 
+**Commands.** While `mickey source` runs, `mickey go <name>` sends the
+keyboard and mouse to a PC from `config.toml`, `mickey home` brings them
+back and `mickey switcher` shows the switcher. They are meant for bars,
+launchers and compositor binds, e.g. on Hyprland (classic syntax):
+
+```ini
+bind = SUPER ALT, 1, exec, mickey go Windows
+```
+
+Compositor binds only reach Mickey while the focus is on this PC; to come
+back from another PC, use Mickey's hotkey.
+
 On **Hyprland** the switcher tiles like any window unless a rule makes it
 float. Lua config (Hyprland 0.56+):
 
