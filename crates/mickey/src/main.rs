@@ -66,7 +66,13 @@ fn run(command: Command) -> Result<(), String> {
             println!("{}", identity.fingerprint());
             Ok(())
         }
-        Command::Status => {
+        Command::Status { waybar: true } => {
+            #[cfg(target_os = "linux")]
+            follow_for_waybar();
+            #[cfg(not(target_os = "linux"))]
+            Err("mickey status needs the source, which runs only on Linux in M0".into())
+        }
+        Command::Status { waybar: false } => {
             #[cfg(target_os = "linux")]
             {
                 let mut answer = control::request("status")?;
@@ -122,6 +128,34 @@ fn run(command: Command) -> Result<(), String> {
             }
         }
         Command::Target { listen } => target(listen),
+    }
+}
+
+/// Prints a Waybar line now and after every change, for as long as Waybar
+/// keeps it running. While no source runs it shows "off" and retries, so
+/// the bar never shows an error.
+#[cfg(target_os = "linux")]
+fn follow_for_waybar() -> ! {
+    use std::io::Write;
+    let mut last = None;
+    loop {
+        let mut show = |line: String| {
+            if last.as_ref() != Some(&line) {
+                println!("{line}");
+                // Waybar reads a pipe, which Rust buffers; push each line out.
+                let _ = std::io::stdout().flush();
+                last = Some(line);
+            }
+        };
+        if let Ok(lines) = control::request("follow") {
+            for line in lines.map_while(Result::ok) {
+                if let Some(status) = control::Status::from_line(&line) {
+                    show(control::waybar_line(Some(&status)));
+                }
+            }
+        }
+        show(control::waybar_line(None));
+        std::thread::sleep(std::time::Duration::from_secs(2));
     }
 }
 
