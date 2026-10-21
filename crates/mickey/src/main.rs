@@ -1,8 +1,4 @@
-//! Spike 0b: prove that Mickey can type and move the mouse on Windows.
-//!
-//! Waits eight seconds, draws a small square with the cursor and types
-//! "hello" into whatever window has focus. Step 1 of M0 replaces this with
-//! the real `source`/`target` CLI.
+//! Spike 0b: type "hello" and move the mouse on Windows.
 
 mod platform;
 
@@ -26,7 +22,6 @@ fn demo() -> std::io::Result<()> {
     use std::thread::sleep;
     use std::time::Duration;
 
-    // Set 1 scan codes (the physical key positions on a US keyboard).
     const SCAN_H: u16 = 0x23;
     const SCAN_E: u16 = 0x12;
     const SCAN_L: u16 = 0x26;
@@ -35,7 +30,6 @@ fn demo() -> std::io::Result<()> {
     println!("mickey: click on a text window now, starting in 8 seconds");
     sleep(Duration::from_secs(8));
 
-    // A 500-unit square in 50 small steps per side, slow enough to see.
     for (dx, dy) in [(10, 0), (0, 10), (-10, 0), (0, -10)] {
         for _ in 0..50 {
             move_mouse(dx, dy)?;
@@ -44,8 +38,7 @@ fn demo() -> std::io::Result<()> {
     }
 
     for scan_code in [SCAN_H, SCAN_E, SCAN_L, SCAN_L, SCAN_O] {
-        // Always try the release, even if the press failed, so no key is
-        // ever left held down on Windows.
+        // Release even if the press failed, so no key stays held.
         let pressed = send_key(scan_code, true);
         let released = send_key(scan_code, false);
         pressed?;
