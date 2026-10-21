@@ -2,6 +2,10 @@
 
 #[cfg(target_os = "linux")]
 mod capture;
+// ponytail: parsed and checked, but used only by tests until the hotkey
+// matcher learns several chords (#61, next PR).
+#[allow(dead_code)]
+mod chord;
 mod cli;
 mod config;
 #[cfg(windows)]
@@ -80,6 +84,7 @@ fn run(command: Command) -> Result<(), String> {
                 (Some(to), _) => vec![config::Peer {
                     name: to.to_string(),
                     address: to,
+                    hotkey: None,
                 }],
                 (None, Some(config)) if !config.peers.is_empty() => config.peers,
                 (None, _) => {
