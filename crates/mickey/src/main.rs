@@ -264,7 +264,7 @@ fn source(to: SocketAddr, touchpad_speed: i32) -> Result<(), String> {
     // including `?` and panics.
     let mut grabs = Vec::new();
     loop {
-        if switcher.focus() == Focus::WaitingForKeysUp
+        if matches!(switcher.focus(), Focus::WaitingForKeysUp(_))
             && !devices
                 .iter()
                 .any(|found| found.device.any_key_down().unwrap_or(true))
@@ -291,7 +291,7 @@ fn source(to: SocketAddr, touchpad_speed: i32) -> Result<(), String> {
         // Sleep until there is input or the next ping is due; poll often only
         // while waiting for keys to go up, so an idle source wakes once a second.
         let mut wait = next_ping.saturating_duration_since(now);
-        if switcher.focus() == Focus::WaitingForKeysUp {
+        if matches!(switcher.focus(), Focus::WaitingForKeysUp(_)) {
             wait = wait.min(KEYS_UP_POLL);
         }
         let event = match events.recv_timeout(wait) {
@@ -301,8 +301,9 @@ fn source(to: SocketAddr, touchpad_speed: i32) -> Result<(), String> {
         };
 
         let mut sent = Ok(());
-        switcher.handle(event, |action| match action {
-            Action::Send(event) => {
+        // ponytail: one peer, always online, until several PCs land (#46).
+        switcher.handle(event, &[true], |action| match action {
+            Action::Send(_, event) => {
                 if sent.is_ok() {
                     sent = link.send(&Message::Input(event));
                 }
