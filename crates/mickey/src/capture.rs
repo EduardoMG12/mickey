@@ -1,7 +1,13 @@
-//! Linux capture: turn raw evdev events into `InputEvent`s.
+//! Linux capture: find keyboards and mice, read them on one thread each and
+//! turn raw evdev events into `InputEvent`s on a single channel.
 
 use crate::event::InputEvent;
-use crate::platform::linux::RawEvent;
+use crate::platform::linux::{Device, RawEvent};
+use std::io;
+use std::path::Path;
+use std::sync::Arc;
+use std::sync::mpsc::Sender;
+use std::thread;
 
 const EV_SYN: u16 = 0;
 const EV_KEY: u16 = 1;
@@ -13,16 +19,79 @@ const REL_HWHEEL: u16 = 6;
 const REL_WHEEL: u16 = 8;
 const REL_WHEEL_HI_RES: u16 = 11;
 const REL_HWHEEL_HI_RES: u16 = 12;
+const KEY_A: u16 = 30;
+const KEY_Z: u16 = 44;
 const BTN_LEFT: u16 = 0x110;
 /// Mouse buttons are 0x110 (left) to 0x117; everything below 0x100 is a key.
 const MOUSE_BUTTONS: std::ops::RangeInclusive<u16> = 0x110..=0x117;
 /// One wheel notch in hi-res units.
 const NOTCH: i32 = 120;
 
+pub struct Found {
+    pub device: Arc<Device>,
+    pub name: String,
+    pub is_keyboard: bool,
+    hi_res_wheel: bool,
+}
+
+/// Opens every keyboard and mouse under `/dev/input` (the kernel's fixed
+/// location for evdev nodes). Other devices, like the power button or the
+/// touchpad, are skipped.
+pub fn find_devices() -> io::Result<Vec<Found>> {
+    let mut found = Vec::new();
+    for entry in std::fs::read_dir("/dev/input")? {
+        let path = entry?.path();
+        let is_event_node = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.starts_with("event"));
+        if is_event_node && let Some(device) = classify(&path)? {
+            found.push(device);
+        }
+    }
+    Ok(found)
+}
+
+fn classify(path: &Path) -> io::Result<Option<Found>> {
+    let device = Device::open(path)?;
+    let is_keyboard = device.supports(EV_KEY, KEY_A)? && device.supports(EV_KEY, KEY_Z)?;
+    let is_mouse = device.supports(EV_REL, REL_X)?
+        && device.supports(EV_REL, REL_Y)?
+        && device.supports(EV_KEY, BTN_LEFT)?;
+    if !is_keyboard && !is_mouse {
+        return Ok(None);
+    }
+    Ok(Some(Found {
+        name: device.name()?,
+        hi_res_wheel: device.supports(EV_REL, REL_WHEEL_HI_RES)?,
+        is_keyboard,
+        device: Arc::new(device),
+    }))
+}
+
+/// Starts one reader thread per device. A thread ends when its device fails
+/// (e.g. it was unplugged) or the receiver is gone.
+pub fn spawn_readers(devices: &[Found], events: Sender<InputEvent>) {
+    for found in devices {
+        let device = Arc::clone(&found.device);
+        let events = events.clone();
+        let mut translator = Translator::new(found.hi_res_wheel);
+        thread::spawn(move || {
+            while let Ok(raw) = device.read_event() {
+                let mut closed = false;
+                translator.feed(raw, |event| closed |= events.send(event).is_err());
+                if closed {
+                    return;
+                }
+            }
+        });
+    }
+}
+
 /// Raw evdev events to `InputEvent`s, for one device. Motion and wheel
 /// arrive as separate axis events and are complete only at `SYN_REPORT`,
 /// so they are summed until then.
-pub struct Translator {
+struct Translator {
     hi_res_wheel: bool,
     dx: i32,
     dy: i32,
@@ -31,7 +100,7 @@ pub struct Translator {
 }
 
 impl Translator {
-    pub fn new(hi_res_wheel: bool) -> Translator {
+    fn new(hi_res_wheel: bool) -> Translator {
         Translator {
             hi_res_wheel,
             dx: 0,
@@ -41,7 +110,7 @@ impl Translator {
         }
     }
 
-    pub fn feed(&mut self, raw: RawEvent, mut out: impl FnMut(InputEvent)) {
+    fn feed(&mut self, raw: RawEvent, mut out: impl FnMut(InputEvent)) {
         // value: 0 = released, 1 = pressed, 2 = auto-repeat (sent as a press,
         // because Windows does not repeat injected keys by itself).
         let pressed = raw.value != 0;
@@ -98,7 +167,6 @@ mod tests {
     }
 
     const SYN: (u16, u16, i32) = (EV_SYN, SYN_REPORT, 0);
-    const KEY_A: u16 = 30;
 
     #[test]
     fn keys_pass_through_and_repeats_are_presses() {
