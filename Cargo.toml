@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/mickey"]
+members = ["crates/mickey", "crates/mickey-ui"]
 resolver = "2"
 
 # Dependencies (the cryptography in particular) are optimized even in debug
