@@ -265,3 +265,15 @@ Order of work (each step is one PR, each ≤ ~300 lines):
   `?`, and an Up arrow held at disconnect released by the target.
 - **Windows Firewall** asks once, the first time `mickey.exe` listens.
   Allowing it on private networks only was enough for the LAN.
+
+### Step 6 — evdev capture (2026-10-21)
+
+- **Discovery by capability works on the owner's laptop.** Of the eleven
+  `/dev/input/event*` nodes, exactly two qualify: the "AT Translated Set 2
+  keyboard" (`KEY_A` and `KEY_Z`) and the touchpad's silent "…Mouse" node
+  (`REL_X`, `REL_Y`, `BTN_LEFT`). Power buttons, video bus and the Acer
+  hotkey nodes are skipped.
+- **Reading blocks, one thread per device.** The non-blocking polling of
+  spike 0a is gone; the main thread waits on the channel with a timeout.
+- **Checked:** grabbed both devices, 99 key events read while nothing
+  reached the desktop, AltGr + Right Shift released them at once.

@@ -1,13 +1,12 @@
 //! Command-line parsing, by hand: four commands do not need a crate.
 
 use std::net::SocketAddr;
-use std::path::PathBuf;
 
 pub const USAGE: &str = "\
 usage:
   mickey target --listen <ip:port>   on the machine to be controlled (Windows)
   mickey source --to <ip:port>       on the machine with the keyboard (Linux)
-  mickey spike [/dev/input/eventN]   M0 spikes: type on Windows, grab on Linux
+  mickey spike                       M0 checks: type on Windows, capture on Linux
 ";
 
 #[derive(Debug, PartialEq, Eq)]
@@ -15,7 +14,7 @@ pub enum Command {
     Help,
     Source { to: SocketAddr },
     Target { listen: SocketAddr },
-    Spike { device: Option<PathBuf> },
+    Spike,
 }
 
 pub fn parse(args: &[String]) -> Result<Command, String> {
@@ -28,10 +27,7 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
         [command, flag, addr] if command == "target" && flag == "--listen" => Ok(Command::Target {
             listen: parse_addr(addr)?,
         }),
-        [command] if command == "spike" => Ok(Command::Spike { device: None }),
-        [command, device] if command == "spike" => Ok(Command::Spike {
-            device: Some(PathBuf::from(device)),
-        }),
+        [command] if command == "spike" => Ok(Command::Spike),
         _ => Err(format!(
             "unknown arguments: {}\nrun `mickey --help` for usage",
             args.join(" ")
@@ -72,21 +68,11 @@ mod tests {
     }
 
     #[test]
-    fn spike_device_is_optional() {
-        assert_eq!(parse(&args("spike")), Ok(Command::Spike { device: None }));
-        assert_eq!(
-            parse(&args("spike /dev/input/event3")),
-            Ok(Command::Spike {
-                device: Some(PathBuf::from("/dev/input/event3"))
-            })
-        );
-    }
-
-    #[test]
     fn bad_input_is_an_error_not_a_panic() {
         assert!(parse(&args("source --to nowhere")).is_err());
         assert!(parse(&args("source 192.0.2.10:4242")).is_err());
         assert!(parse(&args("target --to 192.0.2.10:4242")).is_err());
         assert!(parse(&args("fly")).is_err());
+        assert!(parse(&args("spike /dev/input/event3")).is_err());
     }
 }
