@@ -5,7 +5,8 @@ use std::net::SocketAddr;
 pub const USAGE: &str = "\
 usage:
   mickey target --listen <ip:port>   on the machine to be controlled (Windows)
-  mickey source --to <ip:port>       on the machine with the keyboard (Linux)
+  mickey source [--to <ip:port>]     on the machine with the keyboard (Linux);
+                                     without --to, uses the peers in config.toml
   mickey id                          show this machine's fingerprint
   mickey forget <fingerprint>        stop trusting a paired machine
 ";
@@ -14,9 +15,16 @@ usage:
 pub enum Command {
     Help,
     Id,
-    Forget { fingerprint: String },
-    Source { to: SocketAddr },
-    Target { listen: SocketAddr },
+    Forget {
+        fingerprint: String,
+    },
+    /// `None`: use the peers in `config.toml`.
+    Source {
+        to: Option<SocketAddr>,
+    },
+    Target {
+        listen: SocketAddr,
+    },
 }
 
 pub fn parse(args: &[String]) -> Result<Command, String> {
@@ -27,8 +35,9 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
         [command, fingerprint] if command == "forget" => Ok(Command::Forget {
             fingerprint: fingerprint.clone(),
         }),
+        [command] if command == "source" => Ok(Command::Source { to: None }),
         [command, flag, addr] if command == "source" && flag == "--to" => Ok(Command::Source {
-            to: parse_addr(addr)?,
+            to: Some(parse_addr(addr)?),
         }),
         [command, flag, addr] if command == "target" && flag == "--listen" => Ok(Command::Target {
             listen: parse_addr(addr)?,
@@ -65,8 +74,9 @@ mod tests {
         let addr: SocketAddr = "192.0.2.10:4242".parse().unwrap();
         assert_eq!(
             parse(&args("source --to 192.0.2.10:4242")),
-            Ok(Command::Source { to: addr })
+            Ok(Command::Source { to: Some(addr) })
         );
+        assert_eq!(parse(&args("source")), Ok(Command::Source { to: None }));
         assert_eq!(
             parse(&args("target --listen 192.0.2.10:4242")),
             Ok(Command::Target { listen: addr })
