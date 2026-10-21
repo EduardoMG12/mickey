@@ -10,6 +10,7 @@
 //! speed = 16
 //! ```
 
+use crate::chord::{self, Chord};
 use serde::Deserialize;
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -35,13 +36,39 @@ pub struct Config {
     pub peers: Vec<Peer>,
     #[serde(default)]
     pub touchpad: Touchpad,
+    #[serde(default)]
+    pub hotkeys: Hotkeys,
 }
+
+/// `[hotkeys]`, as written; `Config::hotkeys` parses and checks them.
+#[derive(Debug, Default, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct Hotkeys {
+    pub next: Option<String>,
+    pub home: Option<String>,
+    pub switcher: Option<String>,
+}
+
+/// Every hotkey, parsed. `peers[i]` is peer `i`'s own hotkey, if any.
+#[derive(Debug, PartialEq)]
+pub struct HotkeySet {
+    pub next: Chord,
+    pub home: Option<Chord>,
+    pub switcher: Option<Chord>,
+    pub peers: Vec<Option<Chord>>,
+}
+
+/// The M0 hotkey, still the default for `next`.
+pub const DEFAULT_NEXT: &str = "AltGr+RightShift";
 
 #[derive(Debug, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Peer {
     pub name: String,
     pub address: SocketAddr,
+    /// Goes straight to this peer, e.g. `"AltGr+RightShift+1"`.
+    #[serde(default)]
+    pub hotkey: Option<String>,
 }
 
 #[derive(Debug, Deserialize, PartialEq)]
@@ -64,6 +91,39 @@ fn default_speed() -> i32 {
 }
 
 impl Config {
+    /// Parses every hotkey; an error names the setting and the bad part,
+    /// and two settings with the same keys are refused.
+    pub fn hotkeys(&self) -> Result<HotkeySet, String> {
+        let one = |setting: &str, text: &Option<String>| {
+            text.as_deref()
+                .map(chord::parse)
+                .transpose()
+                .map_err(|err| format!("{setting}: {err}"))
+        };
+        let set = HotkeySet {
+            next: one("hotkeys.next", &self.hotkeys.next)?
+                .unwrap_or_else(|| chord::parse(DEFAULT_NEXT).expect("the default parses")),
+            home: one("hotkeys.home", &self.hotkeys.home)?,
+            switcher: one("hotkeys.switcher", &self.hotkeys.switcher)?,
+            peers: self
+                .peers
+                .iter()
+                .map(|peer| one(&format!("hotkey of {}", peer.name), &peer.hotkey))
+                .collect::<Result<_, _>>()?,
+        };
+        let all: Vec<&Chord> = [Some(&set.next), set.home.as_ref(), set.switcher.as_ref()]
+            .into_iter()
+            .flatten()
+            .chain(set.peers.iter().flatten())
+            .collect();
+        for (i, chord) in all.iter().enumerate() {
+            if all[..i].contains(chord) {
+                return Err(format!("two hotkeys use the same keys: {chord:?}"));
+            }
+        }
+        Ok(set)
+    }
+
     /// Reads `config.toml`; `None` when the file does not exist.
     pub fn load() -> Result<Option<Config>, String> {
         let path = path()?;
@@ -94,6 +154,7 @@ pub fn path() -> Result<PathBuf, String> {
 pub fn parse(text: &str) -> Result<Config, String> {
     // toml's message already names the line and shows the bad text.
     let config: Config = toml::from_str(text).map_err(|err| err.to_string())?;
+    config.hotkeys()?;
     if !TOUCHPAD_SPEEDS.contains(&config.touchpad.speed) {
         return Err(format!(
             "touchpad speed {} is not between {} and {}",
@@ -117,6 +178,7 @@ mod tests {
             [Peer {
                 name: "Desktop".into(),
                 address: "192.0.2.10:4242".parse().unwrap(),
+                hotkey: None,
             }]
         );
         assert_eq!(config.touchpad.speed, 16);
@@ -129,6 +191,7 @@ mod tests {
             Config {
                 peers: vec![],
                 touchpad: Touchpad::default(),
+                hotkeys: Hotkeys::default(),
             }
         );
     }
@@ -144,6 +207,29 @@ mod tests {
         assert!(parse("[[peer]]\nname = \"A\"\naddress = \"nowhere\"\n").is_err());
         assert!(parse("[touchpad]\nspeed = 0\n").is_err());
         assert!(parse("[[peer]\n").is_err());
+    }
+
+    #[test]
+    fn hotkeys_default_to_the_m0_one_and_parse_per_peer() {
+        let set = parse(EXAMPLE).unwrap().hotkeys().unwrap();
+        assert_eq!(set.next, chord::parse(DEFAULT_NEXT).unwrap());
+        assert_eq!((set.home, set.switcher), (None, None));
+
+        let text = "[hotkeys]\nhome = \"AltGr+RightShift+H\"\n\n[[peer]]\nname = \"W\"\naddress = \"192.0.2.10:1\"\nhotkey = \"AltGr+RightShift+1\"\n";
+        let set = parse(text).unwrap().hotkeys().unwrap();
+        assert_eq!(set.home.unwrap().key, Some(35));
+        assert_eq!(set.peers[0].as_ref().unwrap().key, Some(2));
+    }
+
+    #[test]
+    fn bad_or_clashing_hotkeys_are_errors() {
+        let err = parse("[hotkeys]\nhome = \"AltGr+Nope\"\n").unwrap_err();
+        assert!(
+            err.contains("hotkeys.home") && err.contains("Nope"),
+            "{err}"
+        );
+        let err = parse("[hotkeys]\nhome = \"RightShift+AltGr\"\n").unwrap_err();
+        assert!(err.contains("same keys"), "{err}");
     }
 
     #[test]
