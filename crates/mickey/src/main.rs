@@ -121,10 +121,10 @@ fn open_devices() -> Result<Vec<capture::Found>, String> {
         return Err("no keyboard or mouse found under /dev/input".into());
     }
     for found in &devices {
-        let kind = if found.is_keyboard {
-            "keyboard"
-        } else {
-            "mouse"
+        let kind = match found.kind {
+            capture::Kind::Keyboard => "keyboard",
+            capture::Kind::Mouse => "mouse",
+            capture::Kind::Touchpad => "touchpad",
         };
         println!("mickey: found {kind}: {}", found.name);
     }
