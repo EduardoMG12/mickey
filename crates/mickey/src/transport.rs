@@ -13,6 +13,9 @@ use std::time::Duration;
 /// buffers megabytes first, so this only fires when the target is gone or
 /// stuck, never on a slow network.
 const WRITE_TIMEOUT: Duration = Duration::from_secs(1);
+/// A peer that is off does not answer at all; give up on it quickly so it
+/// never delays the others.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// Connects to a target and runs the secure handshake. The caller checks
 /// the target's key (pairing) before saying `hello`.
@@ -24,7 +27,7 @@ const WRITE_TIMEOUT: Duration = Duration::from_secs(1);
 /// the source's keyboard grabbed: the error ends `mickey source`, which
 /// drops the grabs.
 pub fn connect(addr: SocketAddr, identity: &Identity) -> io::Result<Link> {
-    let stream = TcpStream::connect(addr)?;
+    let stream = TcpStream::connect_timeout(&addr, CONNECT_TIMEOUT)?;
     stream.set_nodelay(true)?;
     stream.set_write_timeout(Some(WRITE_TIMEOUT))?;
     Link::initiate(stream, identity)

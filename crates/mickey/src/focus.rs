@@ -118,8 +118,6 @@ impl Switcher {
 
     /// Peer `peer`'s connection is gone. If it had the focus, the devices
     /// come home at once; that peer releases its own keys on disconnect.
-    // ponytail: called by the connection manager in the next PR (#46).
-    #[allow(dead_code)]
     pub fn peer_lost(&mut self, peer: usize, mut act: impl FnMut(Action)) {
         match self.focus {
             Focus::Remote(focused) if focused == peer => {
