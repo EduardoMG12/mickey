@@ -7,9 +7,8 @@ Inspired by Synergy, Deskflow/Input Leap and lan-mouse, built from scratch to
 be understood line by line.
 
 > **Status: pre-alpha.** Milestone M0 works: a Linux laptop's keyboard and
-> touchpad drive a Windows 10 PC, switched with a hotkey. **Not safe on an
-> untrusted network yet**: traffic is encrypted, but the target still accepts
-> any machine until pairing lands (see [Security](#security)). The plan lives in [`docs/prds/`](docs/prds/).
+> touchpad drive a Windows 10 PC, switched with a hotkey, over an encrypted
+> link between paired machines (see [Security](#security)). The plan lives in [`docs/prds/`](docs/prds/).
 
 ---
 
@@ -78,21 +77,31 @@ lists the commands.
 
 ## Security
 
-Everything you type crosses the network, so read this before using M0:
+Everything you type crosses the network, so Mickey protects it:
 
-- **Encrypted.** Everything crosses the network inside a Noise `XX` channel
-  (X25519, ChaCha20-Poly1305, BLAKE2s): it cannot be read, changed or
-  replayed. Each machine has its own key; `mickey id` shows its fingerprint.
-- **No pairing yet.** Both sides print the other's fingerprint, but neither
-  refuses an unknown one, so anyone who can reach the target's port can type
-  on that Windows PC, and a fake target could receive your typing. Only run
-  Mickey on a network you trust until pairing lands.
-  ([#31](https://github.com/EduardoMG12/mickey/issues/31),
-  [#37](https://github.com/EduardoMG12/mickey/issues/37))
-- Mickey never logs or stores what you type, and sends input only to the
-  address you give it.
+- **Encrypted and authenticated.** Everything travels inside a Noise `XX`
+  channel (X25519, ChaCha20-Poly1305, BLAKE2s): it cannot be read, changed
+  or replayed.
+- **Paired machines only.** Each machine has its own key (`mickey id` shows
+  its fingerprint). The first time two machines meet, **both** screens show
+  both fingerprints:
 
-Pairing (both screens confirm the fingerprints) comes next, in [#37](https://github.com/EduardoMG12/mickey/issues/37).
+  ```text
+  mickey: new peer at 192.0.2.10:4242
+  mickey:   this PC:   NRMP-6SSY-5DJZ-2PXV-ZELA-PCWY-EWPC-BF43
+  mickey:   other PC:  E6AK-SYJ6-CDML-5HAY-445U-DABI-3N4X-BYZP
+  ```
+
+  Check that "other PC" on one screen matches "this PC" on the other, then
+  type `y` on both. Until both say yes, the target emits nothing and the
+  source sends nothing. After that they connect without asking. A machine
+  with any other key is asked about again, never trusted silently.
+  `mickey forget <fingerprint>` removes a paired machine.
+- **Never logged or stored:** what you type. Input goes only to the address
+  you give, and only if that machine holds the paired key.
+- **Not covered:** someone who can already log in as you (they can read the
+  key files, as with SSH keys), and someone on the network who just wants to
+  break the connection.
 
 ## Roadmap
 
