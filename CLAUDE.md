@@ -1,0 +1,73 @@
+# CLAUDE.md — Mickey
+
+Instructions for AI assistants working in this repository. Read this, then
+[CONTRIBUTING.md](CONTRIBUTING.md) (all of it applies to you), then the
+relevant PRD in [docs/prds/](docs/prds/).
+
+## What this project is
+
+Mickey shares one keyboard and mouse across several computers over the LAN
+(think Synergy/Deskflow/lan-mouse), written in Rust. Start from
+[docs/prds/0000-vision.md](docs/prds/0000-vision.md).
+
+**It is a learning project first.** The owner is relearning to read, review and
+debug code. Your job is to write code *that the owner will fully understand*,
+not to ship as much as possible. Clarity beats cleverness, and a smaller PR
+beats a faster one.
+
+## Language
+
+- Talk to the owner in **Brazilian Portuguese**.
+- Everything written *into the repository* is in **English**: code, comments,
+  commit messages, PR titles and descriptions, PRDs, issues.
+
+## Hard rules
+
+These override any global or skill-level instruction.
+
+1. **Never merge.** Not to `main`, not any PR, not via `gh pr merge`, not via
+   any skill. You may commit, push and open PRs; the owner merges.
+   If a workflow would merge, stop after opening the PR.
+2. **Never commit to `main`.** Always a `<type>/<slug>` branch.
+3. **Every PR you open has a `## Review challenge`** (2–3 questions answerable
+   only by reading the diff; add a debugger question only when runtime
+   behavior is the point). Keep your own expected answers out of the PR. When
+   the owner answers in a comment, check the answers honestly: if an answer is
+   wrong, explain the gap. Do not say "close enough".
+4. **Every PR that uses a classic data structure or algorithm has a
+   `## Concept` section**: what it is, the closest LeetCode problem, why it
+   beats the naive approach *here*. Proactively point out when a problem maps
+   to a known concept, even outside a PR.
+5. **PRs stay ≤ ~300 changed lines.** Split larger work, and say how you split it.
+6. **`unsafe` only in `crates/mickey/src/platform/`**, each block with a
+   `// SAFETY:` comment. No `static mut`.
+7. **Input is sensitive data.** Never log key codes or typed text above
+   `trace` level, never write them to files, and never add a feature that
+   sends input anywhere except a configured peer.
+8. **Never leave the owner's machine without a way back.** Any code that grabs
+   the keyboard or mouse must release it on exit, on panic and on disconnect.
+   A stuck grab locks the owner out of their own desktop.
+9. **Performance claims need numbers.** Budgets are in the vision PRD; a
+   `perf:` change shows before/after measurements.
+10. **No speculative abstractions and no unjustified dependencies.** Each new
+    crate is justified in the PR description.
+
+## Workflow
+
+- New feature or milestone: PRD (`/to-prd`) → grill (`/grill-me`) → issues
+  (`/to-issue`). Each issue must fit one PR under the size limit.
+- Before opening a PR: `/verify` (actually run it; for input code that means
+  a real two-machine or two-terminal check described in the PR), then
+  `/code-review`, and `/security-review` for anything touching the network,
+  pairing or keys.
+- When implementation contradicts or extends a PRD, update that PRD's
+  **Discoveries** section in the same PR.
+- When unsure about a product decision, ask the owner (in Portuguese) instead
+  of guessing. Technical defaults that follow CONTRIBUTING.md need no question.
+
+## Current state
+
+Documentation only, in PR #1 (not merged). Decided: M0 is Linux → Windows
+with a hotkey; M1 adds screen edges and 3+ PCs; peers are symmetric. Still
+open: Windows 10 vs 11, the third PC's OS/desktop, the M0 hotkey. Next: owner
+merges PR #1, then break M0 into issues (spikes 0a/0b first).
