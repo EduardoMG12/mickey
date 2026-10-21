@@ -76,11 +76,13 @@ fn run(command: Command) -> Result<(), String> {
                 .map_or(config::Touchpad::default().speed, |config| {
                     config.touchpad.speed
                 });
-            // ponytail: only the first peer until several PCs land (#46).
-            let to = match (to, config.as_ref().and_then(|config| config.peers.first())) {
-                (Some(to), _) => to,
-                (None, Some(peer)) => peer.address,
-                (None, None) => {
+            let peers = match (to, config) {
+                (Some(to), _) => vec![config::Peer {
+                    name: to.to_string(),
+                    address: to,
+                }],
+                (None, Some(config)) if !config.peers.is_empty() => config.peers,
+                (None, _) => {
                     return Err(format!(
                         "no peer to connect to: pass --to <ip:port>, or list peers in {}, e.g.\n\n{}",
                         config::path()?.display(),
@@ -89,10 +91,10 @@ fn run(command: Command) -> Result<(), String> {
                 }
             };
             #[cfg(target_os = "linux")]
-            return source::run(to, touchpad_speed);
+            return source::run(peers, touchpad_speed);
             #[cfg(not(target_os = "linux"))]
             {
-                let _ = (to, touchpad_speed);
+                let _ = (peers, touchpad_speed);
                 Err("in M0 the source runs only on Linux (Windows sources come in M2)".into())
             }
         }

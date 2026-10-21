@@ -129,3 +129,19 @@ again.
 - **The touchpad speed left its `ponytail`:** `[touchpad] speed` (1–200,
   default 16) replaces the constant from M0.
 - Until #46, `mickey source` without `--to` uses only the first peer.
+
+### Ticket 2 — every peer, one focus (2026-10-21)
+
+- **Checked on the owner's laptop with two targets** (two ports on the
+  Windows PC, throw-away identities, run over SSH so they could not inject):
+  Windows B was offline at start and reported as such; once started it was
+  picked up within 5 s without asking to pair; three presses of the hotkey
+  went Windows A → Windows B → This PC.
+- **Reconnects never ask to pair.** They run in the background while the
+  owner may be typing on another PC, so a peer whose key is not trusted is
+  left alone until `mickey source` is restarted.
+- **Connecting gives up after 2 s**, so an offline peer does not delay the
+  others at start.
+- Moving from one peer to the next ungrabs for a moment; the log says
+  "back here" only when the focus really is local.
+
