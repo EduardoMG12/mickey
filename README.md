@@ -81,6 +81,29 @@ cancels. From another PC, the hotkey brings you home and opens it. The
 switcher is a separate program, `mickey-ui`, which must sit next to `mickey`
 (`cargo build --release` builds both).
 
+`mickey status` shows where the focus is and which PCs are online.
+
+**Waybar.** Add a custom module (and put `"custom/mickey"` in one of the
+`modules-*` lists). It updates the moment the focus changes; left click
+opens the switcher, right click will open the settings:
+
+```jsonc
+"custom/mickey": {
+  "exec": "mickey status --waybar",
+  "return-type": "json",
+  "on-click": "mickey switcher",
+  "on-click-right": "mickey settings"
+}
+```
+
+The module's class is `local`, `remote` or `off`, so the bar can show at a
+glance where you are typing:
+
+```css
+#custom-mickey.remote { color: #f5a97f; }
+#custom-mickey.off    { opacity: 0.5; }
+```
+
 On **Hyprland** the switcher tiles like any window unless a rule makes it
 float. Lua config (Hyprland 0.56+):
 
