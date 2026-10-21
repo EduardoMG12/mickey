@@ -314,3 +314,16 @@ Order of work (each step is one PR, each ≤ ~300 lines):
   and the `timeout` safety net killed the source once while focus was remote:
   the kernel gave the keyboard and touchpad back to Linux.
 - **Not in M0:** tap to click, two-finger scroll and right click by area.
+
+### Step 8 — latency (2026-10-21)
+
+- **Ping id = send time in µs** (truncated to `u32`), so the source needs no
+  table of outstanding pings; the round trip is `now - id` with wrapping
+  subtraction. One-way latency is reported as RTT/2.
+- **First numbers, laptop on Wi-Fi → Windows 10 on the same LAN**, 125 pings,
+  one per second over about two minutes: **p50 2.1 ms, p99 22.6 ms** one way.
+  The vision has no Wi-Fi budget yet ("measured and reported"); the wired
+  budget (p99 < 2 ms) is still unmeasured.
+- **Not yet done:** the full 10-minute checklist (20 switches, accents,
+  shortcuts). Two-finger scroll on the touchpad is not in M0, so scrolling
+  can only be checked once a wheel mouse is plugged into the laptop.
