@@ -1,5 +1,9 @@
 //! Mickey: one keyboard and mouse shared across computers on the LAN.
 
+// ponytail: used only by tests until the readers arrive (next PR for #13).
+#[allow(dead_code)]
+#[cfg(target_os = "linux")]
+mod capture;
 mod cli;
 #[cfg(windows)]
 mod emit;
