@@ -1,4 +1,5 @@
-//! Spike 0b: type "hello" and move the mouse on Windows.
+//! Spikes for M0. On Windows (0b): type "hello" and move the mouse. On
+//! Linux (0a): grab a keyboard and give it back on the hotkey or a timeout.
 
 mod platform;
 
@@ -10,10 +11,72 @@ fn main() {
     }
 }
 
-#[cfg(not(windows))]
+#[cfg(target_os = "linux")]
 fn main() {
-    eprintln!("mickey: spike 0b only runs on Windows");
-    std::process::exit(1);
+    if let Err(err) = grab_demo() {
+        eprintln!("mickey: {err}");
+        std::process::exit(1);
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn grab_demo() -> std::io::Result<()> {
+    use platform::linux::Device;
+    use std::io;
+    use std::path::PathBuf;
+    use std::thread::sleep;
+    use std::time::{Duration, Instant};
+
+    const EV_KEY: u16 = 1;
+    const KEY_RIGHTSHIFT: u16 = 54;
+    const KEY_RIGHTALT: u16 = 100; // AltGr
+    const GRAB_LIMIT: Duration = Duration::from_secs(10);
+
+    let path: PathBuf = std::env::args_os()
+        .nth(1)
+        .ok_or_else(|| io::Error::other("usage: mickey /dev/input/eventN"))?
+        .into();
+    let device = Device::open(&path)
+        .map_err(|err| io::Error::other(format!("cannot open {}: {err}", path.display())))?;
+
+    // Grabbing while a key is held leaves it stuck down on the desktop.
+    println!("mickey: waiting until no key is held");
+    while device.any_key_down()? {
+        sleep(Duration::from_millis(10));
+    }
+
+    let grab = device.grab()?;
+    println!("mickey: keyboard grabbed for at most 10 s");
+    println!("mickey: press and release AltGr + Right Shift to get it back");
+
+    let deadline = Instant::now() + GRAB_LIMIT;
+    let (mut alt, mut shift, mut both_held) = (false, false, false);
+    let mut key_events = 0u32;
+    while Instant::now() < deadline {
+        let Some(event) = device.read_event()? else {
+            sleep(Duration::from_millis(5));
+            continue;
+        };
+        if event.kind != EV_KEY {
+            continue;
+        }
+        key_events += 1;
+        // value: 0 = released, 1 = pressed, 2 = auto-repeat.
+        match event.code {
+            KEY_RIGHTALT => alt = event.value != 0,
+            KEY_RIGHTSHIFT => shift = event.value != 0,
+            _ => {}
+        }
+        both_held |= alt && shift;
+        if both_held && !alt && !shift {
+            println!("mickey: hotkey released");
+            break;
+        }
+    }
+
+    drop(grab);
+    println!("mickey: keyboard released ({key_events} key events seen)");
+    Ok(())
 }
 
 #[cfg(windows)]
