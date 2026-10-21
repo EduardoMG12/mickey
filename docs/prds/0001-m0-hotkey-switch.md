@@ -12,10 +12,10 @@ Done means: with the Linux machine and the Windows PC on the same LAN,
 
 ```sh
 # on Windows (the machine to be controlled)
-mickey.exe target --listen 192.168.0.20:4242
+mickey.exe target --listen 192.0.2.10:4242
 
 # on Linux (the machine with the keyboard and mouse)
-mickey source --to 192.168.0.20:4242
+mickey source --to 192.0.2.10:4242
 ```
 
 pressing the hotkey on Linux moves the keyboard and mouse to Windows: the Linux
