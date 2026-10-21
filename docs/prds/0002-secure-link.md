@@ -161,3 +161,19 @@ impossible to brute-force.
 - **The startup warning changed** from "not encrypted" to "not paired yet":
   the traffic is encrypted now, but until #37 any machine can still connect.
 
+### Ticket 3 — pairing (2026-10-21)
+
+- **The target answers `Hello` only once it trusts the source**, and the
+  source waits for it before capturing anything. So "both sides confirmed"
+  is a real step in the protocol, not two prompts that happen to line up.
+- **Checked between the owner's machines** with throw-away identities
+  (`XDG_DATA_HOME` / `APPDATA` pointed at a temp directory), the answers fed
+  on stdin: first pairing (fingerprints matched crosswise on both screens),
+  reconnect without prompts, an unknown source refused by the target, and a
+  fake target with another key questioned again by the source, which then
+  sent nothing.
+- **Not done:** a packet capture of a real session (needs `sudo tcpdump`);
+  the localhost tests already show every frame is sealed.
+- **No answer means no.** A prompt with no terminal (stdin closed) reads
+  nothing and refuses.
+
