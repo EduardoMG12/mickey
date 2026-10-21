@@ -159,6 +159,7 @@ Order agreed with the owner on 2026-10-21: secure link, then steps 1–4.
 | M0 | It crosses | [0001](0001-m0-hotkey-switch.md) | Linux → Windows: `evdev` capture, `SendInput` emit, hotkey switches focus, plaintext TCP |
 | M1a, first | Secure link | [0002](0002-secure-link.md) | Noise `XX` encryption and SSH-style pairing (fingerprints confirmed on both screens), brought forward from M1a so Mickey is safe before anything else |
 | Step 1–2 | Several PCs and the switcher | [0003](0003-several-pcs-and-switcher.md) | `config.toml` with several peers; the hotkey opens a "Win+Tab for computers" window (egui) when there are 3+ PCs |
+| Step 2b | Ways to switch | [0007](0007-ways-to-switch.md) | Control socket and commands (`mickey status`, `go`, `home`, `switcher`), a Waybar module, a corner indicator, configurable hotkeys including one per PC |
 | Step 3 | Setup window | 0006 (todo) | A GUI that adds and pairs PCs, changes settings (touchpad speed, hotkey) and places each PC and its monitors, editing the same `config.toml` |
 | Step 4 | Screens have edges | 0005 (todo) | The cursor crosses to the neighbor placed in step 3, and back; the hotkey stays the way home. On Wayland this needs a spike: apps cannot read the cursor position |
 | Later in M1 | Linux targets | — | `uinput`, so Linux can be controlled too |
