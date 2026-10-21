@@ -149,3 +149,15 @@ impossible to brute-force.
   file readable by others is refused.
 - **Checked:** `mickey id` prints the same fingerprint on every run on the
   owner's laptop and Windows PC.
+
+### Ticket 2 — encrypted link (2026-10-21)
+
+- **Checked between the owner's machines:** the source's handshake reported
+  the target fingerprint `53VF-…-UZG5`, the same that `mickey id` prints on
+  the Windows PC, and focus switched over the encrypted link.
+- **Debug builds optimize dependencies** (`[profile.dev.package."*"]`):
+  unoptimized ChaCha20 made the stuck-target test take 11 s instead of
+  2.4 s. Mickey's own code stays unoptimized for the debugger.
+- **The startup warning changed** from "not encrypted" to "not paired yet":
+  the traffic is encrypted now, but until #37 any machine can still connect.
+

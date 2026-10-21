@@ -8,8 +8,8 @@ be understood line by line.
 
 > **Status: pre-alpha.** Milestone M0 works: a Linux laptop's keyboard and
 > touchpad drive a Windows 10 PC, switched with a hotkey. **Not safe on an
-> untrusted network yet**: traffic is unencrypted and the target accepts
-> anyone (see [Security](#security)). The plan lives in [`docs/prds/`](docs/prds/).
+> untrusted network yet**: traffic is encrypted, but the target still accepts
+> any machine until pairing lands (see [Security](#security)). The plan lives in [`docs/prds/`](docs/prds/).
 
 ---
 
@@ -80,16 +80,19 @@ lists the commands.
 
 Everything you type crosses the network, so read this before using M0:
 
-- **Unencrypted.** Anyone on the same network can read what you type on
-  Windows through Mickey. Do not type passwords through it.
-  ([#32](https://github.com/EduardoMG12/mickey/issues/32))
-- **No pairing yet.** Anyone who can reach the target's port can type on that
-  Windows PC. Only run `mickey target` on a network you trust, and only while
-  you use it. ([#31](https://github.com/EduardoMG12/mickey/issues/31))
+- **Encrypted.** Everything crosses the network inside a Noise `XX` channel
+  (X25519, ChaCha20-Poly1305, BLAKE2s): it cannot be read, changed or
+  replayed. Each machine has its own key; `mickey id` shows its fingerprint.
+- **No pairing yet.** Both sides print the other's fingerprint, but neither
+  refuses an unknown one, so anyone who can reach the target's port can type
+  on that Windows PC, and a fake target could receive your typing. Only run
+  Mickey on a network you trust until pairing lands.
+  ([#31](https://github.com/EduardoMG12/mickey/issues/31),
+  [#37](https://github.com/EduardoMG12/mickey/issues/37))
 - Mickey never logs or stores what you type, and sends input only to the
   address you give it.
 
-Encryption and pairing come in M1a.
+Pairing (both screens confirm the fingerprints) comes next, in [#37](https://github.com/EduardoMG12/mickey/issues/37).
 
 ## Roadmap
 

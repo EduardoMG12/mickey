@@ -11,7 +11,8 @@
 use crate::event::InputEvent;
 use std::fmt;
 
-pub const VERSION: u8 = 1;
+/// 2: messages travel inside the secure link (PRD 0002).
+pub const VERSION: u8 = 2;
 
 /// Longest frame: length byte, type byte and an 8-byte payload.
 pub const MAX_FRAME: usize = 10;
