@@ -1,7 +1,12 @@
 //! Mickey: one keyboard and mouse shared across computers on the LAN.
 
 mod cli;
+// ponytail: used only by tests until the transport arrives (M0 step 3, #10).
+#[allow(dead_code)]
+mod event;
 mod platform;
+#[allow(dead_code)]
+mod protocol;
 
 use cli::Command;
 use std::path::Path;
