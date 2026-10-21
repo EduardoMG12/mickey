@@ -257,3 +257,11 @@ Order of work (each step is one PR, each ≤ ~300 lines):
 - **`Ping` and `Pong` carry a `u32` id**, which the PRD did not specify, so
   the source can match each `Pong` to the `Ping` it timed.
 - **Big-endian** (network byte order) for every number.
+
+### Step 5 — `SendInput` emit (2026-10-21)
+
+- **Checked on the owner's Windows 10** with a fake source over the LAN: a
+  square of motion, letters, Shift + the ABNT2 `/ ?` key (`0x73`) typing
+  `?`, and an Up arrow held at disconnect released by the target.
+- **Windows Firewall** asks once, the first time `mickey.exe` listens.
+  Allowing it on private networks only was enough for the LAN.
