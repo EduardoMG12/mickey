@@ -248,3 +248,12 @@ Order of work (each step is one PR, each ≤ ~300 lines):
   "…Touchpad" sends `EV_ABS` (multitouch positions) and was the only one
   with data; "…Mouse" has `REL_X`/`REL_Y` but stayed silent. Capturing
   only `REL_X`/`REL_Y` mice, as planned, would ignore the owner's touchpad.
+
+### Step 2 — wire format (2026-10-21)
+
+- **One length byte is enough.** The longest frame is 10 bytes (length,
+  type, two `i32`), so the length prefix is a single `u8`. A future message
+  longer than 255 bytes would need a wider prefix and a new `VERSION`.
+- **`Ping` and `Pong` carry a `u32` id**, which the PRD did not specify, so
+  the source can match each `Pong` to the `Ping` it timed.
+- **Big-endian** (network byte order) for every number.
