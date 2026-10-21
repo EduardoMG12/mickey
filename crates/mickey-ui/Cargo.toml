@@ -1,0 +1,18 @@
+[package]
+name = "mickey-ui"
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+publish = false
+
+[dependencies]
+# The GUI lives in its own program so `mickey source`, which runs all day and
+# holds the keyboard, never links it (spike #47: 90-125 MB while a window is
+# open). Only what the switcher needs: OpenGL (glow), the built-in fonts, and
+# both Linux display protocols.
+eframe = { version = "0.37", default-features = false, features = [
+    "glow",
+    "default_fonts",
+    "wayland",
+    "x11",
+] }
