@@ -12,6 +12,11 @@ const BITS_BYTES: usize = 96; // KEY_MAX (0x2ff) + 1 bits, the largest bitmap
 const EVIOCGKEY: u64 = 0x8000_4518 | ((BITS_BYTES as u64) << 16);
 const NAME_BYTES: usize = 256;
 const EVIOCGNAME: u64 = 0x8000_4506 | ((NAME_BYTES as u64) << 16);
+/// `EVIOCGABS(axis)`: one axis' `struct input_absinfo`, six `i32`s.
+const ABSINFO_BYTES: usize = 24;
+const fn eviocgabs(axis: u16) -> u64 {
+    (0x8000_4540 + axis as u64) | ((ABSINFO_BYTES as u64) << 16)
+}
 /// `EVIOCGBIT(ev_type)`: which codes of one event type the device has.
 const fn eviocgbit(ev_type: u16) -> u64 {
     (0x8000_4520 + ev_type as u64) | ((BITS_BYTES as u64) << 16)
@@ -66,6 +71,14 @@ impl Device {
         Ok(bits
             .get(code / 8)
             .is_some_and(|byte| byte & (1 << (code % 8)) != 0))
+    }
+
+    /// Device units per millimetre on an absolute axis; 0 when unknown.
+    pub fn abs_resolution(&self, axis: u16) -> io::Result<i32> {
+        let mut info = [0u8; ABSINFO_BYTES];
+        self.ioctl_read(eviocgabs(axis), &mut info)?;
+        // Fields: value, minimum, maximum, fuzz, flat, resolution.
+        Ok(i32::from_ne_bytes([info[20], info[21], info[22], info[23]]))
     }
 
     pub fn name(&self) -> io::Result<String> {

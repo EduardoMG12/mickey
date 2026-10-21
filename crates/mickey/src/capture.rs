@@ -1,5 +1,5 @@
-//! Linux capture: find keyboards and mice, read them on one thread each and
-//! turn raw evdev events into `InputEvent`s on a single channel.
+//! Linux capture: find keyboards, mice and touchpads, read them on one
+//! thread each and turn raw evdev events into `InputEvent`s on one channel.
 
 use crate::event::InputEvent;
 use crate::platform::linux::{Device, RawEvent};
@@ -12,6 +12,7 @@ use std::thread;
 const EV_SYN: u16 = 0;
 const EV_KEY: u16 = 1;
 const EV_REL: u16 = 2;
+const EV_ABS: u16 = 3;
 const SYN_REPORT: u16 = 0;
 const REL_X: u16 = 0;
 const REL_Y: u16 = 1;
@@ -19,24 +20,42 @@ const REL_HWHEEL: u16 = 6;
 const REL_WHEEL: u16 = 8;
 const REL_WHEEL_HI_RES: u16 = 11;
 const REL_HWHEEL_HI_RES: u16 = 12;
+const ABS_X: u16 = 0;
+const ABS_Y: u16 = 1;
 const KEY_A: u16 = 30;
 const KEY_Z: u16 = 44;
 const BTN_LEFT: u16 = 0x110;
+/// Exactly one finger is on the touchpad.
+const BTN_TOOL_FINGER: u16 = 0x145;
 /// Mouse buttons are 0x110 (left) to 0x117; everything below 0x100 is a key.
 const MOUSE_BUTTONS: std::ops::RangeInclusive<u16> = 0x110..=0x117;
 /// One wheel notch in hi-res units.
 const NOTCH: i32 = 120;
+// ponytail: one fixed touchpad speed, tuned by hand on the owner's laptop;
+// it becomes a setting with config.toml in M1a.
+const COUNTS_PER_MM: i32 = 16;
+/// Used when a touchpad does not report its resolution.
+const FALLBACK_UNITS_PER_MM: i32 = 10;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Kind {
+    Keyboard,
+    Mouse,
+    Touchpad,
+}
 
 pub struct Found {
     pub device: Arc<Device>,
     pub name: String,
-    pub is_keyboard: bool,
+    pub kind: Kind,
     hi_res_wheel: bool,
+    /// Touchpad units per millimetre on X and Y.
+    resolution: [i32; 2],
 }
 
-/// Opens every keyboard and mouse under `/dev/input` (the kernel's fixed
-/// location for evdev nodes). Other devices, like the power button or the
-/// touchpad, are skipped.
+/// Opens every keyboard, mouse and touchpad under `/dev/input` (the kernel's
+/// fixed location for evdev nodes). Other devices, like the power button,
+/// are skipped.
 pub fn find_devices() -> io::Result<Vec<Found>> {
     let mut found = Vec::new();
     for entry in std::fs::read_dir("/dev/input")? {
@@ -54,17 +73,35 @@ pub fn find_devices() -> io::Result<Vec<Found>> {
 
 fn classify(path: &Path) -> io::Result<Option<Found>> {
     let device = Device::open(path)?;
-    let is_keyboard = device.supports(EV_KEY, KEY_A)? && device.supports(EV_KEY, KEY_Z)?;
-    let is_mouse = device.supports(EV_REL, REL_X)?
+    let kind = if device.supports(EV_KEY, KEY_A)? && device.supports(EV_KEY, KEY_Z)? {
+        Kind::Keyboard
+    } else if device.supports(EV_REL, REL_X)?
         && device.supports(EV_REL, REL_Y)?
-        && device.supports(EV_KEY, BTN_LEFT)?;
-    if !is_keyboard && !is_mouse {
+        && device.supports(EV_KEY, BTN_LEFT)?
+    {
+        Kind::Mouse
+    } else if device.supports(EV_ABS, ABS_X)?
+        && device.supports(EV_ABS, ABS_Y)?
+        && device.supports(EV_KEY, BTN_TOOL_FINGER)?
+    {
+        Kind::Touchpad
+    } else {
         return Ok(None);
+    };
+    let mut resolution = [0; 2];
+    if kind == Kind::Touchpad {
+        for (axis, value) in [ABS_X, ABS_Y].into_iter().zip(&mut resolution) {
+            *value = match device.abs_resolution(axis)? {
+                0 => FALLBACK_UNITS_PER_MM,
+                units => units,
+            };
+        }
     }
     Ok(Some(Found {
         name: device.name()?,
         hi_res_wheel: device.supports(EV_REL, REL_WHEEL_HI_RES)?,
-        is_keyboard,
+        kind,
+        resolution,
         device: Arc::new(device),
     }))
 }
@@ -75,7 +112,8 @@ pub fn spawn_readers(devices: &[Found], events: Sender<InputEvent>) {
     for found in devices {
         let device = Arc::clone(&found.device);
         let events = events.clone();
-        let mut translator = Translator::new(found.hi_res_wheel);
+        let touchpad = (found.kind == Kind::Touchpad).then(|| Touchpad::new(found.resolution));
+        let mut translator = Translator::new(found.hi_res_wheel, touchpad);
         thread::spawn(move || {
             while let Ok(raw) = device.read_event() {
                 let mut closed = false;
@@ -93,6 +131,7 @@ pub fn spawn_readers(devices: &[Found], events: Sender<InputEvent>) {
 /// so they are summed until then.
 struct Translator {
     hi_res_wheel: bool,
+    touchpad: Option<Touchpad>,
     dx: i32,
     dy: i32,
     vertical: i32,
@@ -100,9 +139,10 @@ struct Translator {
 }
 
 impl Translator {
-    fn new(hi_res_wheel: bool) -> Translator {
+    fn new(hi_res_wheel: bool, touchpad: Option<Touchpad>) -> Translator {
         Translator {
             hi_res_wheel,
+            touchpad,
             dx: 0,
             dy: 0,
             vertical: 0,
@@ -111,6 +151,16 @@ impl Translator {
     }
 
     fn feed(&mut self, raw: RawEvent, mut out: impl FnMut(InputEvent)) {
+        if let Some(touchpad) = &mut self.touchpad {
+            if touchpad.feed(raw) {
+                return;
+            }
+            if (raw.kind, raw.code) == (EV_SYN, SYN_REPORT) {
+                let (dx, dy) = touchpad.motion();
+                self.dx = self.dx.saturating_add(dx);
+                self.dy = self.dy.saturating_add(dy);
+            }
+        }
         // value: 0 = released, 1 = pressed, 2 = auto-repeat (sent as a press,
         // because Windows does not repeat injected keys by itself).
         let pressed = raw.value != 0;
@@ -153,12 +203,69 @@ impl Translator {
     }
 }
 
+/// One finger moving on a touchpad becomes relative motion. A touchpad
+/// reports where the finger is, not how far it moved, so motion is the
+/// difference between two reports, scaled from millimetres to mouse units.
+struct Touchpad {
+    /// Device units per millimetre on X and Y.
+    resolution: [i32; 2],
+    one_finger: bool,
+    position: [i32; 2],
+    /// Position at the previous report; `None` right after a finger lands,
+    /// so putting it down elsewhere never makes the cursor jump.
+    last: Option<[i32; 2]>,
+    /// What the integer division left over, so slow motion is not lost.
+    remainder: [i32; 2],
+}
+
+impl Touchpad {
+    fn new(resolution: [i32; 2]) -> Touchpad {
+        Touchpad {
+            resolution,
+            one_finger: false,
+            position: [0; 2],
+            last: None,
+            remainder: [0; 2],
+        }
+    }
+
+    /// Takes the events only a touchpad sends; `false` for anything else.
+    fn feed(&mut self, raw: RawEvent) -> bool {
+        match (raw.kind, raw.code) {
+            (EV_ABS, ABS_X) => self.position[0] = raw.value,
+            (EV_ABS, ABS_Y) => self.position[1] = raw.value,
+            (EV_KEY, BTN_TOOL_FINGER) => self.one_finger = raw.value != 0,
+            _ => return false,
+        }
+        true
+    }
+
+    /// At `SYN_REPORT`: the motion since the previous report.
+    fn motion(&mut self) -> (i32, i32) {
+        if !self.one_finger {
+            self.last = None;
+            self.remainder = [0; 2];
+            return (0, 0);
+        }
+        let Some(last) = self.last.replace(self.position) else {
+            return (0, 0);
+        };
+        let mut moved = [0; 2];
+        for axis in 0..2 {
+            let scaled = (self.position[axis] - last[axis]) * COUNTS_PER_MM + self.remainder[axis];
+            moved[axis] = scaled / self.resolution[axis];
+            self.remainder[axis] = scaled % self.resolution[axis];
+        }
+        (moved[0], moved[1])
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn run(hi_res_wheel: bool, raw: &[(u16, u16, i32)]) -> Vec<InputEvent> {
-        let mut translator = Translator::new(hi_res_wheel);
+        let mut translator = Translator::new(hi_res_wheel, None);
         let mut out = Vec::new();
         for &(kind, code, value) in raw {
             translator.feed(RawEvent { kind, code, value }, |event| out.push(event));
@@ -227,6 +334,90 @@ mod tests {
             false,
             &[(EV_KEY, BTN_LEFT, 1), (EV_KEY, 0x14a, 1), (4, 4, 30)],
         );
+        assert_eq!(
+            out,
+            [InputEvent::Button {
+                code: BTN_LEFT,
+                pressed: true
+            }]
+        );
+    }
+
+    /// A touchpad with 24 units per millimetre, like the owner's.
+    fn touchpad(raw: &[(u16, u16, i32)]) -> Vec<InputEvent> {
+        let mut translator = Translator::new(false, Some(Touchpad::new([24, 24])));
+        let mut out = Vec::new();
+        for &(kind, code, value) in raw {
+            translator.feed(RawEvent { kind, code, value }, |event| out.push(event));
+        }
+        out
+    }
+
+    const FINGER_DOWN: (u16, u16, i32) = (EV_KEY, BTN_TOOL_FINGER, 1);
+    const FINGER_UP: (u16, u16, i32) = (EV_KEY, BTN_TOOL_FINGER, 0);
+
+    #[test]
+    fn one_finger_moves_the_cursor_without_a_first_jump() {
+        let out = touchpad(&[
+            FINGER_DOWN,
+            (EV_ABS, ABS_X, 1000),
+            (EV_ABS, ABS_Y, 500),
+            SYN,                   // landing: no motion yet
+            (EV_ABS, ABS_X, 1024), // 1 mm right
+            SYN,
+        ]);
+        assert_eq!(
+            out,
+            [InputEvent::Motion {
+                dx: COUNTS_PER_MM,
+                dy: 0
+            }]
+        );
+    }
+
+    #[test]
+    fn lifting_and_landing_elsewhere_does_not_jump() {
+        let out = touchpad(&[
+            FINGER_DOWN,
+            (EV_ABS, ABS_X, 100),
+            SYN,
+            FINGER_UP,
+            SYN,
+            FINGER_DOWN,
+            (EV_ABS, ABS_X, 2000),
+            SYN,
+        ]);
+        assert_eq!(out, []);
+    }
+
+    #[test]
+    fn slow_motion_adds_up_through_the_remainder() {
+        // 1 unit per report is 16/24 of a count: 0, then 1, then 1.
+        let mut raw = vec![FINGER_DOWN, (EV_ABS, ABS_X, 0), SYN];
+        for x in 1..=3 {
+            raw.extend([(EV_ABS, ABS_X, x), SYN]);
+        }
+        let total: i32 = touchpad(&raw)
+            .iter()
+            .map(|event| match event {
+                InputEvent::Motion { dx, .. } => *dx,
+                _ => 0,
+            })
+            .sum();
+        assert_eq!(total, 2);
+    }
+
+    #[test]
+    fn two_fingers_do_not_move_and_the_click_is_a_button() {
+        let out = touchpad(&[
+            FINGER_DOWN,
+            SYN,
+            FINGER_UP, // a second finger landed (BTN_TOOL_DOUBLETAP)
+            (EV_ABS, ABS_X, 900),
+            SYN,
+            (EV_KEY, BTN_LEFT, 1),
+            SYN,
+        ]);
         assert_eq!(
             out,
             [InputEvent::Button {

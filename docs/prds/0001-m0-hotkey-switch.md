@@ -296,3 +296,21 @@ Order of work (each step is one PR, each ≤ ~300 lines):
 - **Checked end to end:** the laptop keyboard switched to Windows and back
   with AltGr + Right Shift, typing reached Notepad, and the owner could use
   AltGr combinations and switch the Windows keyboard layout from it.
+
+### Step 6b — touchpad as a mouse (2026-10-21)
+
+- **Detected by capability**: `ABS_X`, `ABS_Y` and `BTN_TOOL_FINGER`. The
+  owner's touchpad is a clickpad (`INPUT_PROP_BUTTONPAD`): 0–2905 × 0–1766
+  units at 24 units/mm (about 121 × 73 mm), and the physical click is
+  `BTN_LEFT`.
+- **Motion = position difference × 16 counts/mm ÷ resolution**, with the
+  integer remainder carried over so slow motion is not lost, and no motion on
+  the first report after a finger lands, so the cursor never jumps.
+- **Speed feels a bit slow on Windows** to the owner. Left at 16 counts/mm
+  (`ponytail`): it becomes a setting with `config.toml` in M1a and the setup
+  GUI in M1b. Windows' own acceleration ("Enhance pointer precision") also
+  changes how it feels.
+- **Checked end to end:** the touchpad moved the Windows cursor and clicked,
+  and the `timeout` safety net killed the source once while focus was remote:
+  the kernel gave the keyboard and touchpad back to Linux.
+- **Not in M0:** tap to click, two-finger scroll and right click by area.
