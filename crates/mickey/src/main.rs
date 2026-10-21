@@ -24,13 +24,13 @@ mod platform;
 #[allow(dead_code)]
 mod protocol;
 mod secure;
+#[cfg(target_os = "linux")]
+mod source;
 #[allow(dead_code)]
 mod transport;
 mod trust;
 
 use cli::Command;
-#[cfg(target_os = "linux")]
-use protocol::Message;
 use std::net::SocketAddr;
 
 fn main() {
@@ -88,41 +88,16 @@ fn run(command: Command) -> Result<(), String> {
                     ));
                 }
             };
-            source(to, touchpad_speed)
+            #[cfg(target_os = "linux")]
+            return source::run(to, touchpad_speed);
+            #[cfg(not(target_os = "linux"))]
+            {
+                let _ = (to, touchpad_speed);
+                Err("in M0 the source runs only on Linux (Windows sources come in M2)".into())
+            }
         }
         Command::Target { listen } => target(listen),
     }
-}
-
-/// Whether to talk to the peer whose key is `peer_key`. A trusted key is
-/// accepted at once; an unknown one only after the person at this machine
-/// compares fingerprints and types `y`. Anything else (including no
-/// terminal to ask on) refuses.
-fn trust_peer(
-    identity: &identity::Identity,
-    trusted: &mut trust::TrustedPeers,
-    peer_key: &[u8; 32],
-    address: SocketAddr,
-) -> Result<bool, String> {
-    if trusted.is_trusted(peer_key) {
-        return Ok(true);
-    }
-    println!("mickey: new peer at {address}");
-    println!("mickey:   this PC:   {}", identity.fingerprint());
-    println!("mickey:   other PC:  {}", identity::fingerprint(peer_key));
-    println!("mickey: pair with it? Check that \"other PC\" here matches \"this PC\" there.");
-    print!("mickey: type y to pair, anything else to refuse: ");
-    std::io::Write::flush(&mut std::io::stdout()).map_err(|err| err.to_string())?;
-    let mut answer = String::new();
-    std::io::stdin()
-        .read_line(&mut answer)
-        .map_err(|err| format!("cannot read the answer: {err}"))?;
-    if !matches!(answer.trim(), "y" | "Y" | "yes") {
-        return Ok(false);
-    }
-    trusted.add(*peer_key, &address.to_string())?;
-    println!("mickey: paired; it will connect without asking from now on");
-    Ok(true)
 }
 
 /// Serves one source at a time, forever, injecting what it sends.
@@ -156,7 +131,7 @@ fn target(listen: SocketAddr) -> Result<(), String> {
             }
         };
         let peer_key = *link.peer_key();
-        match trust_peer(&identity, &mut trusted, &peer_key, peer) {
+        match trust::trust_or_ask(&identity, &mut trusted, &peer_key, peer) {
             Ok(true) => println!("mickey: source {peer} connected"),
             Ok(false) => {
                 println!("mickey: refused {peer}");
@@ -186,148 +161,4 @@ fn target(listen: SocketAddr) -> Result<(), String> {
 #[cfg(not(windows))]
 fn target(_listen: SocketAddr) -> Result<(), String> {
     Err("in M0 the target runs only on Windows (Linux targets come in M1a)".into())
-}
-
-/// Every keyboard and mouse, with a clear message when we may not read them.
-#[cfg(target_os = "linux")]
-fn open_devices() -> Result<Vec<capture::Found>, String> {
-    let devices = capture::find_devices().map_err(|err| match err.kind() {
-        std::io::ErrorKind::PermissionDenied => "cannot read /dev/input: permission denied; run \
-             `sudo usermod -aG input $USER`, then log in again (or use `newgrp input`)"
-            .to_string(),
-        _ => format!("cannot list input devices: {err}"),
-    })?;
-    if devices.is_empty() {
-        return Err("no keyboard or mouse found under /dev/input".into());
-    }
-    for found in &devices {
-        let kind = match found.kind {
-            capture::Kind::Keyboard => "keyboard",
-            capture::Kind::Mouse => "mouse",
-            capture::Kind::Touchpad => "touchpad",
-        };
-        println!("mickey: found {kind}: {}", found.name);
-    }
-    Ok(devices)
-}
-
-/// Captures local input and sends it to `to` while focus is remote.
-#[cfg(target_os = "linux")]
-fn source(to: SocketAddr, touchpad_speed: i32) -> Result<(), String> {
-    use focus::{Action, Focus, Switcher};
-    use latency::Latency;
-    use std::sync::mpsc::{self, RecvTimeoutError};
-    use std::time::{Duration, Instant};
-
-    const PING_EVERY: Duration = Duration::from_secs(1);
-    const KEYS_UP_POLL: Duration = Duration::from_millis(10);
-
-    let devices = open_devices()?;
-    let data_dir = identity::data_dir()?;
-    let identity = identity::Identity::load_or_create(&data_dir)?;
-    let mut trusted = trust::TrustedPeers::load(&data_dir)?;
-    let mut link = transport::connect(to, &identity)
-        .map_err(|err| format!("cannot connect to {to}: {err}"))?;
-    let peer_key = *link.peer_key();
-    if !trust_peer(&identity, &mut trusted, &peer_key, to)? {
-        return Err(format!("not paired with {to}; nothing was sent"));
-    }
-    println!("mickey: waiting for {to} to accept this PC");
-    transport::hello(&mut link).map_err(|err| match err.kind() {
-        std::io::ErrorKind::UnexpectedEof => format!("{to} refused to pair with this PC"),
-        _ => format!("lost the connection to {to}: {err}"),
-    })?;
-    println!("mickey: connected to {to}; AltGr + Right Shift switches focus");
-
-    // Pongs come back on their own thread, as round-trip times.
-    let start = Instant::now();
-    let mut reader = link
-        .try_clone()
-        .map_err(|err| format!("cannot read from {to}: {err}"))?;
-    let (pong_sender, pongs) = mpsc::channel();
-    std::thread::spawn(move || {
-        while let Ok(message) = reader.recv() {
-            if let Message::Pong { id } = message
-                && pong_sender.send(latency::round_trip(start, id)).is_err()
-            {
-                return;
-            }
-        }
-    });
-    let mut latency = Latency::new();
-    let mut next_ping = start;
-
-    let (sender, events) = mpsc::channel();
-    capture::spawn_readers(&devices, sender, touchpad_speed);
-    let mut switcher = Switcher::new();
-    // Dropping a `Grab` gives its device back, on every way out of here,
-    // including `?` and panics.
-    let mut grabs = Vec::new();
-    loop {
-        if matches!(switcher.focus(), Focus::WaitingForKeysUp(_))
-            && !devices
-                .iter()
-                .any(|found| found.device.any_key_down().unwrap_or(true))
-        {
-            grabs = devices
-                .iter()
-                .map(|found| found.device.grab())
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(|err| format!("cannot grab the input devices: {err}"))?;
-            switcher.grabbed();
-            println!("mickey: focus is on {to}");
-        }
-
-        let now = Instant::now();
-        if now >= next_ping {
-            let ping = Message::Ping {
-                id: latency::ping_id(start),
-            };
-            link.send(&ping)
-                .map_err(|err| format!("lost the connection to {to}: {err}"))?;
-            next_ping = now + PING_EVERY;
-        }
-
-        // Sleep until there is input or the next ping is due; poll often only
-        // while waiting for keys to go up, so an idle source wakes once a second.
-        let mut wait = next_ping.saturating_duration_since(now);
-        if matches!(switcher.focus(), Focus::WaitingForKeysUp(_)) {
-            wait = wait.min(KEYS_UP_POLL);
-        }
-        let event = match events.recv_timeout(wait) {
-            Ok(event) => event,
-            Err(RecvTimeoutError::Timeout) => continue,
-            Err(RecvTimeoutError::Disconnected) => break,
-        };
-
-        let mut sent = Ok(());
-        // ponytail: one peer, always online, until several PCs land (#46).
-        switcher.handle(event, &[true], |action| match action {
-            Action::Send(_, event) => {
-                if sent.is_ok() {
-                    sent = link.send(&Message::Input(event));
-                }
-            }
-            Action::Ungrab => {
-                grabs.clear();
-                println!("mickey: focus is back here");
-                for round_trip in pongs.try_iter() {
-                    latency.add_round_trip(round_trip);
-                }
-                if let Some((p50, p99)) = latency.percentiles() {
-                    println!(
-                        "mickey: one-way latency over {} pings: p50 {p50} µs, p99 {p99} µs",
-                        latency.len()
-                    );
-                }
-            }
-        });
-        sent.map_err(|err| format!("lost the connection to {to}: {err}"))?;
-    }
-    Err("every input device is gone".into())
-}
-
-#[cfg(not(target_os = "linux"))]
-fn source(_to: SocketAddr, _touchpad_speed: i32) -> Result<(), String> {
-    Err("in M0 the source runs only on Linux (Windows sources come in M2)".into())
 }
