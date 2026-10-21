@@ -50,9 +50,10 @@ simplest possible way to switch, so M0 can focus on the pipeline.
       through a guard type's `Drop`.
 
 ### Hotkey and focus
-- [ ] A fixed hotkey toggles focus local ⇄ remote: **Right Ctrl + Right
-      Shift**, firing when the second of the two is released and no other key
-      was pressed in between (so `Ctrl+Shift+T` never switches). It becomes
+- [ ] A fixed hotkey toggles focus local ⇄ remote: **AltGr (Right Alt) +
+      Right Shift**, firing when the second of the two is released and no
+      other key was pressed in between (so `AltGr+Shift+Q` never switches).
+      The owner's laptop has no Right Ctrl (see *Discoveries*). It becomes
       configurable in M1a, when `config.toml` exists.
 - [ ] The hotkey's own key presses are never sent to the target.
 - [ ] Before the grab starts, wait until every key is released locally (see
@@ -222,3 +223,28 @@ Order of work (each step is one PR, each ≤ ~300 lines):
   window has focus, like a real keyboard.
 - **Checked:** "hello" typed by scan code and the cursor drew a square on
   the owner's Windows 10.
+
+### Spike 0a — evdev grab on Hyprland (2026-10-21)
+
+- **Bindings: hand-written, no crate.** `ioctl` is declared in
+  `platform/linux.rs` (glibc is already linked by `std`); `EVIOCGRAB` and
+  `EVIOCGKEY` match the values from `<linux/input.h>` (`0x40044590`,
+  `0x80604518` for 96 bytes). Events are read with plain `File::read_exact`
+  into 24 bytes, so reading needs no `unsafe`. The `evdev` crate is not
+  needed.
+- **Grab works on Hyprland.** While grabbed, typing reaches nothing on the
+  desktop; releasing the hotkey gives the keyboard back at once. The kernel
+  also drops the grab when the file is closed, so even a killed process
+  frees the keyboard.
+- **Ctrl+C cannot work during a grab**: the terminal never sees the keys.
+  The way home is the hotkey; the spike adds a 10-second limit as a net.
+- **Hotkey changed to AltGr + Right Shift.** The owner's laptop (Acer,
+  ABNT2) has no Right Ctrl. AltGr arrives as `KEY_RIGHTALT` (100).
+- **Permissions without logging out.** After `usermod -aG input`, the group
+  only applies to new logins; `newgrp input` gives a shell with it now.
+  Open question for later: the `input` group lets any program of the user
+  read the keyboard. The Wayland InputCapture portal (libei) avoids it.
+- **The touchpad sends absolute positions, not motion.** Its two devices:
+  "…Touchpad" sends `EV_ABS` (multitouch positions) and was the only one
+  with data; "…Mouse" has `REL_X`/`REL_Y` but stayed silent. Capturing
+  only `REL_X`/`REL_Y` mice, as planned, would ignore the owner's touchpad.
