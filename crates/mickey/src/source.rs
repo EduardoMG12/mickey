@@ -2,13 +2,19 @@
 //! machine, and send input to the focused peer.
 
 use crate::capture;
+use crate::config;
 use crate::focus::{Action, Focus, Switcher};
-use crate::identity;
+use crate::identity::{self, Identity};
 use crate::latency::{self, Latency};
 use crate::protocol::Message;
+use crate::secure::Link;
 use crate::transport;
-use crate::trust;
+use crate::trust::{self, TrustedPeers};
 use std::net::SocketAddr;
+use std::sync::Arc;
+use std::sync::mpsc::{self, RecvTimeoutError, Sender};
+use std::thread;
+use std::time::{Duration, Instant};
 
 /// Every keyboard and mouse, with a clear message when we may not read them.
 fn open_devices() -> Result<Vec<capture::Found>, String> {
@@ -32,48 +38,67 @@ fn open_devices() -> Result<Vec<capture::Found>, String> {
     Ok(devices)
 }
 
-/// Captures local input and sends it to `to` while focus is remote.
-pub fn run(to: SocketAddr, touchpad_speed: i32) -> Result<(), String> {
-    use std::sync::mpsc::{self, RecvTimeoutError};
-    use std::time::{Duration, Instant};
+const PING_EVERY: Duration = Duration::from_secs(1);
+const KEYS_UP_POLL: Duration = Duration::from_millis(10);
+const RETRY_EVERY: Duration = Duration::from_secs(5);
 
-    const PING_EVERY: Duration = Duration::from_secs(1);
-    const KEYS_UP_POLL: Duration = Duration::from_millis(10);
+/// One configured peer and its link, if it is connected.
+struct Peer {
+    name: String,
+    address: SocketAddr,
+    link: Option<Link>,
+    latency: Latency,
+}
 
+/// Everything the background reconnect threads need, shared read-only.
+struct Shared {
+    identity: Identity,
+    /// Who was trusted at start. Reconnects never ask, so a peer that is
+    /// not in here is not retried.
+    trusted: TrustedPeers,
+}
+
+/// Captures local input and sends it to the focused peer. Every peer gets
+/// its own secure link; one that is offline is retried in the background
+/// and never blocks the others.
+pub fn run(configured: Vec<config::Peer>, touchpad_speed: i32) -> Result<(), String> {
     let devices = open_devices()?;
     let data_dir = identity::data_dir()?;
-    let identity = identity::Identity::load_or_create(&data_dir)?;
-    let mut trusted = trust::TrustedPeers::load(&data_dir)?;
-    let mut link = transport::connect(to, &identity)
-        .map_err(|err| format!("cannot connect to {to}: {err}"))?;
-    let peer_key = *link.peer_key();
-    if !trust::trust_or_ask(&identity, &mut trusted, &peer_key, to)? {
-        return Err(format!("not paired with {to}; nothing was sent"));
-    }
-    println!("mickey: waiting for {to} to accept this PC");
-    transport::hello(&mut link).map_err(|err| match err.kind() {
-        std::io::ErrorKind::UnexpectedEof => format!("{to} refused to pair with this PC"),
-        _ => format!("lost the connection to {to}: {err}"),
-    })?;
-    println!("mickey: connected to {to}; AltGr + Right Shift switches focus");
-
-    // Pongs come back on their own thread, as round-trip times.
+    let identity = Identity::load_or_create(&data_dir)?;
+    let mut trusted = TrustedPeers::load(&data_dir)?;
     let start = Instant::now();
-    let mut reader = link
-        .try_clone()
-        .map_err(|err| format!("cannot read from {to}: {err}"))?;
     let (pong_sender, pongs) = mpsc::channel();
-    std::thread::spawn(move || {
-        while let Ok(message) = reader.recv() {
-            if let Message::Pong { id } = message
-                && pong_sender.send(latency::round_trip(start, id)).is_err()
-            {
-                return;
+    let (back_sender, back) = mpsc::channel();
+
+    // Connect at start, asking to pair where needed (devices are not grabbed
+    // yet, so the terminal still gets the keyboard).
+    let mut peers = Vec::new();
+    for (index, peer) in configured.into_iter().enumerate() {
+        let link = match connect_and_pair(&identity, &mut trusted, &peer) {
+            Ok(link) => {
+                println!("mickey: {} ({}) is connected", peer.name, peer.address);
+                read_pongs(index, &link, &pong_sender, start);
+                Some(link)
             }
+            Err(err) => {
+                println!("mickey: {} ({}) is offline: {err}", peer.name, peer.address);
+                None
+            }
+        };
+        peers.push(Peer {
+            name: peer.name,
+            address: peer.address,
+            link,
+            latency: Latency::new(),
+        });
+    }
+    let shared = Arc::new(Shared { identity, trusted });
+    for (index, peer) in peers.iter().enumerate() {
+        if peer.link.is_none() {
+            reconnect(index, peer.address, &shared, &back_sender);
         }
-    });
-    let mut latency = Latency::new();
-    let mut next_ping = start;
+    }
+    println!("mickey: AltGr + Right Shift switches focus");
 
     let (sender, events) = mpsc::channel();
     capture::spawn_readers(&devices, sender, touchpad_speed);
@@ -81,8 +106,18 @@ pub fn run(to: SocketAddr, touchpad_speed: i32) -> Result<(), String> {
     // Dropping a `Grab` gives its device back, on every way out of here,
     // including `?` and panics.
     let mut grabs = Vec::new();
+    let mut next_ping = start;
     loop {
-        if matches!(switcher.focus(), Focus::WaitingForKeysUp(_))
+        for (index, link) in back.try_iter() {
+            read_pongs(index, &link, &pong_sender, start);
+            peers[index].link = Some(link);
+            println!("mickey: {} is back online", peers[index].name);
+        }
+        for (index, round_trip) in pongs.try_iter() {
+            peers[index].latency.add_round_trip(round_trip);
+        }
+
+        if let Focus::WaitingForKeysUp(index) = switcher.focus()
             && !devices
                 .iter()
                 .any(|found| found.device.any_key_down().unwrap_or(true))
@@ -93,16 +128,22 @@ pub fn run(to: SocketAddr, touchpad_speed: i32) -> Result<(), String> {
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(|err| format!("cannot grab the input devices: {err}"))?;
             switcher.grabbed();
-            println!("mickey: focus is on {to}");
+            println!("mickey: focus is on {}", peers[index].name);
         }
 
+        let mut lost = Vec::new();
         let now = Instant::now();
         if now >= next_ping {
             let ping = Message::Ping {
                 id: latency::ping_id(start),
             };
-            link.send(&ping)
-                .map_err(|err| format!("lost the connection to {to}: {err}"))?;
+            for (index, peer) in peers.iter_mut().enumerate() {
+                if let Some(link) = &mut peer.link
+                    && link.send(&ping).is_err()
+                {
+                    lost.push(index);
+                }
+            }
             next_ping = now + PING_EVERY;
         }
 
@@ -112,35 +153,116 @@ pub fn run(to: SocketAddr, touchpad_speed: i32) -> Result<(), String> {
         if matches!(switcher.focus(), Focus::WaitingForKeysUp(_)) {
             wait = wait.min(KEYS_UP_POLL);
         }
-        let event = match events.recv_timeout(wait) {
-            Ok(event) => event,
-            Err(RecvTimeoutError::Timeout) => continue,
-            Err(RecvTimeoutError::Disconnected) => break,
-        };
-
-        let mut sent = Ok(());
-        // ponytail: one peer, always online, until several PCs land (#46).
-        switcher.handle(event, &[true], |action| match action {
-            Action::Send(_, event) => {
-                if sent.is_ok() {
-                    sent = link.send(&Message::Input(event));
+        match events.recv_timeout(wait) {
+            Ok(event) => {
+                let online: Vec<bool> = peers.iter().map(|peer| peer.link.is_some()).collect();
+                let left = switcher.focus();
+                switcher.handle(event, &online, |action| match action {
+                    Action::Send(index, event) => {
+                        if let Some(link) = &mut peers[index].link
+                            && link.send(&Message::Input(event)).is_err()
+                        {
+                            lost.push(index);
+                        }
+                    }
+                    Action::Ungrab => {
+                        grabs.clear();
+                        if let Focus::Remote(index) = left {
+                            report_latency(&mut peers[index]);
+                        }
+                    }
+                });
+                // Going to the next peer also ungrabs for a moment; only
+                // say "back here" when the focus really is local.
+                if switcher.focus() == Focus::Local && left != Focus::Local {
+                    println!("mickey: focus is back here");
                 }
             }
-            Action::Ungrab => {
+            Err(RecvTimeoutError::Timeout) => {}
+            Err(RecvTimeoutError::Disconnected) => break,
+        }
+
+        lost.sort_unstable();
+        lost.dedup();
+        for index in lost {
+            peers[index].link = None;
+            println!("mickey: lost {}; retrying every 5 s", peers[index].name);
+            switcher.peer_lost(index, |_ungrab| {
                 grabs.clear();
                 println!("mickey: focus is back here");
-                for round_trip in pongs.try_iter() {
-                    latency.add_round_trip(round_trip);
-                }
-                if let Some((p50, p99)) = latency.percentiles() {
-                    println!(
-                        "mickey: one-way latency over {} pings: p50 {p50} µs, p99 {p99} µs",
-                        latency.len()
-                    );
-                }
-            }
-        });
-        sent.map_err(|err| format!("lost the connection to {to}: {err}"))?;
+            });
+            reconnect(index, peers[index].address, &shared, &back_sender);
+        }
     }
     Err("every input device is gone".into())
+}
+
+/// Connects, asks to pair if the key is unknown, and waits for the peer to
+/// accept us.
+fn connect_and_pair(
+    identity: &Identity,
+    trusted: &mut TrustedPeers,
+    peer: &config::Peer,
+) -> Result<Link, String> {
+    let to = peer.address;
+    let mut link = transport::connect(to, identity).map_err(|err| err.to_string())?;
+    let peer_key = *link.peer_key();
+    if !trust::trust_or_ask(identity, trusted, &peer_key, to)? {
+        return Err("not paired; nothing was sent".into());
+    }
+    println!("mickey: waiting for {} to accept this PC", peer.name);
+    transport::hello(&mut link).map_err(|err| match err.kind() {
+        std::io::ErrorKind::UnexpectedEof => "it refused to pair with this PC".to_string(),
+        _ => err.to_string(),
+    })?;
+    Ok(link)
+}
+
+/// Retries a trusted peer in the background until it answers, then hands
+/// its link to the main loop. Never asks to pair: a peer whose key is not
+/// trusted is left alone.
+fn reconnect(index: usize, to: SocketAddr, shared: &Arc<Shared>, back: &Sender<(usize, Link)>) {
+    let (shared, back) = (Arc::clone(shared), back.clone());
+    thread::spawn(move || {
+        loop {
+            thread::sleep(RETRY_EVERY);
+            let Ok(mut link) = transport::connect(to, &shared.identity) else {
+                continue;
+            };
+            if !shared.trusted.is_trusted(link.peer_key()) {
+                println!("mickey: {to} has a key this PC never paired with; restart to pair");
+                return;
+            }
+            if transport::hello(&mut link).is_ok() {
+                let _ = back.send((index, link));
+                return;
+            }
+        }
+    });
+}
+
+/// Pongs come back on their own thread, as round-trip times per peer.
+fn read_pongs(index: usize, link: &Link, pongs: &Sender<(usize, u32)>, start: Instant) {
+    let (Ok(mut reader), pongs) = (link.try_clone(), pongs.clone()) else {
+        return;
+    };
+    thread::spawn(move || {
+        while let Ok(message) = reader.recv() {
+            if let Message::Pong { id } = message
+                && pongs.send((index, latency::round_trip(start, id))).is_err()
+            {
+                return;
+            }
+        }
+    });
+}
+
+fn report_latency(peer: &mut Peer) {
+    if let Some((p50, p99)) = peer.latency.percentiles() {
+        println!(
+            "mickey: one-way latency to {} over {} pings: p50 {p50} µs, p99 {p99} µs",
+            peer.name,
+            peer.latency.len()
+        );
+    }
 }
