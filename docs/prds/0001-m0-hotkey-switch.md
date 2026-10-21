@@ -12,10 +12,10 @@ Done means: with the Linux machine and the Windows PC on the same LAN,
 
 ```sh
 # on Windows (the machine to be controlled)
-mickey.exe receive --listen 192.0.2.20:4242
+mickey.exe target --listen 192.0.2.20:4242
 
 # on Linux (the machine with the keyboard and mouse)
-mickey send --to 192.0.2.20:4242
+mickey source --to 192.0.2.20:4242
 ```
 
 pressing the hotkey on Linux moves the keyboard and mouse to Windows: the Linux
@@ -24,14 +24,15 @@ side buttons and scroll work. Pressing the hotkey again returns control.
 `Ctrl+C`, a crash or a lost connection always gives Linux its keyboard and
 mouse back. Nothing more.
 
-Screen edges and more than two machines come in M1; the hotkey is the
+Screen edges and more than two machines come in M1a; the hotkey is the
 simplest possible way to switch, so M0 can focus on the pipeline.
 
 ## Requirements
 
 ### CLI
-- [ ] `mickey receive --listen <addr:port>` (Windows) and
-      `mickey send --to <addr:port>` (Linux).
+- [ ] `mickey target --listen <addr:port>` (Windows) and
+      `mickey source --to <addr:port>` (Linux). The names match
+      [CONTEXT.md](../../CONTEXT.md).
 - [ ] Bad arguments, missing permissions on `/dev/input` or a port already in
       use print a one-line error that says how to fix it, and exit non-zero.
       No panic.
@@ -49,8 +50,10 @@ simplest possible way to switch, so M0 can focus on the pipeline.
       through a guard type's `Drop`.
 
 ### Hotkey and focus
-- [ ] A fixed hotkey toggles focus local ⇄ remote (chosen in step 0; see Open
-      Questions).
+- [ ] A fixed hotkey toggles focus local ⇄ remote: **Right Ctrl + Right
+      Shift**, firing when the second of the two is released and no other key
+      was pressed in between (so `Ctrl+Shift+T` never switches). It becomes
+      configurable in M1a, when `config.toml` exists.
 - [ ] The hotkey's own key presses are never sent to the target.
 - [ ] Before the grab starts, wait until every key is released locally (see
       Constraints).
@@ -87,21 +90,22 @@ simplest possible way to switch, so M0 can focus on the pipeline.
 ### Tests
 - [ ] Unit tests: protocol round-trip for every message, malformed input
       rejection, key mapping table, hotkey state machine, pressed-set release.
-- [ ] Integration test: `send` and `receive` on localhost with a fake capture
+- [ ] Integration test: `source` and `target` on localhost with a fake capture
       and a fake emitter (no `/dev/input`, no `SendInput`), asserting that the
       emitted sequence equals the captured one and that a dropped connection
       emits releases.
 - [ ] CI runs on **Linux and Windows** runners.
-- [ ] Manual test (in the PR): Linux → Windows, 10 minutes of normal use
+- [ ] Manual test (in the PR): Linux → Windows 10 (the owner's PC; Windows 11
+      should work but is untested), 10 minutes of normal use
       (typing with accents, shortcuts like `Ctrl+C`/`Alt+Tab`, scrolling,
       side buttons), latency p99 from `Ping`/`Pong` reported, no stuck keys
       after 20 switches.
 
 ## Non-Goals
 
-- Screen edges, layout, more than two machines (M1).
-- Linux as the target (`uinput`, M1). Windows as the source (M2).
-- Encryption, pairing (M1). M0 is trusted-LAN only.
+- Screen edges, layout, more than two machines (M1a).
+- Linux as the target (`uinput`, M1a). Windows as the source (M2).
+- Encryption, pairing (M1a). M0 is trusted-LAN only.
 - Config file. Everything comes from CLI flags.
 - Clipboard.
 - Running as a Windows service or at login. M0 runs from a terminal.
@@ -147,17 +151,17 @@ simplest possible way to switch, so M0 can focus on the pipeline.
    too.
 5. **No traits yet.** One capture backend (evdev) and one emit backend
    (Windows) behind `#[cfg(target_os)]`. The emit trait arrives with the
-   second emit backend (`uinput`, M1).
+   second emit backend (`uinput`, M1a).
 
 Order of work (each step is one PR, each ≤ ~300 lines):
 
 - 0a. Spike, Linux: read a keyboard with evdev on Hyprland, grab it, release
-  it. Hand-written ioctls vs `evdev` crate; pick the hotkey.
+  it. Hand-written ioctls vs `evdev` crate; check that the hotkey works.
 - 0b. Spike, Windows: a tiny program that types "hello" and moves the mouse
   with `SendInput`. Hand-written bindings vs `windows-sys`; build natively
   on Windows vs cross-compile from Arch (`x86_64-pc-windows-gnu`). Both
   spikes record their decisions in *Discoveries*.
-1. Workspace skeleton, CLI (`send`/`receive`), errors, CI on Linux + Windows.
+1. Workspace skeleton, CLI (`source`/`target`), errors, CI on Linux + Windows.
 2. `InputEvent` + protocol encode/decode + round-trip tests.
 3. TCP transport + fake capture/emitter + localhost integration test.
 4. evdev → Windows key and button mapping + tests.
@@ -188,14 +192,10 @@ Order of work (each step is one PR, each ≤ ~300 lines):
 
 ## Open Questions
 
-- **Hotkey.** Must be easy to press, not already bound in Hyprland, and exist
-  on every keyboard (Scroll Lock often does not). Candidate: `Right Ctrl +
-  Right Shift`. *(user decision, in spike 0a)*
 - **Hand-written bindings vs crates** (`evdev`, `windows-sys`).
   *(needs exploration: spikes 0a/0b)*
 - **Build for Windows**: Rust installed on the Windows PC, or cross-compile
   from Arch and copy the `.exe`? *(needs exploration: spike 0b)*
-- **Windows version** (10 or 11) of the owner's PC. *(user decision)*
 
 ## Discoveries
 

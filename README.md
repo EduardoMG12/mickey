@@ -23,16 +23,18 @@ be understood line by line.
   you can notice. Hard budgets, measured.
 - **Safe on a shared network.** Everything you type crosses the network, so
   traffic is encrypted and machines must be paired before they can talk
-  (from M1 on).
+  (from M1a on).
 
 ## Roadmap
 
 | Milestone | What you get | Status |
 |---|---|---|
 | **M0: It crosses** | Press a hotkey, and a Linux PC's keyboard and mouse drive a Windows PC; press it again to come back ([PRD](docs/prds/0001-m0-hotkey-switch.md)) | next |
-| **M1: Screens have edges** | 3+ PCs in a layout: the cursor leaves your screen and enters the neighbor you configured, and back; Linux targets; encryption and pairing | planned |
+| **M1a: Screens have edges** | 3+ PCs in a layout: the cursor leaves your screen and enters the neighbor you configured, and back; Linux targets; encryption and pairing | planned |
+| **M1b: Point and click setup** | A window that draws each PC's monitors so you can arrange them with the mouse | planned |
 | **M2: Any desktop** | Native backends: X11, Wayland portals (GNOME/KDE), wlroots; Windows as the source | planned |
-| Later | Shared clipboard, file drag and drop, automatic discovery (mDNS), GUI/tray, macOS | ideas |
+| Later | Shared clipboard, file drag and drop, automatic discovery (mDNS), tray icon, macOS | ideas |
+| Someday | Sharing headphones and other USB peripherals, TeamViewer-style remote control | very long term |
 
 ## Architecture at a glance
 

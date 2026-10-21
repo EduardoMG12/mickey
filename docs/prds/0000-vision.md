@@ -26,21 +26,19 @@ noticeable lag, whatever each one runs.
 
 ## Vocabulary
 
+Domain terms (peer, source, target, focus, switch, hotkey, layout) live in
+[CONTEXT.md](../../CONTEXT.md). Two architecture terms used below:
+
 | Term | Meaning |
 |---|---|
-| **Peer** | A computer running Mickey. |
-| **Source** | The peer whose physical keyboard/mouse is being used right now. |
-| **Target** | The peer currently receiving input from the source. |
-| **Focus** | Which peer is the target. Exactly one at a time; may be the source itself (local). |
 | **Capture backend** | Reads physical input on the source, and stops the local desktop from seeing it while focus is remote. |
 | **Emit backend** | Creates input on the target as if a real device produced it. |
-| **Layout** | Where each peer's screen sits relative to the others. |
 
 ## Architecture
 
 - **One binary: `mickey`.** The same program runs on every peer, built for
-  Linux and for Windows. In M0 roles are fixed per run (`mickey send` on
-  Linux, `mickey receive` on Windows). The goal is **symmetric peers**: every
+  Linux and for Windows. In M0 roles are fixed per run (`mickey source` on
+  Linux, `mickey target` on Windows). The goal is **symmetric peers**: every
   peer can be the source or a target, whichever keyboard you touch.
 - **Backends per platform.** Capture and emit are the only platform-specific
   parts. The core (focus, layout, pressed keys, hotkeys) and the protocol are
@@ -69,7 +67,11 @@ noticeable lag, whatever each one runs.
 compositor, in the kernel. Their cost: they need permission to
 `/dev/input/*` and `/dev/uinput`, and they cannot see where the cursor is on
 screen (so they cannot detect screen edges alone). That is why M0 switches with
-a hotkey and edges come in M1.
+a hotkey and edges come in M1a.
+
+The hotkey stays after edges exist: it then always brings focus back to the
+source. It is the way home when a target freezes or an edge cannot be
+reached (hard rule 8).
 
 ### Repository layout
 
@@ -152,19 +154,33 @@ A keyboard sent over the network is a keylogger unless it is protected.
 | # | Name | PRD | Summary |
 |---|---|---|---|
 | M0 | It crosses | [0001](0001-m0-hotkey-switch.md) | Linux → Windows: `evdev` capture, `SendInput` emit, hotkey switches focus, plaintext TCP |
-| M1 | Screens have edges | 0002 (todo) | Layout of 3+ peers; cursor crosses to the configured neighbor and back; Linux targets (`uinput`); encryption and pairing |
-| M2 | Any desktop | 0003 (todo) | Native backends (wlroots, portals, X11); Windows as the source |
+| M1a | Screens have edges | 0002 (todo) | Layout of 3+ peers in a hand-written `config.toml`; cursor crosses to the configured neighbor and back; Linux targets (`uinput`); encryption and pairing; configurable hotkey |
+| M1b | Point and click setup | 0003 (todo) | A GUI that draws each peer's monitors and edits the same `config.toml` (the GUI crate is chosen and justified here) |
+| M2 | Any desktop | 0004 (todo) | Native backends (wlroots, portals, X11); Windows as the source |
 
 ### Later (unordered, not committed)
 
 - Shared clipboard (text first, then images)
 - File drag and drop between screens
 - Automatic peer discovery (mDNS)
-- Tray icon / GUI for layout
+- Tray icon
 - macOS backend
 - Packaging: AUR, Flatpak, `.deb`, Windows installer
 
+### Someday (very long term, not committed)
+
+Ideas the owner wants to keep in view. Each one is a different problem from
+moving input, so each needs its own PRD before any work starts, and they stay
+non-goals until then.
+
+- Sharing headphones and audio between peers.
+- Sharing other USB peripherals.
+- Remote control in the style of TeamViewer: screen sharing and control over
+  the internet.
+
 ## Non-Goals
+
+Until a *Someday* item gets its own PRD:
 
 - Screen sharing or remote desktop. Mickey moves input, not pixels: every
   screen is physically in front of the owner.
@@ -172,14 +188,18 @@ A keyboard sent over the network is a keylogger unless it is protected.
 - Distro-specific code paths. If something needs a distro check, the design is
   wrong.
 - Abstractions built for a second use case that does not exist yet (the
-  emit trait appears when the second emit backend, `uinput`, does in M1).
+  emit trait appears when the second emit backend, `uinput`, does in M1a).
 
 ## Open Questions
 
-- **The owner's three machines.** Known so far: machine 1 is Arch + Hyprland
-  (Wayland) and is the source; one machine runs Windows (10 or 11?). The
-  third: OS and desktop? This decides which M1/M2 backends come first.
-  *(user decision)*
+- **The third peer's session.** The owner's three peers: Arch + Hyprland
+  (Wayland, 2 monitors), Windows 10 (3 monitors) and Ubuntu with KDE
+  (1 monitor). Does the Ubuntu peer run KDE on Wayland or X11? This decides
+  how it detects edges in M1a. *(user fact, M1a grill)*
+- **Layout unit (M1a).** Does the layout place whole peers (each one a block
+  with its monitors inside, like Deskflow) or individual monitors? And do we
+  need separate words for a monitor and for a peer's whole desktop?
+  *(user decision, M1a grill)*
 - **Edge detection on Hyprland (M1).** The source must know when its cursor
   hits a screen edge. Hyprland's IPC (`cursorpos`) is simple but
   Hyprland-only; a wlroots layer-shell surface on the edge works on Sway too.
