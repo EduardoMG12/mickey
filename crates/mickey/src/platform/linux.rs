@@ -1,17 +1,21 @@
 //! Hand-written evdev bindings: read input events and grab a device.
 
-use std::fs::{File, OpenOptions};
+use std::fs::File;
 use std::io::{self, Read};
 use std::os::fd::AsRawFd;
-use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
 
-const O_NONBLOCK: i32 = 0o4000;
-
 // ioctl numbers from <linux/input.h>, expanded from the _IOW/_IOR macros.
+// `_IOR` puts the buffer size in bits 16..30, hence the `<< 16`.
 const EVIOCGRAB: u64 = 0x4004_4590;
-const KEY_STATE_BYTES: usize = 96; // KEY_MAX (0x2ff) + 1 bits
-const EVIOCGKEY: u64 = 0x8000_4518 | ((KEY_STATE_BYTES as u64) << 16);
+const BITS_BYTES: usize = 96; // KEY_MAX (0x2ff) + 1 bits, the largest bitmap
+const EVIOCGKEY: u64 = 0x8000_4518 | ((BITS_BYTES as u64) << 16);
+const NAME_BYTES: usize = 256;
+const EVIOCGNAME: u64 = 0x8000_4506 | ((NAME_BYTES as u64) << 16);
+/// `EVIOCGBIT(ev_type)`: which codes of one event type the device has.
+const fn eviocgbit(ev_type: u16) -> u64 {
+    (0x8000_4520 + ev_type as u64) | ((BITS_BYTES as u64) << 16)
+}
 
 // `struct input_event` on 64-bit Linux: a 16-byte timeval, then type, code, value.
 const EVENT_SIZE: usize = 24;
@@ -33,38 +37,63 @@ pub struct Device {
 
 impl Device {
     pub fn open(path: &Path) -> io::Result<Device> {
-        let file = OpenOptions::new()
-            .read(true)
-            .custom_flags(O_NONBLOCK)
-            .open(path)?;
-        Ok(Device { file })
+        Ok(Device {
+            file: File::open(path)?,
+        })
     }
 
-    /// Returns `None` when no event is waiting (the device is non-blocking).
-    pub fn read_event(&self) -> io::Result<Option<RawEvent>> {
+    /// Blocks until the device has an event.
+    pub fn read_event(&self) -> io::Result<RawEvent> {
         let mut buf = [0u8; EVENT_SIZE];
         // The kernel only hands out whole events, never part of one.
-        match (&self.file).read_exact(&mut buf) {
-            Ok(()) => Ok(Some(RawEvent {
-                kind: u16::from_ne_bytes([buf[16], buf[17]]),
-                code: u16::from_ne_bytes([buf[18], buf[19]]),
-                value: i32::from_ne_bytes([buf[20], buf[21], buf[22], buf[23]]),
-            })),
-            Err(err) if err.kind() == io::ErrorKind::WouldBlock => Ok(None),
-            Err(err) => Err(err),
-        }
+        (&self.file).read_exact(&mut buf)?;
+        Ok(RawEvent {
+            kind: u16::from_ne_bytes([buf[16], buf[17]]),
+            code: u16::from_ne_bytes([buf[18], buf[19]]),
+            value: i32::from_ne_bytes([buf[20], buf[21], buf[22], buf[23]]),
+        })
     }
 
     pub fn any_key_down(&self) -> io::Result<bool> {
-        let mut state = [0u8; KEY_STATE_BYTES];
-        // SAFETY: EVIOCGKEY writes at most KEY_STATE_BYTES bytes (the size
-        // encoded in the request) into `state`, which is that long and lives
-        // for the whole call. The fd is open for as long as `self`.
-        let result = unsafe { ioctl(self.file.as_raw_fd(), EVIOCGKEY, state.as_mut_ptr()) };
-        if result < 0 {
+        let state = self.bitmap(EVIOCGKEY)?;
+        Ok(state.iter().any(|&byte| byte != 0))
+    }
+
+    /// Whether the device can send `code` of `ev_type`, e.g. `EV_KEY`, `KEY_A`.
+    pub fn supports(&self, ev_type: u16, code: u16) -> io::Result<bool> {
+        let bits = self.bitmap(eviocgbit(ev_type))?;
+        let code = usize::from(code);
+        Ok(bits
+            .get(code / 8)
+            .is_some_and(|byte| byte & (1 << (code % 8)) != 0))
+    }
+
+    pub fn name(&self) -> io::Result<String> {
+        let mut name = [0u8; NAME_BYTES];
+        let len = self.ioctl_read(EVIOCGNAME, &mut name)?;
+        let name = name[..len].split(|&byte| byte == 0).next().unwrap_or(&[]);
+        Ok(String::from_utf8_lossy(name).into_owned())
+    }
+
+    fn bitmap(&self, request: u64) -> io::Result<[u8; BITS_BYTES]> {
+        let mut bits = [0u8; BITS_BYTES];
+        self.ioctl_read(request, &mut bits)?;
+        Ok(bits)
+    }
+
+    /// Runs a read ioctl whose size field equals `buf.len()`; returns the
+    /// number of bytes the kernel wrote.
+    fn ioctl_read(&self, request: u64, buf: &mut [u8]) -> io::Result<usize> {
+        debug_assert_eq!((request >> 16) & 0x3fff, buf.len() as u64);
+        // SAFETY: every caller passes a request whose size field is
+        // `buf.len()`, so the kernel writes at most that many bytes into
+        // `buf`, which lives for the whole call. The fd is open as long as
+        // `self`.
+        let written = unsafe { ioctl(self.file.as_raw_fd(), request, buf.as_mut_ptr()) };
+        if written < 0 {
             return Err(io::Error::last_os_error());
         }
-        Ok(state.iter().any(|&byte| byte != 0))
+        Ok(written as usize)
     }
 
     /// Takes the device away from the desktop until the guard is dropped.
