@@ -1,8 +1,10 @@
 //! Mickey: one keyboard and mouse shared across computers on the LAN.
 
 mod cli;
-// ponytail: used only by tests until the transport and emitter arrive
-// (M0 steps 3 and 5, #10 and #12).
+#[cfg(windows)]
+mod emit;
+// ponytail: on Linux these are used only by tests until the source is wired
+// (M0 steps 6 and 7, #13 and #14).
 #[allow(dead_code)]
 mod event;
 #[allow(dead_code)]
@@ -16,6 +18,7 @@ mod protocol;
 mod transport;
 
 use cli::Command;
+use std::net::SocketAddr;
 use std::path::Path;
 
 fn main() {
@@ -48,9 +51,7 @@ fn run(command: Command) -> Result<(), String> {
         }
         Command::Target { listen } => {
             warn_unencrypted();
-            Err(format!(
-                "listening on {listen} is not implemented yet (M0 step 3)"
-            ))
+            target(listen)
         }
         Command::Spike { device } => spike(device.as_deref()),
     }
@@ -59,6 +60,48 @@ fn run(command: Command) -> Result<(), String> {
 fn warn_unencrypted() {
     eprintln!("mickey: WARNING: traffic is not encrypted; use only on a trusted network");
     eprintln!("mickey: do not type passwords through Mickey until encryption lands (M1a)");
+}
+
+/// Serves one source at a time, forever, injecting what it sends.
+#[cfg(windows)]
+fn target(listen: SocketAddr) -> Result<(), String> {
+    use std::io::ErrorKind;
+    use std::net::TcpListener;
+
+    let listener = TcpListener::bind(listen).map_err(|err| match err.kind() {
+        ErrorKind::AddrInUse => format!("{listen} is already in use; is another Mickey running?"),
+        ErrorKind::AddrNotAvailable => format!("{listen} is not an address of this machine"),
+        _ => format!("cannot listen on {listen}: {err}"),
+    })?;
+    println!("mickey: listening on {listen}");
+    loop {
+        let (stream, peer) = match listener.accept() {
+            Ok(connection) => connection,
+            Err(err) => {
+                eprintln!("mickey: accept failed: {err}");
+                continue;
+            }
+        };
+        println!("mickey: source {peer} connected");
+        let mut reported = false;
+        let result = transport::serve(&stream, |event| {
+            if let Err(err) = emit::emit(event)
+                && !reported
+            {
+                eprintln!("mickey: input injection failed: {err} (not reported again)");
+                reported = true;
+            }
+        });
+        match result {
+            Ok(()) => println!("mickey: source {peer} disconnected"),
+            Err(err) => eprintln!("mickey: source {peer} dropped: {err}"),
+        }
+    }
+}
+
+#[cfg(not(windows))]
+fn target(_listen: SocketAddr) -> Result<(), String> {
+    Err("in M0 the target runs only on Windows (Linux targets come in M1a)".into())
 }
 
 #[cfg(target_os = "linux")]
@@ -160,8 +203,8 @@ fn type_demo() -> std::io::Result<()> {
 
     for scan_code in [SCAN_H, SCAN_E, SCAN_L, SCAN_L, SCAN_O] {
         // Release even if the press failed, so no key stays held.
-        let pressed = send_key(scan_code, true);
-        let released = send_key(scan_code, false);
+        let pressed = send_key(scan_code, false, true);
+        let released = send_key(scan_code, false, false);
         pressed?;
         released?;
         sleep(Duration::from_millis(50));
