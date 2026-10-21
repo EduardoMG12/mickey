@@ -11,6 +11,8 @@ mod focus;
 mod held;
 #[cfg(target_os = "linux")]
 mod hotkey;
+#[cfg(target_os = "linux")]
+mod latency;
 // The source never translates keys for Windows; only the target does.
 #[cfg_attr(not(windows), allow(dead_code))]
 mod keymap;
@@ -135,13 +137,35 @@ fn open_devices() -> Result<Vec<capture::Found>, String> {
 #[cfg(target_os = "linux")]
 fn source(to: SocketAddr) -> Result<(), String> {
     use focus::{Action, Focus, Switcher};
+    use latency::Latency;
     use std::sync::mpsc::{self, RecvTimeoutError};
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
+
+    const PING_EVERY: Duration = Duration::from_secs(1);
+    const KEYS_UP_POLL: Duration = Duration::from_millis(10);
 
     let devices = open_devices()?;
     let mut stream =
         transport::connect(to).map_err(|err| format!("cannot connect to {to}: {err}"))?;
     println!("mickey: connected to {to}; AltGr + Right Shift switches focus");
+
+    // Pongs come back on their own thread, as round-trip times.
+    let start = Instant::now();
+    let mut reader = stream
+        .try_clone()
+        .map_err(|err| format!("cannot read from {to}: {err}"))?;
+    let (pong_sender, pongs) = mpsc::channel();
+    std::thread::spawn(move || {
+        while let Ok(message) = transport::read_message(&mut reader) {
+            if let Message::Pong { id } = message
+                && pong_sender.send(latency::round_trip(start, id)).is_err()
+            {
+                return;
+            }
+        }
+    });
+    let mut latency = Latency::new();
+    let mut next_ping = start;
 
     let (sender, events) = mpsc::channel();
     capture::spawn_readers(&devices, sender);
@@ -164,19 +188,26 @@ fn source(to: SocketAddr) -> Result<(), String> {
             println!("mickey: focus is on {to}");
         }
 
-        // Poll only while waiting for keys to go up; otherwise sleep until
-        // there is input, so an idle source uses no CPU.
-        let event = if switcher.focus() == Focus::WaitingForKeysUp {
-            match events.recv_timeout(Duration::from_millis(10)) {
-                Ok(event) => event,
-                Err(RecvTimeoutError::Timeout) => continue,
-                Err(RecvTimeoutError::Disconnected) => break,
-            }
-        } else {
-            match events.recv() {
-                Ok(event) => event,
-                Err(_) => break,
-            }
+        let now = Instant::now();
+        if now >= next_ping {
+            let ping = Message::Ping {
+                id: latency::ping_id(start),
+            };
+            transport::send(&mut stream, &ping)
+                .map_err(|err| format!("lost the connection to {to}: {err}"))?;
+            next_ping = now + PING_EVERY;
+        }
+
+        // Sleep until there is input or the next ping is due; poll often only
+        // while waiting for keys to go up, so an idle source wakes once a second.
+        let mut wait = next_ping.saturating_duration_since(now);
+        if switcher.focus() == Focus::WaitingForKeysUp {
+            wait = wait.min(KEYS_UP_POLL);
+        }
+        let event = match events.recv_timeout(wait) {
+            Ok(event) => event,
+            Err(RecvTimeoutError::Timeout) => continue,
+            Err(RecvTimeoutError::Disconnected) => break,
         };
 
         let mut sent = Ok(());
@@ -189,6 +220,15 @@ fn source(to: SocketAddr) -> Result<(), String> {
             Action::Ungrab => {
                 grabs.clear();
                 println!("mickey: focus is back here");
+                for round_trip in pongs.try_iter() {
+                    latency.add_round_trip(round_trip);
+                }
+                if let Some((p50, p99)) = latency.percentiles() {
+                    println!(
+                        "mickey: one-way latency over {} pings: p50 {p50} µs, p99 {p99} µs",
+                        latency.len()
+                    );
+                }
             }
         });
         sent.map_err(|err| format!("lost the connection to {to}: {err}"))?;
