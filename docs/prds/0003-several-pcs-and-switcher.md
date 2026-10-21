@@ -63,10 +63,16 @@ again.
 - [ ] Arrow keys move the selection, Enter or a click switches, Esc closes
       without switching. It never takes longer than one frame to appear
       after the hotkey is released.
-- [ ] Built with **egui/eframe** (decided with the owner), on the Linux
-      source. The same crate is reused by the setup window (step 3).
+- [ ] Built with **egui/eframe** (decided with the owner), as a **separate
+      program, `mickey-ui`** (its own crate in the workspace). `mickey
+      source` starts it when the switcher is needed, passes the PCs on the
+      command line and reads the choice from its standard output; it exits
+      after the choice. The same program will hold the setup window (step 3).
 - [ ] While the switcher is open, nothing is grabbed: it is a normal window
       on the local desktop.
+- [ ] Offline PCs are shown but cannot be picked.
+- [ ] On Hyprland, the README shows the window rules that make it float,
+      centered and pinned (`class:^(mickey-ui)$`).
 
 ### Tests
 - [ ] Config parsing: valid file, missing file, bad TOML, unknown key,
@@ -97,9 +103,9 @@ again.
   - `eframe`/`egui` for the switcher. It is the largest dependency so far,
     so a spike (ticket 3) measures binary size, build time and whether a
     window shows up on top on Hyprland before anything depends on it.
-- **The window and the capture loop are separate.** eframe wants the main
-  thread; the source's loop moves to its own thread and talks to the window
-  over channels (`OpenSwitcher`, `Picked(peer)`, `Closed`).
+- **The window and the capture loop are separate processes** (see the
+  spike in *Discoveries*): the GUI costs 90–125 MB while open, far over the
+  vision's 20 MB budget, so it only exists while it is on screen.
 - Hard rule 8 still holds: the window can crash or hang without the
   keyboard staying grabbed, because nothing is grabbed while it is open.
 
@@ -144,4 +150,34 @@ again.
   others at start.
 - Moving from one peer to the next ungrabs for a moment; the log says
   "back here" only when the focus really is local.
+
+### Ticket 3 — spike: eframe/egui (2026-10-21)
+
+Throw-away program outside the repository: a window with three PC cards,
+arrows/Enter/Esc/click, and a second thread sending a message every second.
+
+- **Works on both systems.** Hyprland: opens focused, renders, keys and
+  clicks work, and `ctx.request_repaint()` from another thread updates it
+  (checked by the agent itself with `grim` screenshots and `wtype` keys).
+  Windows 10, cross-compiled: opens on top, renders.
+- **Hyprland tiles it** like any window, ignores the requested size, and
+  opens it on whatever workspace has focus (even the special one). A
+  switcher should float in the middle: a window rule on the app id
+  (`with_app_id`) does that, and the README will show it.
+- **Windows shows a console** next to it; `#![windows_subsystem = "windows"]`
+  removes it for the GUI program.
+- **Cost**, with `default-features = false` and only `glow`,
+  `default_fonts`, `wayland`, `x11`:
+
+  | | Mickey today | Spike |
+  |---|---|---|
+  | Crates in the tree | 37 | 124 |
+  | Release build, clean | — | 70 s Linux, 53 s Windows (cross) |
+  | Binary (stripped) | 1.2 MB | 8.5 MB Linux, 13 MB Windows |
+  | Resident memory | ~1 MB | 90 MB Linux, 125 MB Windows |
+
+- **Decision (with the owner): the GUI is its own program, `mickey-ui`**,
+  started only while a window is on screen. `mickey source`, which runs all
+  day and holds the keyboard, stays small, never links the GUI crates, and
+  cannot be stuck by a GUI that hangs or crashes.
 
