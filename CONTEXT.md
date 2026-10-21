@@ -35,3 +35,20 @@ _Avoid_: shortcut, panic key
 **Layout**:
 Where each peer sits relative to the others.
 _Avoid_: arrangement, topology
+
+**Identity**:
+A peer's long-term key pair. The private half never leaves the machine.
+_Avoid_: token, certificate
+
+**Fingerprint**:
+A short, human-comparable hash of a peer's public key.
+_Avoid_: ID, code
+
+**Pairing**:
+Confirming on both screens that the fingerprints match, after which each
+peer trusts the other's key.
+_Avoid_: login, registration
+
+**Trusted peer**:
+A peer whose key was paired. Only trusted peers' input is ever emitted.
+_Avoid_: friend, allowed host

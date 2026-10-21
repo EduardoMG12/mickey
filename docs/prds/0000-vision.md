@@ -154,7 +154,8 @@ A keyboard sent over the network is a keylogger unless it is protected.
 | # | Name | PRD | Summary |
 |---|---|---|---|
 | M0 | It crosses | [0001](0001-m0-hotkey-switch.md) | Linux → Windows: `evdev` capture, `SendInput` emit, hotkey switches focus, plaintext TCP |
-| M1a | Screens have edges | 0002 (todo) | Layout of 3+ peers in a hand-written `config.toml`; cursor crosses to the configured neighbor and back; Linux targets (`uinput`); encryption and pairing; configurable hotkey |
+| M1a, first | Secure link | [0002](0002-secure-link.md) | Noise `XX` encryption and SSH-style pairing (fingerprints confirmed on both screens), brought forward from M1a so Mickey is safe before anything else |
+| M1a | Screens have edges | 0005 (todo) | Layout of 3+ peers in a hand-written `config.toml`; cursor crosses to the configured neighbor and back; Linux targets (`uinput`); configurable hotkey |
 | M1b | Point and click setup | 0003 (todo) | A GUI that draws each peer's monitors and edits the same `config.toml` (the GUI crate is chosen and justified here) |
 | M2 | Any desktop | 0004 (todo) | Native backends (wlroots, portals, X11); Windows as the source |
 
@@ -212,8 +213,10 @@ Until a *Someday* item gets its own PRD:
 - **Protocol transport.** TCP for everything (simple, ordered, no lost key
   releases) vs UDP for motion + TCP for keys (lower worst-case latency when
   packets drop). M0 uses TCP; revisit in M1 with numbers. *(needs exploration)*
-- **Encryption in M1.** TLS (`rustls`) vs Noise (`snow`) vs QUIC (`quinn`).
-  *(needs exploration)*
+- ~~**Encryption in M1.** TLS (`rustls`) vs Noise (`snow`) vs QUIC (`quinn`).~~
+  *(resolved: Noise `XX` through `snow`. Peers are identified by their own
+  keys, so TLS certificates add nothing, and QUIC would also change the
+  transport. See [0002](0002-secure-link.md).)*
 - ~~**Symmetric peers.** Should every peer be able to act as the source, or is
   the Linux machine always the source?~~ *(resolved: symmetric. Every peer can
   drive every other one: the Windows keyboard can control Linux too. Linux
