@@ -1,7 +1,5 @@
 //! Mickey: one keyboard and mouse shared across computers on the LAN.
 
-// ponytail: used only by tests until the readers arrive (next PR for #13).
-#[allow(dead_code)]
 #[cfg(target_os = "linux")]
 mod capture;
 mod cli;
@@ -23,7 +21,6 @@ mod transport;
 
 use cli::Command;
 use std::net::SocketAddr;
-use std::path::Path;
 
 fn main() {
     let result = std::env::args_os()
@@ -57,7 +54,7 @@ fn run(command: Command) -> Result<(), String> {
             warn_unencrypted();
             target(listen)
         }
-        Command::Spike { device } => spike(device.as_deref()),
+        Command::Spike => spike(),
     }
 }
 
@@ -109,68 +106,84 @@ fn target(_listen: SocketAddr) -> Result<(), String> {
 }
 
 #[cfg(target_os = "linux")]
-fn spike(device: Option<&Path>) -> Result<(), String> {
-    let device = device.ok_or("usage: mickey spike /dev/input/eventN")?;
-    grab_demo(device)
+fn spike() -> Result<(), String> {
+    capture_demo()
 }
 
 #[cfg(windows)]
-fn spike(device: Option<&Path>) -> Result<(), String> {
-    if device.is_some() {
-        return Err("on Windows, `mickey spike` takes no device".into());
-    }
+fn spike() -> Result<(), String> {
     type_demo().map_err(|err| format!("input injection failed: {err}"))
 }
 
+/// Finds and grabs every keyboard and mouse, then counts what the readers
+/// translate until the hotkey is released or 10 seconds pass.
 #[cfg(target_os = "linux")]
-fn grab_demo(path: &Path) -> Result<(), String> {
-    use platform::linux::Device;
-    use std::io;
+fn capture_demo() -> Result<(), String> {
+    use event::InputEvent;
+    use std::sync::mpsc;
     use std::thread::sleep;
     use std::time::{Duration, Instant};
 
-    const EV_KEY: u16 = 1;
     const KEY_RIGHTSHIFT: u16 = 54;
     const KEY_RIGHTALT: u16 = 100; // AltGr
     const GRAB_LIMIT: Duration = Duration::from_secs(10);
 
-    let device = Device::open(path).map_err(|err| match err.kind() {
-        io::ErrorKind::PermissionDenied => format!(
-            "cannot open {}: permission denied; run `sudo usermod -aG input $USER`, \
-             then log in again (or use `newgrp input`)",
-            path.display()
-        ),
-        _ => format!("cannot open {}: {err}", path.display()),
+    let devices = capture::find_devices().map_err(|err| match err.kind() {
+        std::io::ErrorKind::PermissionDenied => "cannot read /dev/input: permission denied; run \
+             `sudo usermod -aG input $USER`, then log in again (or use `newgrp input`)"
+            .to_string(),
+        _ => format!("cannot list input devices: {err}"),
     })?;
-    let os_err = |err: io::Error| err.to_string();
+    if devices.is_empty() {
+        return Err("no keyboard or mouse found under /dev/input".into());
+    }
+    for found in &devices {
+        let kind = if found.is_keyboard {
+            "keyboard"
+        } else {
+            "mouse"
+        };
+        println!("mickey: found {kind}: {}", found.name);
+    }
 
     // Grabbing while a key is held leaves it stuck down on the desktop.
     println!("mickey: waiting until no key is held");
-    while device.any_key_down().map_err(os_err)? {
+    let os_err = |err: std::io::Error| err.to_string();
+    while devices
+        .iter()
+        .any(|found| found.device.any_key_down().unwrap_or(false))
+    {
         sleep(Duration::from_millis(10));
     }
+    let grabs = devices
+        .iter()
+        .map(|found| found.device.grab())
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(os_err)?;
+    println!("mickey: keyboard and mouse grabbed for at most 10 s");
+    println!("mickey: press and release AltGr + Right Shift to get them back");
 
-    let grab = device.grab().map_err(os_err)?;
-    println!("mickey: keyboard grabbed for at most 10 s");
-    println!("mickey: press and release AltGr + Right Shift to get it back");
+    let (sender, events) = mpsc::channel();
+    capture::spawn_readers(&devices, sender);
 
     let deadline = Instant::now() + GRAB_LIMIT;
     let (mut alt, mut shift, mut both_held) = (false, false, false);
-    let mut key_events = 0u32;
-    while Instant::now() < deadline {
-        let Some(event) = device.read_event().map_err(os_err)? else {
-            sleep(Duration::from_millis(5));
-            continue;
+    let (mut keys, mut motions, mut others) = (0u32, 0u32, 0u32);
+    while let Some(left) = deadline.checked_duration_since(Instant::now()) {
+        let Ok(event) = events.recv_timeout(left) else {
+            break;
         };
-        if event.kind != EV_KEY {
-            continue;
-        }
-        key_events += 1;
-        // value: 0 = released, 1 = pressed, 2 = auto-repeat.
-        match event.code {
-            KEY_RIGHTALT => alt = event.value != 0,
-            KEY_RIGHTSHIFT => shift = event.value != 0,
-            _ => {}
+        match event {
+            InputEvent::Key { code, pressed } => {
+                keys += 1;
+                match code {
+                    KEY_RIGHTALT => alt = pressed,
+                    KEY_RIGHTSHIFT => shift = pressed,
+                    _ => {}
+                }
+            }
+            InputEvent::Motion { .. } => motions += 1,
+            InputEvent::Button { .. } | InputEvent::Scroll { .. } => others += 1,
         }
         both_held |= alt && shift;
         if both_held && !alt && !shift {
@@ -179,8 +192,10 @@ fn grab_demo(path: &Path) -> Result<(), String> {
         }
     }
 
-    drop(grab);
-    println!("mickey: keyboard released ({key_events} key events seen)");
+    drop(grabs);
+    println!(
+        "mickey: released; seen {keys} key, {motions} motion and {others} button/scroll events"
+    );
     Ok(())
 }
 
