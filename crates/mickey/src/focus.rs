@@ -124,6 +124,36 @@ impl Switcher {
         }
     }
 
+    /// Brings the devices home from wherever the focus is, releasing on the
+    /// focused peer everything it holds first.
+    pub fn go_home(&mut self, mut act: impl FnMut(Action)) {
+        match self.focus {
+            Focus::Remote(peer) => {
+                self.keys.release_all(|code| {
+                    act(Action::Send(
+                        peer,
+                        InputEvent::Key {
+                            code,
+                            pressed: false,
+                        },
+                    ))
+                });
+                self.buttons.release_all(|code| {
+                    act(Action::Send(
+                        peer,
+                        InputEvent::Button {
+                            code,
+                            pressed: false,
+                        },
+                    ))
+                });
+                act(Action::Ungrab);
+            }
+            Focus::WaitingForKeysUp(_) | Focus::Local => {}
+        }
+        self.focus = Focus::Local;
+    }
+
     /// The owner picked `peer` in the switcher (`None`: this PC). Ignored
     /// unless the focus is local and the peer is online.
     pub fn go_to(&mut self, peer: Option<usize>, online: &[bool]) {

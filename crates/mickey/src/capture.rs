@@ -106,7 +106,13 @@ fn classify(path: &Path) -> io::Result<Option<Found>> {
 /// Starts one reader thread per device. A thread ends when its device fails
 /// (e.g. it was unplugged) or the receiver is gone.
 /// `touchpad_speed` is in mouse counts per millimetre (`config.toml`).
-pub fn spawn_readers(devices: &[Found], events: Sender<InputEvent>, touchpad_speed: i32) {
+/// Events go into `events` as any type that can be made from an
+/// `InputEvent`, so the source can share one channel with other wake-ups.
+pub fn spawn_readers<T: From<InputEvent> + Send + 'static>(
+    devices: &[Found],
+    events: Sender<T>,
+    touchpad_speed: i32,
+) {
     for found in devices {
         let device = Arc::clone(&found.device);
         let events = events.clone();
@@ -116,7 +122,7 @@ pub fn spawn_readers(devices: &[Found], events: Sender<InputEvent>, touchpad_spe
         thread::spawn(move || {
             while let Ok(raw) = device.read_event() {
                 let mut closed = false;
-                translator.feed(raw, |event| closed |= events.send(event).is_err());
+                translator.feed(raw, |event| closed |= events.send(T::from(event)).is_err());
                 if closed {
                     return;
                 }
