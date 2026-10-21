@@ -5,13 +5,25 @@ use crate::held::HeldSet;
 use crate::protocol::{self, MAX_FRAME, Message, VERSION};
 use std::io::{self, BufReader, Read, Write};
 use std::net::{SocketAddr, TcpStream};
+use std::time::Duration;
+
+/// How long a send may wait for a target that stopped reading. The kernel
+/// buffers megabytes first, so this only fires when the target is gone or
+/// stuck, never on a slow network.
+const WRITE_TIMEOUT: Duration = Duration::from_secs(1);
 
 /// Connects to a target and says hello. `TCP_NODELAY` stops the kernel from
 /// holding back tiny frames to batch them (Nagle's algorithm), which would
 /// add up to tens of milliseconds of latency.
+///
+/// Sends fail after `WRITE_TIMEOUT` instead of blocking forever, so a
+/// target that stops reading (asleep, crashed, malicious) can never keep
+/// the source's keyboard grabbed: the error ends `mickey source`, which
+/// drops the grabs.
 pub fn connect(addr: SocketAddr) -> io::Result<TcpStream> {
     let mut stream = TcpStream::connect(addr)?;
     stream.set_nodelay(true)?;
+    stream.set_write_timeout(Some(WRITE_TIMEOUT))?;
     send(&mut stream, &Message::Hello { version: VERSION })?;
     Ok(stream)
 }
@@ -199,6 +211,28 @@ mod tests {
                 pressed: false
             })
         );
+    }
+
+    #[test]
+    fn a_target_that_stops_reading_makes_send_fail() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind a free localhost port");
+        let addr = listener
+            .local_addr()
+            .expect("a bound listener has an address");
+        // Accepts, then never reads, until the test ends.
+        let stuck = thread::spawn(move || listener.accept().map(|(stream, _)| stream));
+        let mut source = connect(addr).unwrap();
+        let event = Message::Input(InputEvent::Motion { dx: 1, dy: 1 });
+        let failed = (0..10_000_000).find_map(|_| send(&mut source, &event).err());
+        let kind = failed
+            .expect("send must fail once the buffers are full")
+            .kind();
+        // Linux reports a send timeout as WouldBlock, Windows as TimedOut.
+        assert!(matches!(
+            kind,
+            io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
+        ));
+        drop(stuck);
     }
 
     #[test]
