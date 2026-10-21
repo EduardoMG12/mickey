@@ -7,12 +7,14 @@ usage:
   mickey target --listen <ip:port>   on the machine to be controlled (Windows)
   mickey source --to <ip:port>       on the machine with the keyboard (Linux)
   mickey id                          show this machine's fingerprint
+  mickey forget <fingerprint>        stop trusting a paired machine
 ";
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Command {
     Help,
     Id,
+    Forget { fingerprint: String },
     Source { to: SocketAddr },
     Target { listen: SocketAddr },
 }
@@ -22,6 +24,9 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
         [] => Ok(Command::Help),
         [help] if help == "-h" || help == "--help" || help == "help" => Ok(Command::Help),
         [command] if command == "id" => Ok(Command::Id),
+        [command, fingerprint] if command == "forget" => Ok(Command::Forget {
+            fingerprint: fingerprint.clone(),
+        }),
         [command, flag, addr] if command == "source" && flag == "--to" => Ok(Command::Source {
             to: parse_addr(addr)?,
         }),

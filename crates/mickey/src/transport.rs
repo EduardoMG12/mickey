@@ -14,7 +14,8 @@ use std::time::Duration;
 /// stuck, never on a slow network.
 const WRITE_TIMEOUT: Duration = Duration::from_secs(1);
 
-/// Connects to a target, runs the secure handshake and says hello.
+/// Connects to a target and runs the secure handshake. The caller checks
+/// the target's key (pairing) before saying `hello`.
 /// `TCP_NODELAY` stops the kernel from holding back tiny frames to batch
 /// them (Nagle's algorithm), which would add up to tens of milliseconds.
 ///
@@ -26,12 +27,24 @@ pub fn connect(addr: SocketAddr, identity: &Identity) -> io::Result<Link> {
     let stream = TcpStream::connect(addr)?;
     stream.set_nodelay(true)?;
     stream.set_write_timeout(Some(WRITE_TIMEOUT))?;
-    let mut link = Link::initiate(stream, identity)?;
-    link.send(&Message::Hello { version: VERSION })?;
-    Ok(link)
+    Link::initiate(stream, identity)
 }
 
-/// The target's side of the handshake, for one accepted connection.
+/// Says hello and waits for the target's hello, which it sends only once it
+/// trusts us. Until then nothing else is sent.
+pub fn hello(link: &mut Link) -> io::Result<()> {
+    link.send(&Message::Hello { version: VERSION })?;
+    match link.recv()? {
+        Message::Hello { version: VERSION } => Ok(()),
+        Message::Hello { version } => Err(invalid(format!(
+            "target speaks protocol {version}, this Mickey speaks {VERSION}"
+        ))),
+        _ => Err(invalid("target did not answer with Hello".into())),
+    }
+}
+
+/// The target's side of the handshake, for one accepted connection. The
+/// caller checks the source's key (pairing) before calling `serve`.
 pub fn accept(stream: TcpStream, identity: &Identity) -> io::Result<Link> {
     stream.set_nodelay(true)?;
     stream.set_write_timeout(Some(WRITE_TIMEOUT))?;
@@ -42,8 +55,14 @@ pub fn accept(stream: TcpStream, identity: &Identity) -> io::Result<Link> {
 /// `emit`. Whatever is still held when the connection ends, cleanly or not,
 /// is released through `emit` before returning.
 pub fn serve(link: &mut Link, mut emit: impl FnMut(InputEvent)) -> io::Result<()> {
-    match link.recv()? {
-        Message::Hello { version: VERSION } => {}
+    let first = link.recv().map_err(|err| match err.kind() {
+        io::ErrorKind::UnexpectedEof => {
+            invalid("the source left before saying hello (it may have refused to pair)".into())
+        }
+        _ => err,
+    })?;
+    match first {
+        Message::Hello { version: VERSION } => link.send(&Message::Hello { version: VERSION })?,
         Message::Hello { version } => {
             return Err(invalid(format!(
                 "peer speaks protocol {version}, this Mickey speaks {VERSION}"
@@ -134,7 +153,9 @@ mod tests {
     }
 
     fn source(addr: SocketAddr) -> Link {
-        connect(addr, &Identity::generate().unwrap()).unwrap()
+        let mut link = connect(addr, &Identity::generate().unwrap()).unwrap();
+        hello(&mut link).unwrap();
+        link
     }
 
     const KEY_A: InputEvent = InputEvent::Key {
@@ -217,7 +238,7 @@ mod tests {
             let (stream, _) = listener.accept().expect("the test connects");
             accept(stream, &Identity::generate().unwrap())
         });
-        let mut link = source(addr);
+        let mut link = connect(addr, &Identity::generate().unwrap()).unwrap();
         let event = Message::Input(InputEvent::Motion { dx: 1, dy: 1 });
         let failed = (0..10_000_000).find_map(|_| link.send(&event).err());
         let kind = failed
