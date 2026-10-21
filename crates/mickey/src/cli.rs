@@ -6,7 +6,6 @@ pub const USAGE: &str = "\
 usage:
   mickey target --listen <ip:port>   on the machine to be controlled (Windows)
   mickey source --to <ip:port>       on the machine with the keyboard (Linux)
-  mickey spike                       M0 checks: type on Windows, capture on Linux
 ";
 
 #[derive(Debug, PartialEq, Eq)]
@@ -14,7 +13,6 @@ pub enum Command {
     Help,
     Source { to: SocketAddr },
     Target { listen: SocketAddr },
-    Spike,
 }
 
 pub fn parse(args: &[String]) -> Result<Command, String> {
@@ -27,7 +25,6 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
         [command, flag, addr] if command == "target" && flag == "--listen" => Ok(Command::Target {
             listen: parse_addr(addr)?,
         }),
-        [command] if command == "spike" => Ok(Command::Spike),
         _ => Err(format!(
             "unknown arguments: {}\nrun `mickey --help` for usage",
             args.join(" ")
@@ -73,6 +70,6 @@ mod tests {
         assert!(parse(&args("source 192.0.2.10:4242")).is_err());
         assert!(parse(&args("target --to 192.0.2.10:4242")).is_err());
         assert!(parse(&args("fly")).is_err());
-        assert!(parse(&args("spike /dev/input/event3")).is_err());
+        assert!(parse(&args("spike")).is_err());
     }
 }
