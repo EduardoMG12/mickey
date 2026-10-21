@@ -1,13 +1,27 @@
 //! Hand-written bindings for `SendInput`.
 
+use crate::keymap::MouseButton;
 use std::io;
 use std::mem::size_of;
 
 const INPUT_MOUSE: u32 = 0;
 const INPUT_KEYBOARD: u32 = 1;
+const KEYEVENTF_EXTENDEDKEY: u32 = 0x0001;
 const KEYEVENTF_KEYUP: u32 = 0x0002;
 const KEYEVENTF_SCANCODE: u32 = 0x0008;
 const MOUSEEVENTF_MOVE: u32 = 0x0001;
+const MOUSEEVENTF_LEFTDOWN: u32 = 0x0002;
+const MOUSEEVENTF_LEFTUP: u32 = 0x0004;
+const MOUSEEVENTF_RIGHTDOWN: u32 = 0x0008;
+const MOUSEEVENTF_RIGHTUP: u32 = 0x0010;
+const MOUSEEVENTF_MIDDLEDOWN: u32 = 0x0020;
+const MOUSEEVENTF_MIDDLEUP: u32 = 0x0040;
+const MOUSEEVENTF_XDOWN: u32 = 0x0080;
+const MOUSEEVENTF_XUP: u32 = 0x0100;
+const MOUSEEVENTF_WHEEL: u32 = 0x0800;
+const MOUSEEVENTF_HWHEEL: u32 = 0x1000;
+const XBUTTON1: u32 = 0x0001;
+const XBUTTON2: u32 = 0x0002;
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -55,8 +69,12 @@ unsafe extern "system" {
 }
 
 /// Sends a scan code, so the target's keyboard layout decides the character.
-pub fn send_key(scan_code: u16, pressed: bool) -> io::Result<()> {
+/// `extended` keys (arrows, AltGr, ...) carry the E0 prefix.
+pub fn send_key(scan_code: u16, extended: bool, pressed: bool) -> io::Result<()> {
     let mut flags = KEYEVENTF_SCANCODE;
+    if extended {
+        flags |= KEYEVENTF_EXTENDEDKEY;
+    }
     if !pressed {
         flags |= KEYEVENTF_KEYUP;
     }
@@ -75,14 +93,42 @@ pub fn send_key(scan_code: u16, pressed: bool) -> io::Result<()> {
 }
 
 pub fn move_mouse(dx: i32, dy: i32) -> io::Result<()> {
+    send_mouse(dx, dy, 0, MOUSEEVENTF_MOVE)
+}
+
+pub fn send_button(button: MouseButton, pressed: bool) -> io::Result<()> {
+    let (down, up, data) = match button {
+        MouseButton::Left => (MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP, 0),
+        MouseButton::Right => (MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP, 0),
+        MouseButton::Middle => (MOUSEEVENTF_MIDDLEDOWN, MOUSEEVENTF_MIDDLEUP, 0),
+        MouseButton::X1 => (MOUSEEVENTF_XDOWN, MOUSEEVENTF_XUP, XBUTTON1),
+        MouseButton::X2 => (MOUSEEVENTF_XDOWN, MOUSEEVENTF_XUP, XBUTTON2),
+    };
+    send_mouse(0, 0, data, if pressed { down } else { up })
+}
+
+/// Wheel amounts are in 120ths of a notch; positive is up or right.
+pub fn scroll(vertical: i32, horizontal: i32) -> io::Result<()> {
+    // `mouseData` is a DWORD that Windows reads as signed, so a negative
+    // amount is passed as its two's-complement bits (`as u32`).
+    if vertical != 0 {
+        send_mouse(0, 0, vertical as u32, MOUSEEVENTF_WHEEL)?;
+    }
+    if horizontal != 0 {
+        send_mouse(0, 0, horizontal as u32, MOUSEEVENTF_HWHEEL)?;
+    }
+    Ok(())
+}
+
+fn send_mouse(dx: i32, dy: i32, mouse_data: u32, flags: u32) -> io::Result<()> {
     send(&[Input {
         kind: INPUT_MOUSE,
         data: InputUnion {
             mouse: MouseInput {
                 dx,
                 dy,
-                mouse_data: 0,
-                flags: MOUSEEVENTF_MOVE,
+                mouse_data,
+                flags,
                 time: 0,
                 extra_info: 0,
             },
