@@ -56,8 +56,10 @@ again.
       and the hotkey from any remote peer brings focus home and opens it.
 
 ### Switcher window
-- [ ] A small window in the middle of the source's screen listing *This PC*
-      and every peer by name, marking offline ones and the current focus.
+- [ ] A small window in the middle of the source's screen with one **card**
+      per PC: *This PC* and every peer, with its name, its OS, whether it is
+      online and whether it has the focus. Win+Tab was the owner's visual
+      reference, not something to reuse.
 - [ ] Arrow keys move the selection, Enter or a click switches, Esc closes
       without switching. It never takes longer than one frame to appear
       after the hotkey is released.
@@ -83,6 +85,9 @@ again.
 - Windows as a source (M2): the switcher runs where the keyboard is, which
   is the Linux laptop for now.
 - Automatic discovery of peers on the network (mDNS, later).
+- **Live screen thumbnails** in the cards (like Win+Tab's previews). Each PC
+  would have to capture its screen and stream it, which is heavy and puts
+  screen contents on the network. An idea for later, decided with the owner.
 
 ## Constraints
 
