@@ -1,0 +1,25 @@
+name: Audit
+
+# Checks Cargo.lock against the RustSec advisory database. It runs on every
+# PR and on main, and also weekly: a new advisory can appear for a crate we
+# already use, without any change on our side.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "0 9 * * 1" # Mondays, 09:00 UTC
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+      # Built from source with its own lockfile, so no third-party action or
+      # prebuilt binary is trusted.
+      - run: cargo install cargo-audit --locked
+      - run: cargo audit --deny warnings
