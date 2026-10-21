@@ -41,7 +41,7 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
 
 fn parse_addr(addr: &str) -> Result<SocketAddr, String> {
     addr.parse()
-        .map_err(|_| format!("`{addr}` is not an address like 192.168.0.20:4242"))
+        .map_err(|_| format!("`{addr}` is not an address like 192.0.2.10:4242"))
 }
 
 #[cfg(test)]
@@ -60,13 +60,13 @@ mod tests {
 
     #[test]
     fn source_and_target_take_an_address() {
-        let addr: SocketAddr = "192.168.0.20:4242".parse().unwrap();
+        let addr: SocketAddr = "192.0.2.10:4242".parse().unwrap();
         assert_eq!(
-            parse(&args("source --to 192.168.0.20:4242")),
+            parse(&args("source --to 192.0.2.10:4242")),
             Ok(Command::Source { to: addr })
         );
         assert_eq!(
-            parse(&args("target --listen 192.168.0.20:4242")),
+            parse(&args("target --listen 192.0.2.10:4242")),
             Ok(Command::Target { listen: addr })
         );
     }
@@ -85,8 +85,8 @@ mod tests {
     #[test]
     fn bad_input_is_an_error_not_a_panic() {
         assert!(parse(&args("source --to nowhere")).is_err());
-        assert!(parse(&args("source 192.168.0.20:4242")).is_err());
-        assert!(parse(&args("target --to 192.168.0.20:4242")).is_err());
+        assert!(parse(&args("source 192.0.2.10:4242")).is_err());
+        assert!(parse(&args("target --to 192.0.2.10:4242")).is_err());
         assert!(parse(&args("fly")).is_err());
     }
 }
