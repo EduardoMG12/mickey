@@ -1,3 +1,9 @@
 [workspace]
 members = ["crates/mickey"]
 resolver = "2"
+
+# Dependencies (the cryptography in particular) are optimized even in debug
+# builds: unoptimized ChaCha20 made one test 4x slower. Mickey's own code
+# stays unoptimized, so the debugger still shows every variable.
+[profile.dev.package."*"]
+opt-level = 3

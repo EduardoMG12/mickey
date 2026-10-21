@@ -55,6 +55,9 @@ impl Link {
         &self.peer
     }
 
+    // Only the source clones a link (for its pong reader), so the Windows
+    // build never calls this in M0.
+    #[cfg_attr(windows, allow(dead_code))]
     pub fn try_clone(&self) -> io::Result<Link> {
         Ok(Link {
             stream: self.stream.try_clone()?,
@@ -93,10 +96,6 @@ impl Link {
             .read_message(&sealed[..len], &mut body)
             .map_err(noise_error)?;
         protocol::decode(&body[..body_len]).map_err(|err| invalid(err.to_string()))
-    }
-
-    pub fn stream(&self) -> &TcpStream {
-        &self.stream
     }
 
     /// `writes[i]` says whether this side sends handshake message `i`.
