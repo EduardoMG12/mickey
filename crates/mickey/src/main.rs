@@ -6,10 +6,14 @@ mod cli;
 #[allow(dead_code)]
 mod event;
 #[allow(dead_code)]
+mod held;
+#[allow(dead_code)]
 mod keymap;
 mod platform;
 #[allow(dead_code)]
 mod protocol;
+#[allow(dead_code)]
+mod transport;
 
 use cli::Command;
 use std::path::Path;
