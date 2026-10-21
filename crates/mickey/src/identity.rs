@@ -17,8 +17,6 @@ const FINGERPRINT_BYTES: usize = 20;
 const BASE32: &[u8; 32] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 
 pub struct Identity {
-    // ponytail: read by the Noise handshake in the next PR (#36).
-    #[allow(dead_code)]
     private: [u8; KEY_LEN],
     public: [u8; KEY_LEN],
 }
@@ -30,15 +28,21 @@ impl Identity {
         if path.exists() {
             return load(&path);
         }
+        let identity = Identity::generate()?;
+        save(dir, &path, &identity.private)?;
+        Ok(identity)
+    }
+
+    /// A new random identity, only in memory.
+    pub fn generate() -> Result<Identity, String> {
         let builder = snow::Builder::new(NOISE_PARAMS.parse().map_err(|err| format!("{err}"))?);
         let keypair = builder
             .generate_keypair()
             .map_err(|err| format!("cannot generate a key: {err}"))?;
-        let private: [u8; KEY_LEN] = keypair
+        let private = keypair
             .private
             .try_into()
             .map_err(|_| "unexpected private key length".to_string())?;
-        save(dir, &path, &private)?;
         Identity::from_private(private)
     }
 
@@ -52,6 +56,16 @@ impl Identity {
             .try_into()
             .map_err(|_| "unexpected public key length".to_string())?;
         Ok(Identity { private, public })
+    }
+
+    /// For the Noise handshake only; never print or send it.
+    pub fn private(&self) -> &[u8; KEY_LEN] {
+        &self.private
+    }
+
+    #[cfg(test)]
+    pub fn public(&self) -> &[u8; KEY_LEN] {
+        &self.public
     }
 
     pub fn fingerprint(&self) -> String {
@@ -190,7 +204,7 @@ mod tests {
         let dir = temp_dir("create");
         let first = Identity::load_or_create(&dir).unwrap();
         let second = Identity::load_or_create(&dir).unwrap();
-        assert_eq!(first.public, second.public);
+        assert_eq!(first.public(), second.public());
         assert_eq!(first.private, second.private);
         fs::remove_dir_all(&dir).unwrap();
     }
