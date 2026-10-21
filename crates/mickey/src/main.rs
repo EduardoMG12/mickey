@@ -3,6 +3,7 @@
 #[cfg(target_os = "linux")]
 mod capture;
 mod cli;
+mod config;
 #[cfg(windows)]
 mod emit;
 mod event;
@@ -68,7 +69,27 @@ fn run(command: Command) -> Result<(), String> {
                 Err(format!("no trusted peer has the fingerprint {fingerprint}"))
             }
         }
-        Command::Source { to } => source(to),
+        Command::Source { to } => {
+            let config = config::Config::load()?;
+            let touchpad_speed = config
+                .as_ref()
+                .map_or(config::Touchpad::default().speed, |config| {
+                    config.touchpad.speed
+                });
+            // ponytail: only the first peer until several PCs land (#46).
+            let to = match (to, config.as_ref().and_then(|config| config.peers.first())) {
+                (Some(to), _) => to,
+                (None, Some(peer)) => peer.address,
+                (None, None) => {
+                    return Err(format!(
+                        "no peer to connect to: pass --to <ip:port>, or list peers in {}, e.g.\n\n{}",
+                        config::path()?.display(),
+                        config::EXAMPLE
+                    ));
+                }
+            };
+            source(to, touchpad_speed)
+        }
         Command::Target { listen } => target(listen),
     }
 }
@@ -192,7 +213,7 @@ fn open_devices() -> Result<Vec<capture::Found>, String> {
 
 /// Captures local input and sends it to `to` while focus is remote.
 #[cfg(target_os = "linux")]
-fn source(to: SocketAddr) -> Result<(), String> {
+fn source(to: SocketAddr, touchpad_speed: i32) -> Result<(), String> {
     use focus::{Action, Focus, Switcher};
     use latency::Latency;
     use std::sync::mpsc::{self, RecvTimeoutError};
@@ -237,7 +258,7 @@ fn source(to: SocketAddr) -> Result<(), String> {
     let mut next_ping = start;
 
     let (sender, events) = mpsc::channel();
-    capture::spawn_readers(&devices, sender);
+    capture::spawn_readers(&devices, sender, touchpad_speed);
     let mut switcher = Switcher::new();
     // Dropping a `Grab` gives its device back, on every way out of here,
     // including `?` and panics.
@@ -306,6 +327,6 @@ fn source(to: SocketAddr) -> Result<(), String> {
 }
 
 #[cfg(not(target_os = "linux"))]
-fn source(_to: SocketAddr) -> Result<(), String> {
+fn source(_to: SocketAddr, _touchpad_speed: i32) -> Result<(), String> {
     Err("in M0 the source runs only on Linux (Windows sources come in M2)".into())
 }

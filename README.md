@@ -59,6 +59,18 @@ sudo usermod -aG input $USER                    # then log out and in again
 mickey source --to 192.0.2.10:4242              # the Windows PC's address
 ```
 
+Instead of `--to`, you can list your PCs in `~/.config/mickey/config.toml`
+(`%APPDATA%\mickey\config.toml` on Windows) and run `mickey source`:
+
+```toml
+[[peer]]
+name = "Desktop"
+address = "192.0.2.10:4242"
+
+[touchpad]
+speed = 16      # higher is faster (1-200)
+```
+
 Press and release **AltGr + Right Shift** to send the keyboard and touchpad
 (or mouse) to Windows; press it again to bring them back. `mickey --help`
 lists the commands.
@@ -67,7 +79,7 @@ lists the commands.
 
 - **Hotkey only**, no screen edges yet (M1a). The hotkey is fixed.
 - **Touchpad:** one-finger motion and the physical click work; tap to click
-  and two-finger scroll do not yet. The speed is fixed.
+  and two-finger scroll do not yet. The speed is set in `config.toml`.
 - **Windows won't take input** in the lock screen, the UAC prompt,
   `Ctrl+Alt+Del` or windows running as administrator. That is a Windows rule.
 - **The keyboard layout is Windows'**: keys are sent by position, so set
