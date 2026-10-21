@@ -31,9 +31,6 @@ const BTN_TOOL_FINGER: u16 = 0x145;
 const MOUSE_BUTTONS: std::ops::RangeInclusive<u16> = 0x110..=0x117;
 /// One wheel notch in hi-res units.
 const NOTCH: i32 = 120;
-// ponytail: one fixed touchpad speed, tuned by hand on the owner's laptop;
-// it becomes a setting with config.toml in M1a.
-const COUNTS_PER_MM: i32 = 16;
 /// Used when a touchpad does not report its resolution.
 const FALLBACK_UNITS_PER_MM: i32 = 10;
 
@@ -108,11 +105,13 @@ fn classify(path: &Path) -> io::Result<Option<Found>> {
 
 /// Starts one reader thread per device. A thread ends when its device fails
 /// (e.g. it was unplugged) or the receiver is gone.
-pub fn spawn_readers(devices: &[Found], events: Sender<InputEvent>) {
+/// `touchpad_speed` is in mouse counts per millimetre (`config.toml`).
+pub fn spawn_readers(devices: &[Found], events: Sender<InputEvent>, touchpad_speed: i32) {
     for found in devices {
         let device = Arc::clone(&found.device);
         let events = events.clone();
-        let touchpad = (found.kind == Kind::Touchpad).then(|| Touchpad::new(found.resolution));
+        let touchpad =
+            (found.kind == Kind::Touchpad).then(|| Touchpad::new(found.resolution, touchpad_speed));
         let mut translator = Translator::new(found.hi_res_wheel, touchpad);
         thread::spawn(move || {
             while let Ok(raw) = device.read_event() {
@@ -209,6 +208,8 @@ impl Translator {
 struct Touchpad {
     /// Device units per millimetre on X and Y.
     resolution: [i32; 2],
+    /// Mouse counts per millimetre of finger travel.
+    speed: i32,
     one_finger: bool,
     position: [i32; 2],
     /// Position at the previous report; `None` right after a finger lands,
@@ -219,9 +220,10 @@ struct Touchpad {
 }
 
 impl Touchpad {
-    fn new(resolution: [i32; 2]) -> Touchpad {
+    fn new(resolution: [i32; 2], speed: i32) -> Touchpad {
         Touchpad {
             resolution,
+            speed,
             one_finger: false,
             position: [0; 2],
             last: None,
@@ -252,7 +254,7 @@ impl Touchpad {
         };
         let mut moved = [0; 2];
         for axis in 0..2 {
-            let scaled = (self.position[axis] - last[axis]) * COUNTS_PER_MM + self.remainder[axis];
+            let scaled = (self.position[axis] - last[axis]) * self.speed + self.remainder[axis];
             moved[axis] = scaled / self.resolution[axis];
             self.remainder[axis] = scaled % self.resolution[axis];
         }
@@ -343,9 +345,11 @@ mod tests {
         );
     }
 
+    const SPEED: i32 = 16;
+
     /// A touchpad with 24 units per millimetre, like the owner's.
     fn touchpad(raw: &[(u16, u16, i32)]) -> Vec<InputEvent> {
-        let mut translator = Translator::new(false, Some(Touchpad::new([24, 24])));
+        let mut translator = Translator::new(false, Some(Touchpad::new([24, 24], SPEED)));
         let mut out = Vec::new();
         for &(kind, code, value) in raw {
             translator.feed(RawEvent { kind, code, value }, |event| out.push(event));
@@ -366,13 +370,7 @@ mod tests {
             (EV_ABS, ABS_X, 1024), // 1 mm right
             SYN,
         ]);
-        assert_eq!(
-            out,
-            [InputEvent::Motion {
-                dx: COUNTS_PER_MM,
-                dy: 0
-            }]
-        );
+        assert_eq!(out, [InputEvent::Motion { dx: SPEED, dy: 0 }]);
     }
 
     #[test]

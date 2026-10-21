@@ -119,4 +119,13 @@ again.
 
 ## Discoveries
 
-*(Filled in during execution.)*
+### Ticket 1 — config.toml (2026-10-21)
+
+- **`toml` with only `parse` and `serde`**, plus `serde` with `derive`:
+  11 more crates (37 in total), all Rust; `cargo audit` is clean.
+- **`deny_unknown_fields` gives the best error for free:** a misspelled key
+  is reported with its line, column and the keys that were expected
+  (`unknown field adress, expected name or address`).
+- **The touchpad speed left its `ponytail`:** `[touchpad] speed` (1–200,
+  default 16) replaces the constant from M0.
+- Until #46, `mickey source` without `--to` uses only the first peer.
