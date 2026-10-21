@@ -11,6 +11,7 @@ mod focus;
 mod held;
 #[cfg(target_os = "linux")]
 mod hotkey;
+mod identity;
 #[cfg(target_os = "linux")]
 mod latency;
 // The source never translates keys for Windows; only the target does.
@@ -49,6 +50,11 @@ fn run(command: Command) -> Result<(), String> {
     match command {
         Command::Help => {
             print!("{}", cli::USAGE);
+            Ok(())
+        }
+        Command::Id => {
+            let identity = identity::Identity::load_or_create(&identity::data_dir()?)?;
+            println!("{}", identity.fingerprint());
             Ok(())
         }
         Command::Source { to } => {

@@ -134,4 +134,18 @@ impossible to brute-force.
 
 ## Discoveries
 
-*(Filled in during execution.)*
+### Ticket 1 — identity (2026-10-21)
+
+- **Only the private key is stored** (32 bytes). The public key is derived
+  from it on load with snow's X25519, so the two can never disagree.
+- **`snow` without default features.** Its `std` feature also turns on
+  `ring` (C and assembly) and `sha2`, which we do not use. Enabling only
+  `use-curve25519`, `use-chacha20poly1305`, `use-blake2` and
+  `use-getrandom` leaves 26 crates, all Rust. `cargo audit` reports no
+  advisories for them.
+- **Windows permissions come from the profile.** `%APPDATA%\mickey\identity`
+  inherits SYSTEM, Administrators and the user, nobody else, so no ACL code
+  is needed. On Linux the directory is `0700` and the file `0600`, and a
+  file readable by others is refused.
+- **Checked:** `mickey id` prints the same fingerprint on every run on the
+  owner's laptop and Windows PC.
