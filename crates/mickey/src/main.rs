@@ -22,6 +22,9 @@ mod platform;
 // build uses half of these. Both halves run on Linux in M1a (`uinput`).
 #[allow(dead_code)]
 mod protocol;
+// ponytail: used only by tests until source and target switch to it (#36).
+#[allow(dead_code)]
+mod secure;
 #[allow(dead_code)]
 mod transport;
 
