@@ -5,23 +5,26 @@ mod capture;
 mod cli;
 #[cfg(windows)]
 mod emit;
-// ponytail: on Linux these are used only by tests until the source is wired
-// (M0 steps 6 and 7, #13 and #14).
-#[allow(dead_code)]
 mod event;
-#[allow(dead_code)]
+#[cfg(target_os = "linux")]
+mod focus;
 mod held;
-#[allow(dead_code)]
+#[cfg(target_os = "linux")]
 mod hotkey;
-#[allow(dead_code)]
+// The source never translates keys for Windows; only the target does.
+#[cfg_attr(not(windows), allow(dead_code))]
 mod keymap;
 mod platform;
+// ponytail: in M0 Linux is only a source and Windows only a target, so each
+// build uses half of these. Both halves run on Linux in M1a (`uinput`).
 #[allow(dead_code)]
 mod protocol;
 #[allow(dead_code)]
 mod transport;
 
 use cli::Command;
+#[cfg(target_os = "linux")]
+use protocol::Message;
 use std::net::SocketAddr;
 
 fn main() {
@@ -48,9 +51,7 @@ fn run(command: Command) -> Result<(), String> {
         }
         Command::Source { to } => {
             warn_unencrypted();
-            Err(format!(
-                "sending to {to} is not implemented yet (M0 step 3)"
-            ))
+            source(to)
         }
         Command::Target { listen } => {
             warn_unencrypted();
@@ -107,6 +108,99 @@ fn target(_listen: SocketAddr) -> Result<(), String> {
     Err("in M0 the target runs only on Windows (Linux targets come in M1a)".into())
 }
 
+/// Every keyboard and mouse, with a clear message when we may not read them.
+#[cfg(target_os = "linux")]
+fn open_devices() -> Result<Vec<capture::Found>, String> {
+    let devices = capture::find_devices().map_err(|err| match err.kind() {
+        std::io::ErrorKind::PermissionDenied => "cannot read /dev/input: permission denied; run \
+             `sudo usermod -aG input $USER`, then log in again (or use `newgrp input`)"
+            .to_string(),
+        _ => format!("cannot list input devices: {err}"),
+    })?;
+    if devices.is_empty() {
+        return Err("no keyboard or mouse found under /dev/input".into());
+    }
+    for found in &devices {
+        let kind = if found.is_keyboard {
+            "keyboard"
+        } else {
+            "mouse"
+        };
+        println!("mickey: found {kind}: {}", found.name);
+    }
+    Ok(devices)
+}
+
+/// Captures local input and sends it to `to` while focus is remote.
+#[cfg(target_os = "linux")]
+fn source(to: SocketAddr) -> Result<(), String> {
+    use focus::{Action, Focus, Switcher};
+    use std::sync::mpsc::{self, RecvTimeoutError};
+    use std::time::Duration;
+
+    let devices = open_devices()?;
+    let mut stream =
+        transport::connect(to).map_err(|err| format!("cannot connect to {to}: {err}"))?;
+    println!("mickey: connected to {to}; AltGr + Right Shift switches focus");
+
+    let (sender, events) = mpsc::channel();
+    capture::spawn_readers(&devices, sender);
+    let mut switcher = Switcher::new();
+    // Dropping a `Grab` gives its device back, on every way out of here,
+    // including `?` and panics.
+    let mut grabs = Vec::new();
+    loop {
+        if switcher.focus() == Focus::WaitingForKeysUp
+            && !devices
+                .iter()
+                .any(|found| found.device.any_key_down().unwrap_or(true))
+        {
+            grabs = devices
+                .iter()
+                .map(|found| found.device.grab())
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|err| format!("cannot grab the input devices: {err}"))?;
+            switcher.grabbed();
+            println!("mickey: focus is on {to}");
+        }
+
+        // Poll only while waiting for keys to go up; otherwise sleep until
+        // there is input, so an idle source uses no CPU.
+        let event = if switcher.focus() == Focus::WaitingForKeysUp {
+            match events.recv_timeout(Duration::from_millis(10)) {
+                Ok(event) => event,
+                Err(RecvTimeoutError::Timeout) => continue,
+                Err(RecvTimeoutError::Disconnected) => break,
+            }
+        } else {
+            match events.recv() {
+                Ok(event) => event,
+                Err(_) => break,
+            }
+        };
+
+        let mut sent = Ok(());
+        switcher.handle(event, |action| match action {
+            Action::Send(event) => {
+                if sent.is_ok() {
+                    sent = transport::send(&mut stream, &Message::Input(event));
+                }
+            }
+            Action::Ungrab => {
+                grabs.clear();
+                println!("mickey: focus is back here");
+            }
+        });
+        sent.map_err(|err| format!("lost the connection to {to}: {err}"))?;
+    }
+    Err("every input device is gone".into())
+}
+
+#[cfg(not(target_os = "linux"))]
+fn source(_to: SocketAddr) -> Result<(), String> {
+    Err("in M0 the source runs only on Linux (Windows sources come in M2)".into())
+}
+
 #[cfg(target_os = "linux")]
 fn spike() -> Result<(), String> {
     capture_demo()
@@ -130,23 +224,7 @@ fn capture_demo() -> Result<(), String> {
     const KEY_RIGHTALT: u16 = 100; // AltGr
     const GRAB_LIMIT: Duration = Duration::from_secs(10);
 
-    let devices = capture::find_devices().map_err(|err| match err.kind() {
-        std::io::ErrorKind::PermissionDenied => "cannot read /dev/input: permission denied; run \
-             `sudo usermod -aG input $USER`, then log in again (or use `newgrp input`)"
-            .to_string(),
-        _ => format!("cannot list input devices: {err}"),
-    })?;
-    if devices.is_empty() {
-        return Err("no keyboard or mouse found under /dev/input".into());
-    }
-    for found in &devices {
-        let kind = if found.is_keyboard {
-            "keyboard"
-        } else {
-            "mouse"
-        };
-        println!("mickey: found {kind}: {}", found.name);
-    }
+    let devices = open_devices()?;
 
     // Grabbing while a key is held leaves it stuck down on the desktop.
     println!("mickey: waiting until no key is held");

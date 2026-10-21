@@ -88,13 +88,16 @@ lazily. See `docs/agents/domain.md`.
 
 ## Current state
 
-M0 in progress, tracked in issue #5 (tickets #6–#15). Done: spike 0b
-(`SendInput`, merged in #16) and spike 0a (evdev grab). Decided: M0 is
-Linux → Windows 10 with the hotkey AltGr + Right Shift (on release; the
-owner's laptop has no Right Ctrl); M1a adds screen edges, 3+ PCs and a
+M0 tracked in issue #5. Working end to end (2026-10-21): `mickey target` on
+Windows, `mickey source` on Linux, AltGr + Right Shift switches the laptop
+keyboard between them. Left: the touchpad as a mouse (#18, it sends absolute
+positions), latency and the 10-minute check (#15). Decided: M0 is Linux →
+Windows 10 with the hotkey AltGr + Right Shift (on release; the owner's
+laptop has no Right Ctrl); M1a adds screen edges, 3+ PCs, encryption and a
 configurable hotkey; M1b adds a setup GUI; peers are symmetric; the hotkey
-stays as the way home after edges exist. Glossary in `CONTEXT.md`. Open: how
-to capture the owner's touchpad (absolute positions, see PRD 0001
-*Discoveries*); for the M1a grill, Ubuntu KDE on Wayland or X11, and whether
-the layout places peers or monitors. Windows builds are cross-compiled from
-Arch and tested over SSH (see PRD 0001 *Discoveries*).
+stays as the way home after edges exist. Glossary in `CONTEXT.md`. Open for
+the M1a grill: Ubuntu KDE on Wayland or X11, whether the layout places peers
+or monitors, and the Wayland InputCapture portal instead of the `input`
+group. Windows builds are cross-compiled from Arch and tested over SSH (see
+PRD 0001 *Discoveries*). Never put the owner's IPs or usernames in the repo;
+examples use `192.0.2.0/24`.
