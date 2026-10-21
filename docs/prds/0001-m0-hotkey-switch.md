@@ -199,4 +199,26 @@ Order of work (each step is one PR, each ≤ ~300 lines):
 
 ## Discoveries
 
-*(Filled in during execution.)*
+### Spike 0b — `SendInput` on Windows (2026-10-21)
+
+- **Bindings: hand-written.** One function (`SendInput`) and three structs
+  (`INPUT`, `MOUSEINPUT`, `KEYBDINPUT`) in `platform/windows.rs`, about 60
+  lines. A compile-time assertion checks `size_of::<Input>() == 40`, the size
+  of `INPUT` on 64-bit Windows, because a wrong layout makes the call fail.
+  `windows-sys` is not needed.
+- **Build: cross-compile from Arch.** `rustup target add
+  x86_64-pc-windows-gnu` plus `mingw-w64-gcc`, then
+  `cargo build --target x86_64-pc-windows-gnu`. No Rust on the Windows PC.
+  The `.exe` is copied over SSH (OpenSSH Server on Windows 10 19045).
+- **SSH cannot inject input directly.** A program started from `sshd` runs in
+  session 0 (`services`), not the owner's desktop (session 1, `console`), and
+  `SendInput` fails there with "Access denied" (os error 5). To test from
+  Linux, run it in the interactive session through a scheduled task:
+  `schtasks /create /tn mickey-spike /tr "cmd /k C:\mickey\mickey.exe" /sc once /st 23:59 /it /f`
+  then `schtasks /run /tn mickey-spike`.
+- **The console window takes focus.** `mickey.exe` is a console program, so
+  launching it opens a terminal that receives the injected keys. Expected:
+  in M0 the target runs in a terminal anyway, and input goes to whatever
+  window has focus, like a real keyboard.
+- **Checked:** "hello" typed by scan code and the cursor drew a square on
+  the owner's Windows 10.
