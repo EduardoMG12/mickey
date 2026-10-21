@@ -22,8 +22,6 @@ mod platform;
 // build uses half of these. Both halves run on Linux in M1a (`uinput`).
 #[allow(dead_code)]
 mod protocol;
-// ponytail: used only by tests until source and target switch to it (#36).
-#[allow(dead_code)]
 mod secure;
 #[allow(dead_code)]
 mod transport;
@@ -61,19 +59,20 @@ fn run(command: Command) -> Result<(), String> {
             Ok(())
         }
         Command::Source { to } => {
-            warn_unencrypted();
+            warn_unpaired();
             source(to)
         }
         Command::Target { listen } => {
-            warn_unencrypted();
+            warn_unpaired();
             target(listen)
         }
     }
 }
 
-fn warn_unencrypted() {
-    eprintln!("mickey: WARNING: traffic is not encrypted; use only on a trusted network");
-    eprintln!("mickey: do not type passwords through Mickey until encryption lands (M1a)");
+// ponytail: removed by pairing (#37), which makes peers trust only known keys.
+fn warn_unpaired() {
+    eprintln!("mickey: WARNING: traffic is encrypted, but peers are not paired yet:");
+    eprintln!("mickey: any machine on the network can connect; use only on a trusted network");
 }
 
 /// Serves one source at a time, forever, injecting what it sends.
@@ -82,6 +81,7 @@ fn target(listen: SocketAddr) -> Result<(), String> {
     use std::io::ErrorKind;
     use std::net::TcpListener;
 
+    let identity = identity::Identity::load_or_create(&identity::data_dir()?)?;
     let listener = TcpListener::bind(listen).map_err(|err| match err.kind() {
         ErrorKind::AddrInUse => format!("{listen} is already in use; is another Mickey running?"),
         ErrorKind::AddrNotAvailable => format!("{listen} is not an address of this machine"),
@@ -96,9 +96,19 @@ fn target(listen: SocketAddr) -> Result<(), String> {
                 continue;
             }
         };
-        println!("mickey: source {peer} connected");
+        let mut link = match transport::accept(stream, &identity) {
+            Ok(link) => link,
+            Err(err) => {
+                eprintln!("mickey: {peer} failed the secure handshake: {err}");
+                continue;
+            }
+        };
+        println!(
+            "mickey: source {peer} connected, fingerprint {}",
+            identity::fingerprint(link.peer_key())
+        );
         let mut reported = false;
-        let result = transport::serve(&stream, |event| {
+        let result = transport::serve(&mut link, |event| {
             if let Err(err) = emit::emit(event)
                 && !reported
             {
@@ -153,18 +163,23 @@ fn source(to: SocketAddr) -> Result<(), String> {
     const KEYS_UP_POLL: Duration = Duration::from_millis(10);
 
     let devices = open_devices()?;
-    let mut stream =
-        transport::connect(to).map_err(|err| format!("cannot connect to {to}: {err}"))?;
-    println!("mickey: connected to {to}; AltGr + Right Shift switches focus");
+    let identity = identity::Identity::load_or_create(&identity::data_dir()?)?;
+    let mut link = transport::connect(to, &identity)
+        .map_err(|err| format!("cannot connect to {to}: {err}"))?;
+    println!(
+        "mickey: connected to {to}, fingerprint {}",
+        identity::fingerprint(link.peer_key())
+    );
+    println!("mickey: AltGr + Right Shift switches focus");
 
     // Pongs come back on their own thread, as round-trip times.
     let start = Instant::now();
-    let mut reader = stream
+    let mut reader = link
         .try_clone()
         .map_err(|err| format!("cannot read from {to}: {err}"))?;
     let (pong_sender, pongs) = mpsc::channel();
     std::thread::spawn(move || {
-        while let Ok(message) = transport::read_message(&mut reader) {
+        while let Ok(message) = reader.recv() {
             if let Message::Pong { id } = message
                 && pong_sender.send(latency::round_trip(start, id)).is_err()
             {
@@ -201,7 +216,7 @@ fn source(to: SocketAddr) -> Result<(), String> {
             let ping = Message::Ping {
                 id: latency::ping_id(start),
             };
-            transport::send(&mut stream, &ping)
+            link.send(&ping)
                 .map_err(|err| format!("lost the connection to {to}: {err}"))?;
             next_ping = now + PING_EVERY;
         }
@@ -222,7 +237,7 @@ fn source(to: SocketAddr) -> Result<(), String> {
         switcher.handle(event, |action| match action {
             Action::Send(event) => {
                 if sent.is_ok() {
-                    sent = transport::send(&mut stream, &Message::Input(event));
+                    sent = link.send(&Message::Input(event));
                 }
             }
             Action::Ungrab => {

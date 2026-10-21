@@ -1,9 +1,11 @@
-//! One TCP connection from source to target, carrying protocol frames.
+//! The connection from source to target: TCP carrying the secure link.
 
 use crate::event::InputEvent;
 use crate::held::HeldSet;
-use crate::protocol::{self, MAX_FRAME, Message, VERSION};
-use std::io::{self, BufReader, Read, Write};
+use crate::identity::Identity;
+use crate::protocol::{Message, VERSION};
+use crate::secure::Link;
+use std::io;
 use std::net::{SocketAddr, TcpStream};
 use std::time::Duration;
 
@@ -12,50 +14,35 @@ use std::time::Duration;
 /// stuck, never on a slow network.
 const WRITE_TIMEOUT: Duration = Duration::from_secs(1);
 
-/// Connects to a target and says hello. `TCP_NODELAY` stops the kernel from
-/// holding back tiny frames to batch them (Nagle's algorithm), which would
-/// add up to tens of milliseconds of latency.
+/// Connects to a target, runs the secure handshake and says hello.
+/// `TCP_NODELAY` stops the kernel from holding back tiny frames to batch
+/// them (Nagle's algorithm), which would add up to tens of milliseconds.
 ///
 /// Sends fail after `WRITE_TIMEOUT` instead of blocking forever, so a
 /// target that stops reading (asleep, crashed, malicious) can never keep
 /// the source's keyboard grabbed: the error ends `mickey source`, which
 /// drops the grabs.
-pub fn connect(addr: SocketAddr) -> io::Result<TcpStream> {
-    let mut stream = TcpStream::connect(addr)?;
+pub fn connect(addr: SocketAddr, identity: &Identity) -> io::Result<Link> {
+    let stream = TcpStream::connect(addr)?;
     stream.set_nodelay(true)?;
     stream.set_write_timeout(Some(WRITE_TIMEOUT))?;
-    send(&mut stream, &Message::Hello { version: VERSION })?;
-    Ok(stream)
+    let mut link = Link::initiate(stream, identity)?;
+    link.send(&Message::Hello { version: VERSION })?;
+    Ok(link)
 }
 
-pub fn send(writer: &mut impl Write, message: &Message) -> io::Result<()> {
-    let mut frame = [0u8; MAX_FRAME];
-    let len = protocol::encode(message, &mut frame);
-    writer.write_all(&frame[..len])
-}
-
-/// Reads exactly one frame. A clean end of stream is `UnexpectedEof`.
-pub fn read_message(reader: &mut impl Read) -> io::Result<Message> {
-    let mut len = [0u8; 1];
-    reader.read_exact(&mut len)?;
-    let len = usize::from(len[0]);
-    if len == 0 || len > MAX_FRAME - 1 {
-        return Err(invalid(format!("frame length {len} is out of range")));
-    }
-    let mut body = [0u8; MAX_FRAME - 1];
-    reader.read_exact(&mut body[..len])?;
-    protocol::decode(&body[..len]).map_err(|err| invalid(err.to_string()))
+/// The target's side of the handshake, for one accepted connection.
+pub fn accept(stream: TcpStream, identity: &Identity) -> io::Result<Link> {
+    stream.set_nodelay(true)?;
+    stream.set_write_timeout(Some(WRITE_TIMEOUT))?;
+    Link::respond(stream, identity)
 }
 
 /// Serves one source until it disconnects, passing every input event to
 /// `emit`. Whatever is still held when the connection ends, cleanly or not,
 /// is released through `emit` before returning.
-pub fn serve(stream: &TcpStream, mut emit: impl FnMut(InputEvent)) -> io::Result<()> {
-    stream.set_nodelay(true)?;
-    let mut reader = BufReader::new(stream);
-    let mut writer = stream;
-
-    match read_message(&mut reader)? {
+pub fn serve(link: &mut Link, mut emit: impl FnMut(InputEvent)) -> io::Result<()> {
+    match link.recv()? {
         Message::Hello { version: VERSION } => {}
         Message::Hello { version } => {
             return Err(invalid(format!(
@@ -68,7 +55,7 @@ pub fn serve(stream: &TcpStream, mut emit: impl FnMut(InputEvent)) -> io::Result
     let mut keys = HeldSet::new();
     let mut buttons = HeldSet::new();
     let result = loop {
-        let message = match read_message(&mut reader) {
+        let message = match link.recv() {
             Ok(message) => message,
             Err(err) if err.kind() == io::ErrorKind::UnexpectedEof => break Ok(()),
             Err(err) => break Err(err),
@@ -84,7 +71,7 @@ pub fn serve(stream: &TcpStream, mut emit: impl FnMut(InputEvent)) -> io::Result
             }
             Message::ReleaseAll => release_all(&mut keys, &mut buttons, &mut emit),
             Message::Ping { id } => {
-                if let Err(err) = send(&mut writer, &Message::Pong { id }) {
+                if let Err(err) = link.send(&Message::Pong { id }) {
                     break Err(err);
                 }
             }
@@ -124,29 +111,42 @@ mod tests {
     /// What the fake target returns: how `serve` ended and what it emitted.
     type Outcome = (io::Result<()>, Vec<InputEvent>);
 
-    /// Starts a target with a fake emitter that records what it is given.
-    fn fake_target() -> (SocketAddr, thread::JoinHandle<Outcome>) {
+    fn listener() -> (TcpListener, SocketAddr) {
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind a free localhost port");
         let addr = listener
             .local_addr()
             .expect("a bound listener has an address");
+        (listener, addr)
+    }
+
+    /// Starts a target with a fake emitter that records what it is given.
+    fn fake_target() -> (SocketAddr, thread::JoinHandle<Outcome>) {
+        let (listener, addr) = listener();
         let handle = thread::spawn(move || {
             let (stream, _) = listener.accept().expect("the test connects");
+            let identity = Identity::generate().unwrap();
+            let mut link = accept(stream, &identity).expect("handshake");
             let mut emitted = Vec::new();
-            let result = serve(&stream, |event| emitted.push(event));
+            let result = serve(&mut link, |event| emitted.push(event));
             (result, emitted)
         });
         (addr, handle)
     }
 
+    fn source(addr: SocketAddr) -> Link {
+        connect(addr, &Identity::generate().unwrap()).unwrap()
+    }
+
+    const KEY_A: InputEvent = InputEvent::Key {
+        code: 30,
+        pressed: true,
+    };
+
     #[test]
     fn events_cross_and_disconnect_releases_held_keys() {
         let (addr, target) = fake_target();
         let captured = [
-            InputEvent::Key {
-                code: 30,
-                pressed: true,
-            },
+            KEY_A,
             InputEvent::Motion { dx: 5, dy: -3 },
             InputEvent::Button {
                 code: 0x110,
@@ -162,11 +162,11 @@ mod tests {
             },
         ];
         {
-            let mut source = connect(addr).unwrap();
+            let mut link = source(addr);
             for event in captured {
-                send(&mut source, &Message::Input(event)).unwrap();
+                link.send(&Message::Input(event)).unwrap();
             }
-        } // `source` is dropped here while key 30 is still held
+        } // the link is dropped here while key 30 is still held
 
         let (result, emitted) = target.join().unwrap();
         assert!(result.is_ok());
@@ -181,49 +181,45 @@ mod tests {
     #[test]
     fn ping_gets_a_pong() {
         let (addr, target) = fake_target();
-        let mut source = connect(addr).unwrap();
-        send(&mut source, &Message::Ping { id: 42 }).unwrap();
-        assert_eq!(read_message(&mut source).unwrap(), Message::Pong { id: 42 });
-        drop(source);
+        let mut link = source(addr);
+        link.send(&Message::Ping { id: 42 }).unwrap();
+        assert_eq!(link.recv().unwrap(), Message::Pong { id: 42 });
+        drop(link);
         assert!(target.join().unwrap().0.is_ok());
     }
 
     #[test]
-    fn garbage_closes_the_connection_and_still_releases() {
+    fn a_protocol_error_closes_the_link_and_still_releases() {
         let (addr, target) = fake_target();
-        let mut source = connect(addr).unwrap();
-        send(
-            &mut source,
-            &Message::Input(InputEvent::Key {
-                code: 42,
-                pressed: true,
-            }),
-        )
-        .unwrap();
-        source.write_all(&[2, 99, 0]).unwrap(); // message type 99 does not exist
+        let mut link = source(addr);
+        link.send(&Message::Input(KEY_A)).unwrap();
+        link.send(&Message::Hello { version: VERSION }).unwrap(); // a second Hello
 
         let (result, emitted) = target.join().unwrap();
         assert_eq!(result.unwrap_err().kind(), io::ErrorKind::InvalidData);
         assert_eq!(
-            emitted.last(),
-            Some(&InputEvent::Key {
-                code: 42,
-                pressed: false
-            })
+            emitted,
+            [
+                KEY_A,
+                InputEvent::Key {
+                    code: 30,
+                    pressed: false
+                }
+            ]
         );
     }
 
     #[test]
     fn a_target_that_stops_reading_makes_send_fail() {
-        let listener = TcpListener::bind("127.0.0.1:0").expect("bind a free localhost port");
-        let addr = listener
-            .local_addr()
-            .expect("a bound listener has an address");
-        // Accepts, then never reads, until the test ends.
-        let stuck = thread::spawn(move || listener.accept().map(|(stream, _)| stream));
-        let mut source = connect(addr).unwrap();
+        let (listener, addr) = listener();
+        // Answers the handshake, then never reads, until the test ends.
+        let stuck = thread::spawn(move || {
+            let (stream, _) = listener.accept().expect("the test connects");
+            accept(stream, &Identity::generate().unwrap())
+        });
+        let mut link = source(addr);
         let event = Message::Input(InputEvent::Motion { dx: 1, dy: 1 });
-        let failed = (0..10_000_000).find_map(|_| send(&mut source, &event).err());
+        let failed = (0..10_000_000).find_map(|_| link.send(&event).err());
         let kind = failed
             .expect("send must fail once the buffers are full")
             .kind();
@@ -238,13 +234,11 @@ mod tests {
     #[test]
     fn wrong_version_is_refused() {
         let (addr, target) = fake_target();
-        let mut source = TcpStream::connect(addr).unwrap();
-        send(
-            &mut source,
-            &Message::Hello {
-                version: VERSION + 1,
-            },
-        )
+        let stream = TcpStream::connect(addr).unwrap();
+        let mut link = Link::initiate(stream, &Identity::generate().unwrap()).unwrap();
+        link.send(&Message::Hello {
+            version: VERSION + 1,
+        })
         .unwrap();
         assert!(target.join().unwrap().0.is_err());
     }
