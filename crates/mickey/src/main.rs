@@ -25,6 +25,7 @@ mod protocol;
 mod secure;
 #[allow(dead_code)]
 mod transport;
+mod trust;
 
 use cli::Command;
 #[cfg(target_os = "linux")]
@@ -58,21 +59,49 @@ fn run(command: Command) -> Result<(), String> {
             println!("{}", identity.fingerprint());
             Ok(())
         }
-        Command::Source { to } => {
-            warn_unpaired();
-            source(to)
+        Command::Forget { fingerprint } => {
+            let mut trusted = trust::TrustedPeers::load(&identity::data_dir()?)?;
+            if trusted.forget(&fingerprint)? {
+                println!("mickey: forgot {fingerprint}; it must pair again to connect");
+                Ok(())
+            } else {
+                Err(format!("no trusted peer has the fingerprint {fingerprint}"))
+            }
         }
-        Command::Target { listen } => {
-            warn_unpaired();
-            target(listen)
-        }
+        Command::Source { to } => source(to),
+        Command::Target { listen } => target(listen),
     }
 }
 
-// ponytail: removed by pairing (#37), which makes peers trust only known keys.
-fn warn_unpaired() {
-    eprintln!("mickey: WARNING: traffic is encrypted, but peers are not paired yet:");
-    eprintln!("mickey: any machine on the network can connect; use only on a trusted network");
+/// Whether to talk to the peer whose key is `peer_key`. A trusted key is
+/// accepted at once; an unknown one only after the person at this machine
+/// compares fingerprints and types `y`. Anything else (including no
+/// terminal to ask on) refuses.
+fn trust_peer(
+    identity: &identity::Identity,
+    trusted: &mut trust::TrustedPeers,
+    peer_key: &[u8; 32],
+    address: SocketAddr,
+) -> Result<bool, String> {
+    if trusted.is_trusted(peer_key) {
+        return Ok(true);
+    }
+    println!("mickey: new peer at {address}");
+    println!("mickey:   this PC:   {}", identity.fingerprint());
+    println!("mickey:   other PC:  {}", identity::fingerprint(peer_key));
+    println!("mickey: pair with it? Check that \"other PC\" here matches \"this PC\" there.");
+    print!("mickey: type y to pair, anything else to refuse: ");
+    std::io::Write::flush(&mut std::io::stdout()).map_err(|err| err.to_string())?;
+    let mut answer = String::new();
+    std::io::stdin()
+        .read_line(&mut answer)
+        .map_err(|err| format!("cannot read the answer: {err}"))?;
+    if !matches!(answer.trim(), "y" | "Y" | "yes") {
+        return Ok(false);
+    }
+    trusted.add(*peer_key, &address.to_string())?;
+    println!("mickey: paired; it will connect without asking from now on");
+    Ok(true)
 }
 
 /// Serves one source at a time, forever, injecting what it sends.
@@ -81,7 +110,9 @@ fn target(listen: SocketAddr) -> Result<(), String> {
     use std::io::ErrorKind;
     use std::net::TcpListener;
 
-    let identity = identity::Identity::load_or_create(&identity::data_dir()?)?;
+    let data_dir = identity::data_dir()?;
+    let identity = identity::Identity::load_or_create(&data_dir)?;
+    let mut trusted = trust::TrustedPeers::load(&data_dir)?;
     let listener = TcpListener::bind(listen).map_err(|err| match err.kind() {
         ErrorKind::AddrInUse => format!("{listen} is already in use; is another Mickey running?"),
         ErrorKind::AddrNotAvailable => format!("{listen} is not an address of this machine"),
@@ -103,10 +134,18 @@ fn target(listen: SocketAddr) -> Result<(), String> {
                 continue;
             }
         };
-        println!(
-            "mickey: source {peer} connected, fingerprint {}",
-            identity::fingerprint(link.peer_key())
-        );
+        let peer_key = *link.peer_key();
+        match trust_peer(&identity, &mut trusted, &peer_key, peer) {
+            Ok(true) => println!("mickey: source {peer} connected"),
+            Ok(false) => {
+                println!("mickey: refused {peer}");
+                continue;
+            }
+            Err(err) => {
+                eprintln!("mickey: {err}");
+                continue;
+            }
+        }
         let mut reported = false;
         let result = transport::serve(&mut link, |event| {
             if let Err(err) = emit::emit(event)
@@ -163,14 +202,21 @@ fn source(to: SocketAddr) -> Result<(), String> {
     const KEYS_UP_POLL: Duration = Duration::from_millis(10);
 
     let devices = open_devices()?;
-    let identity = identity::Identity::load_or_create(&identity::data_dir()?)?;
+    let data_dir = identity::data_dir()?;
+    let identity = identity::Identity::load_or_create(&data_dir)?;
+    let mut trusted = trust::TrustedPeers::load(&data_dir)?;
     let mut link = transport::connect(to, &identity)
         .map_err(|err| format!("cannot connect to {to}: {err}"))?;
-    println!(
-        "mickey: connected to {to}, fingerprint {}",
-        identity::fingerprint(link.peer_key())
-    );
-    println!("mickey: AltGr + Right Shift switches focus");
+    let peer_key = *link.peer_key();
+    if !trust_peer(&identity, &mut trusted, &peer_key, to)? {
+        return Err(format!("not paired with {to}; nothing was sent"));
+    }
+    println!("mickey: waiting for {to} to accept this PC");
+    transport::hello(&mut link).map_err(|err| match err.kind() {
+        std::io::ErrorKind::UnexpectedEof => format!("{to} refused to pair with this PC"),
+        _ => format!("lost the connection to {to}: {err}"),
+    })?;
+    println!("mickey: connected to {to}; AltGr + Right Shift switches focus");
 
     // Pongs come back on their own thread, as round-trip times.
     let start = Instant::now();
