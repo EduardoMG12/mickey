@@ -55,7 +55,10 @@ simplest possible way to switch, so M0 can focus on the pipeline.
       other key was pressed in between (so `AltGr+Shift+Q` never switches).
       The owner's laptop has no Right Ctrl (see *Discoveries*). It becomes
       configurable in M1a, when `config.toml` exists.
-- [ ] The hotkey's own key presses are never sent to the target.
+- [ ] The hotkey's own key presses are never sent to the target. While
+      focus is remote, AltGr and Right Shift presses are held back until it
+      is clear whether they are the hotkey, then sent if they were not, so
+      `AltGr+Q` (`/` on ABNT2) and Shift still type on the target.
 - [ ] Before the grab starts, wait until every key is released locally (see
       Constraints).
 - [ ] Track the set of keys and buttons currently held on the target. When
@@ -277,3 +280,19 @@ Order of work (each step is one PR, each ≤ ~300 lines):
   spike 0a is gone; the main thread waits on the channel with a timeout.
 - **Checked:** grabbed both devices, 99 key events read while nothing
   reached the desktop, AltGr + Right Shift released them at once.
+
+### Step 7 — hotkey and focus (2026-10-21)
+
+- **Holding the hotkey keys back** (see the requirement above) was needed
+  because AltGr and Right Shift are typing keys on ABNT2; simply dropping
+  them while remote would break `/`, `?` and capitals on Windows.
+- **The idle source does not poll.** It blocks on the channel, and only
+  polls every 10 ms while waiting for keys to go up before the grab.
+- **Ctrl+C and SIGTERM** are covered by the kernel: the grab is tied to the
+  open file, so a killed source always gives the devices back. A `timeout
+  90` around the first real run relied on exactly that.
+- **`schtasks /end` stops `cmd`, not `mickey.exe`** inside it; the old
+  target kept the `.exe` locked. `taskkill /im mickey.exe /f` stops it.
+- **Checked end to end:** the laptop keyboard switched to Windows and back
+  with AltGr + Right Shift, typing reached Notepad, and the owner could use
+  AltGr combinations and switch the Windows keyboard layout from it.
