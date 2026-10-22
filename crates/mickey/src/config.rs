@@ -155,6 +155,17 @@ pub fn parse(text: &str) -> Result<Config, String> {
     // toml's message already names the line and shows the bad text.
     let config: Config = toml::from_str(text).map_err(|err| err.to_string())?;
     config.hotkeys()?;
+    // Names travel in tab-separated status lines and as window labels.
+    if let Some(peer) = config
+        .peers
+        .iter()
+        .find(|peer| peer.name.contains(['\t', '\n']))
+    {
+        return Err(format!(
+            "peer name {:?} may not contain tabs or line breaks",
+            peer.name
+        ));
+    }
     if !TOUCHPAD_SPEEDS.contains(&config.touchpad.speed) {
         return Err(format!(
             "touchpad speed {} is not between {} and {}",
@@ -207,6 +218,7 @@ mod tests {
         assert!(parse("[[peer]]\nname = \"A\"\naddress = \"nowhere\"\n").is_err());
         assert!(parse("[touchpad]\nspeed = 0\n").is_err());
         assert!(parse("[[peer]\n").is_err());
+        assert!(parse("[[peer]]\nname = \"a\\tb\"\naddress = \"192.0.2.10:1\"\n").is_err());
     }
 
     #[test]
