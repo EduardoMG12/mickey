@@ -97,19 +97,61 @@ impl TrustedPeers {
 
 /// Whether to talk to the peer whose key is `peer_key`. A trusted key is
 /// accepted at once; an unknown one only after the person at this machine
-/// sees the same pairing `code` on both PCs and types `y`. Anything else
-/// (including no terminal to ask on) refuses.
+/// sees the same pairing `code` on both PCs and pairs, in a window or else
+/// on the terminal. Anything else refuses. `who` names the other PC.
 pub fn trust_or_ask(
     trusted: &mut TrustedPeers,
     peer_key: &[u8; 32],
     address: SocketAddr,
     code: &str,
+    who: &str,
 ) -> Result<bool, String> {
     if trusted.is_trusted(peer_key) {
         return Ok(true);
     }
+    if !ask(peer_key, address, code, who)? {
+        return Ok(false);
+    }
+    trusted.add(*peer_key, &address.to_string())?;
+    println!("mickey: paired; it will connect without asking from now on");
+    Ok(true)
+}
+
+/// Asks the person at this PC whether to pair with the PC whose key is
+/// `peer_key`: in a window, or on the terminal when there is no window.
+pub fn ask(
+    peer_key: &[u8; 32],
+    address: SocketAddr,
+    code: &str,
+    who: &str,
+) -> Result<bool, String> {
     println!("mickey: new PC at {address} ({})", fingerprint(peer_key));
     println!("mickey: pairing code: {code}");
+    match ask_in_window(who, code) {
+        Some(answer) => Ok(answer),
+        None => ask_in_terminal(),
+    }
+}
+
+/// Asks with `mickey-ui pair` (PRD 0010), installed next to this program;
+/// `None` when it cannot show a window, so the terminal is asked instead.
+fn ask_in_window(who: &str, code: &str) -> Option<bool> {
+    let ui = std::env::current_exe()
+        .ok()?
+        .with_file_name(format!("mickey-ui{}", std::env::consts::EXE_SUFFIX));
+    let status = std::process::Command::new(ui)
+        .args(["pair", who, code])
+        .status()
+        .ok()?;
+    match status.code() {
+        Some(0) => Some(true),
+        Some(1) => Some(false),
+        // 2: no display to open a window on.
+        _ => None,
+    }
+}
+
+fn ask_in_terminal() -> Result<bool, String> {
     println!("mickey: pair only if the other PC shows the same code.");
     print!("mickey: type y to pair, anything else to refuse: ");
     std::io::Write::flush(&mut std::io::stdout()).map_err(|err| err.to_string())?;
@@ -117,12 +159,7 @@ pub fn trust_or_ask(
     std::io::stdin()
         .read_line(&mut answer)
         .map_err(|err| format!("cannot read the answer: {err}"))?;
-    if !matches!(answer.trim(), "y" | "Y" | "yes") {
-        return Ok(false);
-    }
-    trusted.add(*peer_key, &address.to_string())?;
-    println!("mickey: paired; it will connect without asking from now on");
-    Ok(true)
+    Ok(matches!(answer.trim(), "y" | "Y" | "yes"))
 }
 
 fn to_hex(bytes: &[u8]) -> String {

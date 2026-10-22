@@ -94,6 +94,12 @@ impl Table {
         table.insert(found.key, (found, at));
     }
 
+    /// The name a PC announced, if it was heard.
+    pub fn name_of(&self, key: &[u8; 32]) -> Option<String> {
+        let table = self.0.lock().unwrap_or_else(|p| p.into_inner());
+        table.get(key).map(|(found, _)| found.name.clone())
+    }
+
     /// The PCs heard in the last `FORGET_AFTER`, by name.
     pub fn list(&self, now: Instant) -> Vec<Found> {
         let mut table = self.0.lock().unwrap_or_else(|p| p.into_inner());
