@@ -254,11 +254,13 @@ fn main() -> ExitCode {
     };
     let (size, card_width) = measure(&choice);
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
+        viewport: crate::theme::viewport()
             .with_title("Mickey")
             .with_app_id(APP_ID)
             .with_inner_size(size)
             .with_always_on_top()
+            // A switcher is not an app that was opened: no taskbar button.
+            .with_taskbar(false)
             // Not mouse passthrough for the copy: on Windows that makes the
             // whole window transparent.
             .with_active(!mirror),
@@ -297,7 +299,7 @@ fn main() -> ExitCode {
 /// `mickey-ui settings`: the settings window (`mickey settings` starts it).
 fn settings_window() -> ExitCode {
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
+        viewport: crate::theme::viewport()
             .with_title("Mickey settings")
             .with_app_id("mickey-settings")
             .with_inner_size([720.0, 500.0]),

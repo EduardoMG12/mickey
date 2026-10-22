@@ -69,7 +69,7 @@ impl eframe::App for Pair {
 
 pub fn window(who: &str, code: &str) -> ExitCode {
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
+        viewport: crate::theme::viewport()
             .with_title("Mickey: pair with another PC")
             .with_app_id("mickey-pair")
             .with_inner_size([380.0, 240.0])
