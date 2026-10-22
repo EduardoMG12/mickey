@@ -58,64 +58,84 @@ pub struct Hotkey {
     escape: Escape,
 }
 
-/// How long AltGr and Right Shift must be held, alone, to come home.
+/// How long AltGr and Right Shift must be held together to come home.
 pub const ESCAPE_HOLD: Duration = Duration::from_secs(2);
+/// How long Right Shift alone must be held to come home: every keyboard has
+/// it, even one without AltGr.
+pub const ESCAPE_HOLD_ALONE: Duration = Duration::from_secs(3);
 
 /// The way home that no setting changes (CLAUDE.md rule 8, #182): hold
-/// AltGr and Right Shift together for `ESCAPE_HOLD`, nothing else, and let
-/// go. Watched apart from the configured hotkeys, so a shared or broken
-/// setting cannot take it away; the default hotkeys use the same keys, so
-/// no other key is held back while away.
+/// Right Shift alone for `ESCAPE_HOLD_ALONE`, or with AltGr for
+/// `ESCAPE_HOLD`, press nothing else, and let go. Watched apart from the
+/// configured hotkeys, so a shared or broken setting cannot take it away;
+/// the default hotkeys use the same keys, so no other key is held back
+/// while away.
 #[derive(Debug, Default)]
 struct Escape {
-    /// AltGr, Right Shift.
-    down: [bool; 2],
-    /// When both went down.
+    altgr: bool,
+    right_shift: bool,
+    /// When Right Shift went down, or AltGr joined it.
     since: Option<Instant>,
-    /// Both were held long enough, alone.
+    /// AltGr was held with Right Shift: the shorter hold counts.
+    with_altgr: bool,
+    /// Held long enough; fires once both keys are up.
     held: bool,
-    /// Something else was pressed meanwhile.
+    /// Another key or a click while holding.
     spoiled: bool,
 }
 
 impl Escape {
-    /// Whether `event` completes the escape: the last of the two let go
-    /// after holding both long enough.
+    /// Whether `event` completes the escape.
     fn feed(&mut self, event: InputEvent, now: Instant) -> bool {
-        let (code, pressed) = match event {
-            InputEvent::Key { code, pressed } => (code, pressed),
-            InputEvent::Button { pressed: true, .. } => {
-                self.spoiled = true;
-                return false;
+        match event {
+            InputEvent::Key {
+                code: KEY_RIGHTSHIFT,
+                pressed: true,
+            } => {
+                if !self.right_shift {
+                    self.since = Some(now);
+                    self.spoiled = false;
+                    self.with_altgr = self.altgr;
+                }
+                self.right_shift = true;
             }
-            _ => return false,
-        };
-        let index = match code {
-            KEY_RIGHTALT => 0,
-            KEY_RIGHTSHIFT => 1,
-            _ => {
-                self.spoiled |= pressed;
-                return false;
+            InputEvent::Key {
+                code: KEY_RIGHTALT,
+                pressed: true,
+            } => {
+                if self.right_shift && !self.altgr {
+                    self.since = Some(now);
+                    self.with_altgr = true;
+                }
+                self.altgr = true;
             }
-        };
-        let both = self.down == [true, true];
-        self.down[index] = pressed;
-        if pressed && self.down == [true, true] && !both {
-            self.since = Some(now);
-            self.spoiled = false;
+            InputEvent::Key {
+                code: KEY_RIGHTALT,
+                pressed: false,
+            } => self.altgr = false,
+            InputEvent::Key {
+                code: KEY_RIGHTSHIFT,
+                pressed: false,
+            } => {
+                self.right_shift = false;
+                let need = if self.with_altgr {
+                    ESCAPE_HOLD
+                } else {
+                    ESCAPE_HOLD_ALONE
+                };
+                self.held = self
+                    .since
+                    .take()
+                    .is_some_and(|since| !self.spoiled && now.duration_since(since) >= need);
+            }
+            InputEvent::Key { pressed: true, .. } | InputEvent::Button { pressed: true, .. } => {
+                self.spoiled |= self.right_shift;
+            }
+            _ => {}
         }
-        if !pressed && both {
-            // The first of the two let go: was it long enough?
-            self.held = self
-                .since
-                .take()
-                .is_some_and(|since| now.duration_since(since) >= ESCAPE_HOLD);
-        }
-        if self.down == [false, false] {
-            let fired = self.held && !self.spoiled;
+        if self.held && !self.altgr && !self.right_shift {
             self.held = false;
-            self.spoiled = false;
-            return fired;
+            return true;
         }
         false
     }
@@ -194,9 +214,11 @@ impl Hotkey {
         let escape = self.escape.feed(event, now);
         let fired = self.match_hotkeys(event, now, forward);
         if escape {
-            // Instead of whatever the same keys would do as a hotkey.
+            // Instead of whatever the same keys would do as a hotkey, and
+            // the long press is no tap of a double tap.
             self.attempt.clear();
             self.spoiled = false;
+            self.last_tap = None;
             return Some(Trigger::Home);
         }
         fired
@@ -440,6 +462,13 @@ mod tests {
         let mut defaults = Hotkey::new();
         assert_eq!(press(&mut defaults, &hold(500)), [Trigger::Next]);
         assert_eq!(press(&mut defaults, &hold(2100)), [Trigger::Home]);
+        // Right Shift alone, for keyboards without AltGr: 3 s is home.
+        let alone = |ms| [(key(SHIFT, true), 0), (key(SHIFT, false), ms)];
+        assert_eq!(
+            press(&mut Hotkey::from_config(&set), &alone(3100)),
+            [Trigger::Home]
+        );
+        assert!(!press(&mut Hotkey::from_config(&set), &alone(2500)).contains(&Trigger::Home));
         // Another key while holding spoils it.
         let spoiled = [
             (key(ALT, true), 0),
