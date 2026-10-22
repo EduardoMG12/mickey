@@ -86,6 +86,13 @@ impl Peers {
                     online: *state == "online",
                     monitors: monitors_from_text(monitors)?,
                 }),
+                // A peer with no monitors ends in a tab, which trimming the
+                // answer takes away.
+                ["peer", state, name] => peers.peers.push(PeerInfo {
+                    name: name.to_string(),
+                    online: *state == "online",
+                    monitors: Vec::new(),
+                }),
                 _ => return None,
             }
         }
@@ -143,6 +150,8 @@ mod tests {
     fn an_offline_peer_without_monitors_and_bad_lines() {
         let text = "this\t1536x864+0+0\npeer\toffline\tTeste\t\n";
         assert_eq!(Peers::from_text(text).unwrap().peers[0].monitors, []);
+        // The same text with the trailing tab trimmed, as a caller may do.
+        assert_eq!(Peers::from_text(text.trim()), Peers::from_text(text));
         assert_eq!(Peers::from_text("nonsense"), None);
         assert_eq!(Peers::from_text("this\t10x10"), None);
     }
