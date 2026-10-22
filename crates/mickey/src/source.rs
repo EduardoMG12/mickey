@@ -93,7 +93,8 @@ fn obey(
         | Order::HistoryCopy(_)
         | Order::Quit
         | Order::Arranged
-        | Order::Record => "error: not an order".into(),
+        | Order::Record
+        | Order::Connect { .. } => "error: not an order".into(),
         Order::Go(name) => {
             let Some(peer) = names.iter().position(|known| *known == name) else {
                 return format!("error: no PC named `{name}` in config.toml");
@@ -240,31 +241,51 @@ fn join(
         }
         return None;
     }
-    let added = config::path().and_then(|path| {
-        let text = std::fs::read_to_string(&path).unwrap_or_default();
-        let (text, name) = config::add_peer(&text, &member.name, member.address, member.position)?;
-        std::fs::write(&path, text).map_err(|err| err.to_string())?;
-        Ok(name)
-    });
-    let name = match added {
-        Ok(name) => name,
+    match add_peer(
+        peers,
+        positions,
+        &member.name,
+        member.address,
+        member.position,
+    ) {
+        Ok(index) => {
+            peers[index].key = Some(member.key);
+            println!("mickey: {} joined through the group", peers[index].name);
+            Some(index)
+        }
         Err(err) => {
             eprintln!("mickey: cannot add {} from the group: {err}", member.name);
-            return None;
+            None
         }
-    };
-    println!("mickey: {name} joined through the group");
+    }
+}
+
+/// A PC new to this one: written into config.toml (a name already taken
+/// gets a number) and added to `peers`, not yet connected. Its index.
+fn add_peer(
+    peers: &mut Vec<Peer>,
+    positions: &mut Vec<Option<[i32; 2]>>,
+    name: &str,
+    address: SocketAddr,
+    position: Option<[i32; 2]>,
+) -> Result<usize, String> {
+    let name = config::path().and_then(|path| {
+        let text = std::fs::read_to_string(&path).unwrap_or_default();
+        let (text, name) = config::add_peer(&text, name, address, position)?;
+        std::fs::write(&path, text).map_err(|err| err.to_string())?;
+        Ok(name)
+    })?;
     peers.push(Peer {
         name,
-        address: member.address,
+        address,
         link: None,
         heard: Instant::now(),
-        key: Some(member.key),
+        key: None,
         latency: Latency::new(),
         monitors: Vec::new(),
     });
-    positions.push(member.position);
-    Some(peers.len() - 1)
+    positions.push(position);
+    Ok(peers.len() - 1)
 }
 
 /// Writes where a peer placed itself into config.toml, so the settings
@@ -664,6 +685,8 @@ pub fn run(
         let mut quit = false;
         let mut placed = None;
         let mut heard_map = None;
+        // A PC to connect to from the settings: handled below, like `join`.
+        let mut connecting = None;
         let mut asked_to_arrange = None;
         match wakes.recv_timeout(wait) {
             // While recording a hotkey, keys are named, never acted on.
@@ -682,6 +705,10 @@ pub fn run(
                     let _ = reply.send(answer);
                 }
             }
+            Ok(Wake::Control(Request {
+                order: Order::Connect { address, name },
+                reply,
+            })) => connecting = Some((address, name, reply)),
             Ok(Wake::Control(request)) if request.order == Order::Record => {
                 recording = Some((
                     Recording::new(double_tap_window),
@@ -788,6 +815,23 @@ pub fn run(
             let _ = reply.send(arrange(&mut positions, &mut peers));
             // Everyone gets the new places, not only the PCs moved.
             shared_with.clear();
+        }
+        if let Some((address, name, reply)) = connecting {
+            let answer = if peers.iter().any(|peer| peer.address == address) {
+                format!("error: {address} is already one of this PC's PCs")
+            } else {
+                match add_peer(&mut peers, &mut positions, &name, address, None) {
+                    Ok(index) => {
+                        let name = peers[index].name.clone();
+                        names.push(name.clone());
+                        // Pairs: the code shows on both PCs.
+                        connect_first(index, name.clone(), address, &shared, &back_sender);
+                        format!("ok: pairing with {name}: check that both PCs show the same code")
+                    }
+                    Err(err) => format!("error: {err}"),
+                }
+            };
+            let _ = reply.send(answer);
         }
         if let Some(members) = heard_map {
             let me = *shared.identity.public();
