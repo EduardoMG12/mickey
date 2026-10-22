@@ -146,6 +146,7 @@ pub fn serve(
 
     // The last Leave sent, so pushing against a wall sends it once.
     let mut left = None;
+    let mut edge_check = edges::Throttle::new();
     let mut refused_at = None;
     let mut keys = HeldSet::new();
     let mut buttons = HeldSet::new();
@@ -172,8 +173,10 @@ pub fn serve(
                         break Err(err);
                     }
                 }
-                if let InputEvent::Motion { dx, dy } = event {
-                    let off = cursor().and_then(|at| edges::beyond(monitors, at, (dx, dy)));
+                if let InputEvent::Motion { dx, dy } = event
+                    && let Some(delta) = edge_check.feed((dx, dy))
+                {
+                    let off = cursor().and_then(|at| edges::beyond(monitors, at, delta));
                     if let Some((x, y)) = off
                         && left != off
                         && let Err(err) = link.send(&Message::Leave { x, y })
@@ -352,6 +355,9 @@ mod tests {
         link.send(&Message::Enter { x: 1535, y: 284 }).unwrap();
         let push = Message::Input(InputEvent::Motion { dx: 4, dy: 0 });
         link.send(&push).unwrap();
+        // Still pushing a moment later: edges are checked at most every
+        // EDGE_CHECK, with the motion summed in between.
+        thread::sleep(edges::EDGE_CHECK + std::time::Duration::from_millis(2));
         link.send(&push).unwrap();
         assert_eq!(link.recv().unwrap(), Message::Leave { x: 1536, y: 284 });
         // Only once: the next message is the pong, not a second Leave.
