@@ -98,7 +98,11 @@ struct Shared {
 /// Captures local input and sends it to the focused peer. Every peer gets
 /// its own secure link; one that is offline is retried in the background
 /// and never blocks the others.
-pub fn run(configured: Vec<config::Peer>, touchpad_speed: i32) -> Result<(), String> {
+pub fn run(
+    configured: Vec<config::Peer>,
+    touchpad_speed: i32,
+    switcher_position: String,
+) -> Result<(), String> {
     // Two sources would both capture the keyboard and fight over the grab.
     if control::source_running() {
         return Err("another mickey source is already running".into());
@@ -279,7 +283,7 @@ pub fn run(configured: Vec<config::Peer>, touchpad_speed: i32) -> Result<(), Str
         }
         if open && !switcher_open {
             switcher_open = true;
-            open_switcher(&peers, &wake);
+            open_switcher(&peers, &switcher_position, &wake);
         }
 
         lost.sort_unstable();
@@ -345,9 +349,11 @@ fn reconnect(index: usize, to: SocketAddr, shared: &Arc<Shared>, back: &Sender<(
 /// thread, and sends the owner's pick when the window closes: `Some(peer)`,
 /// `None` for this PC or Esc, or an error if the window could not run.
 /// The GUI is a separate program so this one stays small (PRD 0003).
-fn open_switcher(peers: &[Peer], wake: &Sender<Wake>) {
+fn open_switcher(peers: &[Peer], position: &str, wake: &Sender<Wake>) {
     let mut args = vec![
         "switcher".to_string(),
+        "--at".to_string(),
+        position.to_string(),
         "0".to_string(),
         "online:This PC".to_string(),
     ];

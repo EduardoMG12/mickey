@@ -26,6 +26,9 @@ address = "192.0.2.10:4242"
 
 [touchpad]
 speed = 16
+
+[interface]
+switcher_position = "bottom-right"   # or center, top-left, top-right, bottom-left
 "#;
 
 // `deny_unknown_fields`: a typo like `adress` is an error, not ignored.
@@ -38,6 +41,37 @@ pub struct Config {
     pub touchpad: Touchpad,
     #[serde(default)]
     pub hotkeys: Hotkeys,
+    #[serde(default)]
+    pub interface: Interface,
+}
+
+/// `[interface]`: how Mickey shows itself.
+#[derive(Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct Interface {
+    /// Where the switcher appears: a corner or `center`.
+    #[serde(default = "default_switcher_position")]
+    pub switcher_position: String,
+}
+
+impl Default for Interface {
+    fn default() -> Interface {
+        Interface {
+            switcher_position: default_switcher_position(),
+        }
+    }
+}
+
+const SWITCHER_POSITIONS: [&str; 5] = [
+    "center",
+    "top-left",
+    "top-right",
+    "bottom-left",
+    "bottom-right",
+];
+
+fn default_switcher_position() -> String {
+    "bottom-right".into()
 }
 
 /// `[hotkeys]`, as written; `Config::hotkeys` parses and checks them.
@@ -166,6 +200,13 @@ pub fn parse(text: &str) -> Result<Config, String> {
             peer.name
         ));
     }
+    if !SWITCHER_POSITIONS.contains(&config.interface.switcher_position.as_str()) {
+        return Err(format!(
+            "switcher_position {:?} is not one of {}",
+            config.interface.switcher_position,
+            SWITCHER_POSITIONS.join(", ")
+        ));
+    }
     if !TOUCHPAD_SPEEDS.contains(&config.touchpad.speed) {
         return Err(format!(
             "touchpad speed {} is not between {} and {}",
@@ -203,6 +244,7 @@ mod tests {
                 peers: vec![],
                 touchpad: Touchpad::default(),
                 hotkeys: Hotkeys::default(),
+                interface: Interface::default(),
             }
         );
     }
@@ -218,6 +260,7 @@ mod tests {
         assert!(parse("[[peer]]\nname = \"A\"\naddress = \"nowhere\"\n").is_err());
         assert!(parse("[touchpad]\nspeed = 0\n").is_err());
         assert!(parse("[[peer]\n").is_err());
+        assert!(parse("[interface]\nswitcher_position = \"middle\"\n").is_err());
         assert!(parse("[[peer]]\nname = \"a\\tb\"\naddress = \"192.0.2.10:1\"\n").is_err());
     }
 
