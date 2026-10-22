@@ -416,7 +416,7 @@ impl eframe::App for Settings {
                 theme::tab(ui, &mut self.tab, Tab::Pcs, icon::DESKTOP, "PCs");
                 theme::tab(ui, &mut self.tab, Tab::Layout, icon::MONITOR, "Layout");
                 theme::tab(ui, &mut self.tab, Tab::Hotkeys, icon::KEYBOARD, "Hotkeys");
-                theme::tab(ui, &mut self.tab, Tab::Look, icon::PALETTE, "Appearance");
+                theme::tab(ui, &mut self.tab, Tab::Look, icon::PALETTE, "General");
             });
             ui.add_space(4.0);
             let form = &mut self.form;
@@ -443,9 +443,6 @@ impl eframe::App for Settings {
                             ui.label(format!("{}  Fingerprint", icon::SHIELD));
                             ui.label(egui::RichText::new(&self.fingerprint).monospace().weak());
                             ui.end_row();
-                            ui.label(format!("{}  Listen on", icon::LINK));
-                            ui.add(egui::TextEdit::singleline(&mut form.listen).desired_width(260.0));
-                            ui.end_row();
                         });
                     ui.add_space(10.0);
                     ui.checkbox(
@@ -453,6 +450,20 @@ impl eframe::App for Settings {
                         "Control other PCs with this keyboard and mouse",
                     );
                     ui.checkbox(&mut form.controlled, "Let paired PCs control this one");
+                    ui.add_space(10.0);
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().slider_width = 220.0;
+                        ui.label(format!("{}  Touchpad speed", icon::LAPTOP));
+                        ui.add(egui::Slider::new(&mut form.speed, 1..=200));
+                    });
+                    ui.add_space(10.0);
+                    egui::CollapsingHeader::new("Advanced").show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(format!("{}  Listen on", icon::LINK));
+                            ui.add(egui::TextEdit::singleline(&mut form.listen).desired_width(200.0));
+                        });
+                        ui.weak("Where the other PCs connect. 0.0.0.0:4242 (every network of this PC) suits almost everyone.");
+                    });
                 }
                 Tab::Pcs => {
                     // What the window last heard: who is online, their monitors.
@@ -646,7 +657,7 @@ impl eframe::App for Settings {
                                 );
                             }
                         });
-                    ui.add(egui::Slider::new(&mut form.speed, 1..=200).text("Touchpad speed"));
+                    ui.weak("Where the switcher window appears when the hotkey opens it.");
                 }
             }
             });
