@@ -2,16 +2,18 @@
 //! What it saves is checked with `mickey_config::parse`, the same rules
 //! `mickey` applies, before anything is written.
 
+use crate::layout;
 use eframe::egui;
+use mickey_config::peers::Peers;
 use mickey_config::{self as config, Config, SWITCHER_POSITIONS};
 use std::process::Command;
+use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PcRow {
     pub name: String,
     pub address: String,
     pub hotkey: String,
-    /// Kept as read; the Layout tab sets it.
     pub position: Option<[i32; 2]>,
 }
 
@@ -134,6 +136,10 @@ pub struct Settings {
     form: Form,
     saved: Form,
     fingerprint: String,
+    /// What the running Mickey said about the PCs; `Err` says why not.
+    peers: Result<Peers, String>,
+    asked: Instant,
+    drag: layout::Drag,
     tab: Tab,
     message: String,
 }
@@ -142,6 +148,7 @@ pub struct Settings {
 enum Tab {
     ThisPc,
     Pcs,
+    Layout,
     Hotkeys,
     Look,
 }
@@ -160,7 +167,10 @@ impl Settings {
         Settings {
             saved: form.clone(),
             form,
-            fingerprint: fingerprint(),
+            fingerprint: ask_mickey("id").unwrap_or_else(|_| "(run `mickey id`)".into()),
+            peers: load_peers(),
+            asked: Instant::now(),
+            drag: layout::Drag::default(),
             tab: Tab::ThisPc,
             message,
         }
@@ -193,13 +203,14 @@ fn empty() -> Config {
     config::parse("").expect("an empty config is valid")
 }
 
-/// This PC's fingerprint, from `mickey id` next to this program.
-fn fingerprint() -> String {
+/// Runs `mickey <argument>` from next to this program: its output, or
+/// what it said went wrong.
+fn ask_mickey(argument: &str) -> Result<String, String> {
     std::env::current_exe()
         .map(|exe| exe.with_file_name(format!("mickey{}", std::env::consts::EXE_SUFFIX)))
         .and_then(|mickey| {
             let mut command = Command::new(mickey);
-            command.arg("id");
+            command.arg(argument);
             // mickey.exe is a console program; without this, Windows would
             // flash a console window over the settings.
             #[cfg(windows)]
@@ -210,10 +221,16 @@ fn fingerprint() -> String {
             }
             command.output()
         })
-        .ok()
-        .filter(|output| output.status.success())
-        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
-        .unwrap_or_else(|| "(run `mickey id`)".into())
+        .map_err(|err| err.to_string())
+        .and_then(|output| match output.status.success() {
+            true => Ok(String::from_utf8_lossy(&output.stdout).trim().to_string()),
+            false => Err(String::from_utf8_lossy(&output.stderr).trim().to_string()),
+        })
+}
+
+fn load_peers() -> Result<Peers, String> {
+    let text = ask_mickey("peers")?;
+    Peers::from_text(&text).ok_or_else(|| format!("mickey peers answered `{text}`"))
 }
 
 impl eframe::App for Settings {
@@ -222,6 +239,7 @@ impl eframe::App for Settings {
             ui.horizontal(|ui| {
                 ui.selectable_value(&mut self.tab, Tab::ThisPc, "This PC");
                 ui.selectable_value(&mut self.tab, Tab::Pcs, "PCs");
+                ui.selectable_value(&mut self.tab, Tab::Layout, "Layout");
                 ui.selectable_value(&mut self.tab, Tab::Hotkeys, "Hotkeys");
                 ui.selectable_value(&mut self.tab, Tab::Look, "Appearance");
             });
@@ -279,6 +297,26 @@ impl eframe::App for Settings {
                             position: None,
                         });
                     }
+                }
+                Tab::Layout => {
+                    // Mickey may still be starting: ask again every 2 s.
+                    if self.peers.is_err() && self.asked.elapsed() > Duration::from_secs(2) {
+                        self.peers = load_peers();
+                        self.asked = Instant::now();
+                    }
+                    if self.peers.is_err() {
+                        ui.ctx().request_repaint_after(Duration::from_secs(2));
+                    }
+                    match &self.peers {
+                        Ok(_) => ui.weak("Drag a PC to where it sits; it snaps against the nearest monitor. Then Save."),
+                        Err(err) => ui.colored_label(
+                            ui.visuals().warn_fg_color,
+                            format!("Waiting for Mickey to list the monitors ({err})"),
+                        ),
+                    };
+                    let empty = Peers::default();
+                    let peers = self.peers.as_ref().unwrap_or(&empty);
+                    layout::show(ui, peers, &mut form.pcs, &mut self.drag);
                 }
                 Tab::Hotkeys => {
                     ui.weak("e.g. AltGr+RightShift or AltGr+RightShift+H");
