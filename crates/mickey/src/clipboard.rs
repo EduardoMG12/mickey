@@ -71,6 +71,54 @@ impl Clipboard {
     }
 }
 
+// ponytail: the clipboard sync uses it (#131).
+#[allow(dead_code)]
+/// The one clipboard of this process, on its own thread. What Mickey
+/// writes stays pasteable on Wayland and X11 only while its owner lives,
+/// so the owner never goes away; the rest of Mickey asks it.
+#[derive(Clone)]
+pub struct Keeper(std::sync::mpsc::Sender<Job>);
+
+#[allow(dead_code)]
+enum Job {
+    Read(std::sync::mpsc::Sender<Option<Content>>),
+    Write(Content),
+}
+
+#[allow(dead_code)]
+impl Keeper {
+    pub fn start() -> Result<Keeper, String> {
+        let mut board = Clipboard::open()?;
+        let (jobs, todo) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            for job in todo {
+                match job {
+                    Job::Read(answer) => {
+                        let _ = answer.send(board.read());
+                    }
+                    Job::Write(content) => {
+                        if let Err(err) = board.write(&content) {
+                            eprintln!("mickey: {err}");
+                        }
+                    }
+                }
+            }
+        });
+        Ok(Keeper(jobs))
+    }
+
+    /// What is copied now; `None` also if the keeper is gone.
+    pub fn read(&self) -> Option<Content> {
+        let (answer, wait) = std::sync::mpsc::channel();
+        self.0.send(Job::Read(answer)).ok()?;
+        wait.recv().ok().flatten()
+    }
+
+    pub fn write(&self, content: Content) {
+        let _ = self.0.send(Job::Write(content));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
