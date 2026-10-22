@@ -1,0 +1,62 @@
+name: Bug report
+description: Something does not work as described.
+labels: [needs-triage]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. **Never paste typed text, passwords or clipboard
+        content** into an issue. Mickey's own logs never contain them; if you
+        add other output, check it first.
+        A security problem? Do not open an issue: see SECURITY.md.
+  - type: input
+    id: version
+    attributes:
+      label: Mickey version
+      description: "`mickey --version`, or the release you installed."
+    validations:
+      required: true
+  - type: dropdown
+    id: role
+    attributes:
+      label: Where it happens
+      options:
+        - On the PC whose keyboard and mouse are shared (source)
+        - On the PC being controlled (target)
+        - On both, or not sure
+    validations:
+      required: true
+  - type: textarea
+    id: systems
+    attributes:
+      label: The PCs involved
+      description: For each PC, the system, and on Linux the distro, desktop and session.
+      placeholder: |
+        Source: Ubuntu 24.04, GNOME 46, Wayland
+        Target: Windows 11 24H2
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Pair the two PCs
+        2. Press AltGr + Right Shift
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected, and what happened
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Mickey's messages
+      description: |
+        Linux: `journalctl --user -u mickey -n 100`. Windows:
+        `%LOCALAPPDATA%\mickey-run.log`. Check them before pasting.
+      render: text
