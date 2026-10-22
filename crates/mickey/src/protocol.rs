@@ -51,6 +51,13 @@ pub enum Message {
         x: i32,
         y: i32,
     },
+    /// To the target: on your desktop, I sit at `x, y` (my point 0,0 is
+    /// your `x, y`). Sent when the owner places PCs on the sender, so both
+    /// PCs agree on the layout (PRD 0005).
+    Arrange {
+        x: i32,
+        y: i32,
+    },
     /// To the target: the source's keyboard and mouse now control you
     /// (`here`), or not any more (PRD 0009).
     Focus {
@@ -70,6 +77,7 @@ const MONITORS: u8 = 9;
 const ENTER: u8 = 10;
 const LEAVE: u8 = 11;
 const FOCUS: u8 = 12;
+const ARRANGE: u8 = 13;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum DecodeError {
@@ -154,6 +162,11 @@ pub fn encode(message: &Message, frame: &mut [u8; MAX_FRAME]) -> usize {
             put(&y.to_be_bytes());
         }
         Message::Focus { here } => put(&[FOCUS, u8::from(here)]),
+        Message::Arrange { x, y } => {
+            put(&[ARRANGE]);
+            put(&x.to_be_bytes());
+            put(&y.to_be_bytes());
+        }
     }
     // At most MAX_FRAME (131), so it always fits in the length byte.
     frame[0] = (len - 1) as u8;
@@ -210,14 +223,14 @@ pub fn decode(body: &[u8]) -> Result<Message, DecodeError> {
         PONG => Message::Pong {
             id: u32::from_be_bytes(exact(kind, payload)?),
         },
-        ENTER | LEAVE => {
+        ENTER | LEAVE | ARRANGE => {
             let bytes: [u8; 8] = exact(kind, payload)?;
             let x = i32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
             let y = i32::from_be_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]);
-            if kind == ENTER {
-                Message::Enter { x, y }
-            } else {
-                Message::Leave { x, y }
+            match kind {
+                ENTER => Message::Enter { x, y },
+                LEAVE => Message::Leave { x, y },
+                _ => Message::Arrange { x, y },
             }
         }
         FOCUS => {
@@ -319,6 +332,7 @@ mod tests {
         round_trip(Message::Pong { id: u32::MAX });
         round_trip(Message::Enter { x: -1536, y: 216 });
         round_trip(Message::Focus { here: true });
+        round_trip(Message::Arrange { x: 1536, y: -216 });
         round_trip(Message::Focus { here: false });
         assert_eq!(decode(&[FOCUS, 2]), Err(DecodeError::BadBool(2)));
         round_trip(Message::Leave {

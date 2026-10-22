@@ -336,9 +336,78 @@ pub fn parse(text: &str) -> Result<Config, String> {
     Ok(config)
 }
 
+/// `text` (a config.toml) with the peer named `name` placed at `position`:
+/// its `position` line replaced, or added under its `name`. Every other
+/// line, comments included, is kept as it was. The result is checked with
+/// the same rules as `parse`.
+pub fn set_position(text: &str, name: &str, position: [i32; 2]) -> Result<String, String> {
+    let wanted = format!("position = [{}, {}]", position[0], position[1]);
+    let is_our_name = |line: &str| {
+        line.starts_with("name")
+            && toml::from_str::<toml::Table>(line)
+                .ok()
+                .and_then(|table| table.get("name")?.as_str().map(|value| value == name))
+                == Some(true)
+    };
+    let mut out: Vec<String> = Vec::new();
+    let mut in_peer = false;
+    // Where our peer's name line is in `out`, while inside its block.
+    let mut ours: Option<usize> = None;
+    let mut done = false;
+    for line in text.lines().chain(std::iter::once("[end]")) {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with('[') {
+            // Leaving our block without a position line: add one under its name.
+            if let Some(at) = ours.take()
+                && !done
+            {
+                out.insert(at + 1, wanted.clone());
+                done = true;
+            }
+            in_peer = trimmed.starts_with("[[peer]]");
+        }
+        if in_peer && !done && is_our_name(trimmed) {
+            ours = Some(out.len());
+        }
+        if ours.is_some() && !done && trimmed.starts_with("position") {
+            out.push(wanted.clone());
+            done = true;
+            continue;
+        }
+        out.push(line.to_string());
+    }
+    out.pop(); // the "[end]" sentinel
+    if !done {
+        return Err(format!("no PC named {name:?} in config.toml"));
+    }
+    let mut text = out.join("\n");
+    text.push('\n');
+    parse(&text)?;
+    Ok(text)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_position_is_set_without_touching_the_rest() {
+        let config = "# mine\n[[peer]]\nname = \"Windows\"\naddress = \"192.0.2.10:4242\"\n\n[[peer]]\nname = \"Desk\"\naddress = \"192.0.2.11:4242\"\nposition = [1, 2]    # old\n\n[touchpad]\nspeed = 16\n";
+        let added = set_position(config, "Windows", [1536, -216]).unwrap();
+        assert!(
+            added.starts_with(
+                "# mine\n[[peer]]\nname = \"Windows\"\nposition = [1536, -216]\naddress"
+            ),
+            "{added}"
+        );
+        let parsed = parse(&added).unwrap();
+        assert_eq!(parsed.peers[0].position, Some([1536, -216]));
+        assert_eq!(parsed.peers[1].position, Some([1, 2]));
+        let replaced = set_position(&added, "Desk", [-5, 6]).unwrap();
+        assert_eq!(parse(&replaced).unwrap().peers[1].position, Some([-5, 6]));
+        assert!(replaced.contains("speed = 16"));
+        assert!(set_position(config, "Nobody", [0, 0]).is_err());
+    }
 
     #[test]
     fn a_position_is_two_numbers() {
