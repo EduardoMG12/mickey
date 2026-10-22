@@ -66,6 +66,17 @@ fn key_code(name: &str) -> Option<u16> {
     Some(named)
 }
 
+/// One key by name, modifier or not, e.g. `RightShift` for a double tap.
+pub fn parse_key(text: &str) -> Result<u16, String> {
+    let name = text.trim().to_ascii_lowercase();
+    MODIFIERS
+        .iter()
+        .find(|(known, _)| *known == name)
+        .map(|&(_, code)| code)
+        .or_else(|| key_code(&name))
+        .ok_or_else(|| format!("`{text}` is not a key Mickey knows"))
+}
+
 pub fn parse(text: &str) -> Result<Chord, String> {
     let mut modifiers = Vec::new();
     let mut key = None;
@@ -135,6 +146,13 @@ mod tests {
         assert!(err("AltGr+AltGr").contains("twice"));
         assert!(err("H").contains("needs at least one modifier"));
         assert!(err("AltGr+F13").contains("`F13` is not a key"));
+    }
+
+    #[test]
+    fn single_keys_parse_by_name() {
+        assert_eq!(parse_key("RightShift"), Ok(54));
+        assert_eq!(parse_key("right"), Ok(106));
+        assert!(parse_key("Banana").is_err());
     }
 
     #[test]

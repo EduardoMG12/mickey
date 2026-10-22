@@ -23,6 +23,10 @@ pub struct Form {
     pub next: String,
     pub home: String,
     pub switcher: String,
+    pub forward: String,
+    pub back: String,
+    /// A key name; empty turns the double tap off.
+    pub double_tap: String,
     pub position: String,
     pub speed: i32,
 }
@@ -46,6 +50,13 @@ impl Form {
             next: text(&config.hotkeys.next),
             home: text(&config.hotkeys.home),
             switcher: text(&config.hotkeys.switcher),
+            forward: text(&config.hotkeys.forward),
+            back: text(&config.hotkeys.back),
+            double_tap: config
+                .hotkeys
+                .double_tap
+                .clone()
+                .unwrap_or_else(|| config::DEFAULT_DOUBLE_TAP.into()),
             position: config.interface.switcher_position.clone(),
             speed: config.touchpad.speed,
         }
@@ -84,17 +95,22 @@ impl Form {
             ("next", &self.next),
             ("home", &self.home),
             ("switcher", &self.switcher),
+            ("forward", &self.forward),
+            ("back", &self.back),
         ]
         .into_iter()
         .map(|(key, value)| (key, value.trim()))
         .filter(|(_, value)| !value.is_empty())
         .collect();
-        if !hotkeys.is_empty() {
-            out += "\n[hotkeys]\n";
-            for (key, value) in hotkeys {
-                out += &format!("{key} = {}\n", quote(value));
-            }
+        out += "\n[hotkeys]\n";
+        for (key, value) in hotkeys {
+            out += &format!("{key} = {}\n", quote(value));
         }
+        // Written even when empty: "" is how the double tap is turned off.
+        out += &format!(
+            "double_tap = {}    # a key tapped twice quickly: next PC\n",
+            quote(self.double_tap.trim())
+        );
         out += "\n[interface]\n";
         out += &format!("switcher_position = {}\n", quote(&self.position));
         out += "\n[touchpad]\n";
@@ -258,11 +274,10 @@ impl eframe::App for Settings {
                     }
                 }
                 Tab::Hotkeys => {
-                    ui.weak("e.g. AltGr+RightShift or AltGr+RightShift+H; empty = default/none");
-                    // ponytail: only "next" acts today; the others are saved
-                    // and checked, and act once the matcher knows several
-                    // hotkeys (#61).
-                    ui.weak("For now only the first one acts; the others are saved for later.");
+                    ui.weak("e.g. AltGr+RightShift or AltGr+RightShift+H");
+                    ui.weak(
+                        "Empty: AltGr+RightShift (next), +0 (home), +1 to +9 (each PC in order)",
+                    );
                     egui::Grid::new("hotkeys")
                         .min_col_width(150.0)
                         .show(ui, |ui| {
@@ -270,6 +285,9 @@ impl eframe::App for Settings {
                                 ("Next PC / switcher", &mut form.next),
                                 ("Back to this PC", &mut form.home),
                                 ("Open the switcher", &mut form.switcher),
+                                ("Next PC (one hand)", &mut form.forward),
+                                ("Previous PC (one hand)", &mut form.back),
+                                ("Double tap (empty: off)", &mut form.double_tap),
                             ] {
                                 ui.label(label);
                                 ui.add_sized([240.0, 20.0], egui::TextEdit::singleline(value));
