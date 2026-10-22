@@ -51,7 +51,7 @@ The position is read only while the mouse moves.
 - [x] `mickey monitors` lists this PC's monitors on Windows and Hyprland.
 - [x] `Monitors` message (up to 8 monitors), protocol version 3.
 - [x] `[[peer]] position = [x, y]`.
-- [ ] Edge crossing both ways, same relative height; no crossing while a
+- [x] Edge crossing both ways, where the desktops touch; no crossing while a
       mouse button is held (dragging a window must not throw it to another
       PC).
 - [x] Settings window: PCs online and their monitors, drawn; drag to
@@ -75,6 +75,21 @@ The position is read only while the mouse moves.
   process, so it runs `mickey peers` over the control channel (a Unix
   socket on Linux; on Windows TCP on localhost with a token in the user's
   own folder). It asks again every 2 s while Mickey is still starting.
+- **Crossing, both ways.** The source crosses when the cursor pushes
+  against the edge of its desktop onto a pixel that, shifted by a peer's
+  position, is on one of the peer's monitors; it sends `Enter` with that
+  point. The way back is noticed by the target, which knows its own
+  cursor: when it pushes off the target's desktop, the target sends
+  `Leave` with the pixel just off it, and the source comes home if that
+  pixel lands on one of its monitors. A Leave is sent once per push.
+- **Placing the cursor on Linux** uses Hyprland's `movecursor` instead of
+  an `EV_ABS` axis on the uinput device: an absolute axis would make the
+  virtual device look like a tablet, and Hyprland already uses the
+  coordinates `monitors` reports.
+- **Windows reads raw mouse motion while local too**, to see the cursor
+  pushing against an edge: the mouse hook is installed only while the
+  focus is remote (it slowed games down otherwise), and raw input costs
+  nothing in the game's path.
 - **Games and raw input (Windows).** Found while testing with
   Counter-Strike open: games read input with raw input, which hooks cannot
   block, and pin the cursor while aiming. While the focus is remote, an

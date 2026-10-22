@@ -4,8 +4,6 @@
 mod capture;
 mod cli;
 mod control;
-// ponytail: the source and target cross edges in the next PR (#89).
-#[allow(dead_code)]
 mod edges;
 mod emit;
 mod event;
@@ -276,14 +274,24 @@ fn target(listen: SocketAddr) -> Result<(), String> {
             eprintln!("mickey: {err}; the source will not see this PC's monitors");
             Vec::new()
         });
-        let result = transport::serve(&mut link, &monitors, |event| {
-            if let Err(err) = emitter.emit(event)
-                && !reported
-            {
-                eprintln!("mickey: input injection failed: {err} (not reported again)");
-                reported = true;
-            }
-        });
+        let output = |effect| match effect {
+            transport::Effect::Input(event) => emitter.emit(event),
+            transport::Effect::Place { x, y } => emitter.place(x, y),
+        };
+        let mut output = output;
+        let result = transport::serve(
+            &mut link,
+            &monitors,
+            |effect| {
+                if let Err(err) = output(effect)
+                    && !reported
+                {
+                    eprintln!("mickey: input injection failed: {err} (not reported again)");
+                    reported = true;
+                }
+            },
+            emit::cursor,
+        );
         match result {
             Ok(()) => println!("mickey: source {peer} disconnected"),
             Err(err) => eprintln!("mickey: source {peer} dropped: {err}"),
