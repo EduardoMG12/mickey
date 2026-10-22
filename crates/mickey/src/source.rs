@@ -515,7 +515,7 @@ fn connect_and_pair(
     let to = peer.address;
     let mut link = transport::connect(to, identity).map_err(|err| err.to_string())?;
     let peer_key = *link.peer_key();
-    if !trust::trust_or_ask(identity, trusted, &peer_key, to)? {
+    if !trust::trust_or_ask(trusted, &peer_key, to, &link.pairing_code())? {
         return Err("not paired; nothing was sent".into());
     }
     println!("mickey: waiting for {} to accept this PC", peer.name);
