@@ -26,6 +26,7 @@ mod keymap;
 mod platform;
 mod protocol;
 mod received;
+mod record;
 mod secure;
 mod source;
 mod transport;
