@@ -1,0 +1,13 @@
+[Unit]
+Description=Mickey: one keyboard and mouse for all your computers
+# The switcher window needs the graphical session's environment.
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+ExecStart=%h/.local/bin/mickey run
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=graphical-session.target
