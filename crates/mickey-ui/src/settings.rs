@@ -153,6 +153,16 @@ pub struct Settings {
     message: String,
     /// The mascot in the header, loaded on the first frame.
     mascot: Option<egui::TextureHandle>,
+    /// When config.toml last changed as far as this window knows, and when
+    /// it last looked: another PC may place itself and rewrite the file.
+    config_changed: Option<std::time::SystemTime>,
+    looked: Instant,
+}
+
+/// When config.toml was last written, if it exists.
+fn config_time() -> Option<std::time::SystemTime> {
+    let path = config::path().ok()?;
+    std::fs::metadata(path).ok()?.modified().ok()
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -185,6 +195,36 @@ impl Settings {
             tab: Tab::ThisPc,
             mascot: None,
             message,
+            config_changed: config_time(),
+            looked: Instant::now(),
+        }
+    }
+
+    /// Once a second: follows config.toml when something else rewrote it
+    /// (another PC placing itself, PRD 0005), unless the owner has changes
+    /// not saved yet; and every 5 s asks Mickey again about the PCs.
+    fn follow_changes(&mut self, ctx: &egui::Context) {
+        ctx.request_repaint_after(Duration::from_secs(1));
+        if self.looked.elapsed() < Duration::from_secs(1) {
+            return;
+        }
+        self.looked = Instant::now();
+        let now = config_time();
+        if now != self.config_changed {
+            self.config_changed = now;
+            if self.form == self.saved {
+                if let Ok(Some(config)) = Config::load() {
+                    self.form = Form::from_config(&config);
+                    self.saved = self.form.clone();
+                    self.message = "Updated: config.toml changed (another PC moved).".into();
+                }
+            } else {
+                self.message = "config.toml changed elsewhere; Save would replace it.".into();
+            }
+        }
+        if self.asked.elapsed() > Duration::from_secs(5) {
+            self.peers = load_peers();
+            self.asked = Instant::now();
         }
     }
 
@@ -204,6 +244,8 @@ impl Settings {
         self.message = match written {
             Ok(()) => {
                 self.saved = self.form.clone();
+                // Our own write is not news.
+                self.config_changed = config_time();
                 // The layout is used at once and the other PCs follow it;
                 // other settings still wait for a restart.
                 match ask_mickey("arranged") {
@@ -259,6 +301,7 @@ impl eframe::App for Settings {
         if self.mascot.is_none() {
             self.mascot = theme::mascot(ui.ctx());
         }
+        self.follow_changes(ui.ctx());
         egui::CentralPanel::default().show(ui, |ui| {
             ui.horizontal(|ui| {
                 if let Some(mascot) = &self.mascot {
