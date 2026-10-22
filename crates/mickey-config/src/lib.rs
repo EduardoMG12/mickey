@@ -238,6 +238,12 @@ pub struct Peer {
     /// touch. None: no edges, only hotkeys.
     #[serde(default)]
     pub position: Option<[i32; 2]>,
+    /// The peer's public key (64 hex digits), written when it first
+    /// connects: from then on Mickey talks to this address only with this
+    /// key, so another trusted PC that takes over the address gets nothing
+    /// meant for this one (#184).
+    #[serde(default)]
+    pub key: Option<String>,
 }
 
 #[derive(Debug, Deserialize, PartialEq)]
@@ -401,6 +407,23 @@ pub fn parse(text: &str) -> Result<Config, String> {
 /// the same rules as `parse`.
 pub fn set_position(text: &str, name: &str, position: [i32; 2]) -> Result<String, String> {
     let wanted = format!("position = [{}, {}]", position[0], position[1]);
+    set_peer_field(text, name, "position", wanted)
+}
+
+/// `text` with the peer named `name` bound to the public key `key` (64 hex
+/// digits): Mickey then talks to that PC only with that key (#184).
+pub fn set_key(text: &str, name: &str, key: &str) -> Result<String, String> {
+    set_peer_field(text, name, "key", format!("key = {}", toml_string(key)))
+}
+
+/// `text` with the `field` line of the peer named `name` replaced by
+/// `wanted`, or `wanted` added under its `name`. Every other line,
+/// comments included, is kept; the result is checked like `parse`.
+fn set_peer_field(text: &str, name: &str, field: &str, wanted: String) -> Result<String, String> {
+    let is_field = |line: &str| {
+        line.strip_prefix(field)
+            .is_some_and(|rest| rest.trim_start().starts_with('='))
+    };
     let is_our_name = |line: &str| {
         line.starts_with("name")
             && toml::from_str::<toml::Table>(line)
@@ -428,7 +451,7 @@ pub fn set_position(text: &str, name: &str, position: [i32; 2]) -> Result<String
         if in_peer && !done && is_our_name(trimmed) {
             ours = Some(out.len());
         }
-        if ours.is_some() && !done && trimmed.starts_with("position") {
+        if ours.is_some() && !done && is_field(trimmed) {
             out.push(wanted.clone());
             done = true;
             continue;
@@ -550,6 +573,25 @@ fn toml_string(text: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_peer_gets_its_key_in_place() {
+        let text =
+            "[[peer]]\nname = \"Windows\"\naddress = \"192.0.2.7:4242\"\nkeyboard_note = 1\n";
+        let text = text.replace("keyboard_note = 1\n", "");
+        let key = "ab".repeat(32);
+        let with = set_key(&text, "Windows", &key).unwrap();
+        assert_eq!(
+            parse(&with).unwrap().peers[0].key.as_deref(),
+            Some(key.as_str())
+        );
+        let again = set_key(&with, "Windows", &"cd".repeat(32)).unwrap();
+        assert_eq!(
+            again.matches("key =").count(),
+            1,
+            "replaced, not added twice"
+        );
+    }
+
     use super::*;
 
     #[test]
@@ -677,6 +719,7 @@ mod tests {
                 address: "192.0.2.10:4242".parse().unwrap(),
                 hotkey: None,
                 position: None,
+                key: None,
             }]
         );
         assert_eq!(config.touchpad.speed, 16);

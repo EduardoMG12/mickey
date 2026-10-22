@@ -271,6 +271,7 @@ fn join(
     ) {
         Ok(index) => {
             peers[index].key = Some(member.key);
+            save_key(&peers[index].name, &member.key);
             println!("mickey: {} joined through the group", peers[index].name);
             Some(index)
         }
@@ -311,6 +312,19 @@ fn add_peer(
 
 /// Writes where a peer placed itself into config.toml, so the settings
 /// window and the next start see it too.
+/// Writes `key` into the peer's block in config.toml, the first time it
+/// connects (#184).
+fn save_key(name: &str, key: &[u8; 32]) {
+    let saved = config::path().and_then(|path| {
+        let text = std::fs::read_to_string(&path).map_err(|err| err.to_string())?;
+        let text = config::set_key(&text, name, &trust::to_hex(key))?;
+        std::fs::write(&path, text).map_err(|err| err.to_string())
+    });
+    if let Err(err) = saved {
+        eprintln!("mickey: cannot remember {name}'s key: {err}");
+    }
+}
+
 fn save_position(name: &str, position: [i32; 2]) {
     let saved = config::path().and_then(|path| {
         let text = std::fs::read_to_string(&path).map_err(|err| err.to_string())?;
@@ -450,9 +464,18 @@ pub fn run(
     let mut peers: Vec<Peer> = configured
         .into_iter()
         .map(|peer| Peer {
+            key: peer.key.as_deref().and_then(|hex| {
+                let key = trust::from_hex(hex);
+                if key.is_none() {
+                    eprintln!(
+                        "mickey: {}'s key in config.toml is not 64 hex digits; ignored",
+                        peer.name
+                    );
+                }
+                key
+            }),
             name: peer.name,
             address: peer.address,
-            key: None,
             link: None,
             heard: start,
             latency: Latency::new(),
@@ -556,6 +579,19 @@ pub fn run(
     let mut online: Vec<bool> = Vec::with_capacity(peers.len());
     loop {
         for (index, link) in back.try_iter() {
+            // A peer is one PC, known by its key: another trusted PC that
+            // took over its address gets nothing meant for it (#184).
+            match peers[index].key {
+                Some(key) if key != *link.peer_key() => {
+                    println!(
+                        "mickey: {} answered with another PC's key; refused. If it was reinstalled, remove it in the settings and connect again",
+                        peers[index].name
+                    );
+                    continue;
+                }
+                Some(_) => {}
+                None => save_key(&peers[index].name, link.peer_key()),
+            }
             read_peer(index, &link, &pong_sender, start);
             if let Some(mover) = &mover {
                 open_data_link(index, peers[index].address, &shared, mover);

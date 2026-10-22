@@ -15,6 +15,9 @@ pub struct PcRow {
     pub address: String,
     pub hotkey: String,
     pub position: Option<[i32; 2]>,
+    /// Its public key, written by Mickey when it first connects; kept
+    /// as it is, never shown or edited.
+    pub key: Option<String>,
 }
 
 /// Everything editable, as the text the fields show.
@@ -59,6 +62,7 @@ impl Form {
                     address: peer.address.to_string(),
                     hotkey: text(&peer.hotkey),
                     position: peer.position,
+                    key: peer.key.clone(),
                 })
                 .collect(),
             next: text(&config.hotkeys.next),
@@ -118,6 +122,12 @@ impl Form {
             }
             if let Some([x, y]) = pc.position {
                 out += &format!("position = [{x}, {y}]    # where it sits next to this PC\n");
+            }
+            if let Some(key) = &pc.key {
+                out += &format!(
+                    "key = {}    # this PC's identity, set by Mickey\n",
+                    quote(key)
+                );
             }
         }
         let hotkeys: Vec<(&str, &str)> = [
@@ -584,6 +594,7 @@ impl eframe::App for Settings {
                                 address: format!("192.168.0.2:{}", config::DEFAULT_PORT),
                                 hotkey: String::new(),
                                 position: None,
+                                key: None,
                             });
                         }
                         ui.weak("Then edit its address in Your PCs, and Save.");
@@ -831,7 +842,7 @@ mod tests {
     #[test]
     fn what_the_form_writes_parses_back_to_the_same_form() {
         let original = config::parse(
-            "[[peer]]\nname = \"Windows \\\"main\\\"\"\naddress = \"192.0.2.10:4242\"\nhotkey = \"AltGr+RightShift+1\"\nposition = [-1920, 0]\n\n[hotkeys]\nhome = \"AltGr+RightShift+H\"\n\n[interface]\nswitcher_position = \"top-left\"\n\n[this_pc]\ncontrolled = false\nname = \"Desk\"\n",
+            "[[peer]]\nname = \"Windows \\\"main\\\"\"\naddress = \"192.0.2.10:4242\"\nhotkey = \"AltGr+RightShift+1\"\nposition = [-1920, 0]\nkey = \"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"\n\n[hotkeys]\nhome = \"AltGr+RightShift+H\"\n\n[interface]\nswitcher_position = \"top-left\"\n\n[this_pc]\ncontrolled = false\nname = \"Desk\"\n",
         )
         .unwrap();
         let form = Form::from_config(&original);
@@ -874,6 +885,7 @@ mod tests {
             address: "nowhere".into(),
             hotkey: String::new(),
             position: None,
+            key: None,
         });
         assert!(config::parse(&form.to_toml()).is_err());
     }
