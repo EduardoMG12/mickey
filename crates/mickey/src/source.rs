@@ -570,6 +570,8 @@ pub fn run(
         let changed = published.as_ref().is_none_or(|last: &Status| {
             last.focus != focus
                 || last.here != here
+                // A PC the group added makes the list longer.
+                || last.peers.len() != peers.len()
                 || last
                     .peers
                     .iter()
