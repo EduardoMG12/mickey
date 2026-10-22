@@ -164,6 +164,12 @@ pub struct Peer {
     /// Goes straight to this peer, e.g. `"AltGr+RightShift+1"`.
     #[serde(default)]
     pub hotkey: Option<String>,
+    /// Where the peer's desktop sits next to this one (PRD 0005): its point
+    /// 0,0 is at `[x, y]` of this PC's desktop, so its monitors are its own
+    /// positions plus this. The cursor crosses wherever the two desktops
+    /// touch. None: no edges, only hotkeys.
+    #[serde(default)]
+    pub position: Option<[i32; 2]>,
 }
 
 #[derive(Debug, Deserialize, PartialEq)]
@@ -301,6 +307,21 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_position_is_two_numbers() {
+        let peer = |position: &str| {
+            format!(
+                "[[peer]]\nname = \"A\"\naddress = \"192.0.2.10:4242\"\nposition = {position}\n"
+            )
+        };
+        assert_eq!(
+            parse(&peer("[-1536, 216]")).unwrap().peers[0].position,
+            Some([-1536, 216])
+        );
+        assert!(parse(&peer("[1]")).is_err());
+        assert!(parse(&peer("\"left\"")).is_err());
+    }
+
+    #[test]
     fn the_example_parses() {
         let config = parse(EXAMPLE).unwrap();
         assert_eq!(
@@ -309,6 +330,7 @@ mod tests {
                 name: "Desktop".into(),
                 address: "192.0.2.10:4242".parse().unwrap(),
                 hotkey: None,
+                position: None,
             }]
         );
         assert_eq!(config.touchpad.speed, 16);
