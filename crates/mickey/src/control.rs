@@ -80,6 +80,43 @@ impl Status {
     }
 }
 
+/// One line for a Waybar `custom` module with `"return-type": "json"`. The
+/// `class` lets the bar's CSS color it: `local`, `remote`, or `off` when no
+/// source is running (`status` is `None`).
+pub fn waybar_line(status: Option<&Status>) -> String {
+    let Some(status) = status else {
+        return r#"{"text":"Mickey off","tooltip":"mickey source is not running","class":"off"}"#
+            .to_string();
+    };
+    let online = status.peers.iter().filter(|(_, online)| *online).count();
+    let (focus, class) = match status.focus {
+        None => ("This PC", "local"),
+        Some(peer) => (status.peers[peer].0.as_str(), "remote"),
+    };
+    let text = format!("{focus} · {online}/{}", status.peers.len());
+    let tooltip = status.describe();
+    format!(
+        r#"{{"text":"{}","tooltip":"{}","class":"{class}"}}"#,
+        json_escape(&text),
+        json_escape(tooltip.trim_end())
+    )
+}
+
+/// Escapes a string for the inside of a JSON string literal.
+fn json_escape(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            c if c.is_control() => out.push_str(&format!("\\u{:04x}", u32::from(c))),
+            c => out.push(c),
+        }
+    }
+    out
+}
+
 /// `$XDG_RUNTIME_DIR/mickey/control.sock`, the per-user runtime directory
 /// that only exists while the user is logged in.
 pub fn socket_path() -> Result<PathBuf, String> {
@@ -247,6 +284,25 @@ mod tests {
             status().describe(),
             "focus: Win: B\nWindows A: online\nWin: B: offline\n"
         );
+    }
+
+    #[test]
+    fn waybar_lines_are_json_with_a_class() {
+        assert_eq!(
+            waybar_line(Some(&status())),
+            r#"{"text":"Win: B · 1/2","tooltip":"focus: Win: B\nWindows A: online\nWin: B: offline","class":"remote"}"#
+        );
+        let home = Status {
+            focus: None,
+            ..status()
+        };
+        assert!(waybar_line(Some(&home)).contains(r#""class":"local""#));
+        assert!(waybar_line(None).contains(r#""class":"off""#));
+    }
+
+    #[test]
+    fn json_escape_handles_quotes_backslashes_and_controls() {
+        assert_eq!(json_escape("a\"b\\c\nd\u{1}"), r#"a\"b\\c\nd\u0001"#);
     }
 
     #[test]
