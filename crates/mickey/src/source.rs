@@ -1,12 +1,12 @@
 //! The source side (Linux): capture local input, run the focus state
 //! machine, and send input to the focused peer.
 
-use crate::capture;
 use crate::config;
 use crate::control::{self, Control, Order, Request, Status};
 use crate::event::InputEvent;
 use crate::focus::{Action, Focus, Switcher};
 use crate::identity::{self, Identity};
+use crate::input::Input;
 use crate::latency::{self, Latency};
 use crate::protocol::Message;
 use crate::secure::Link;
@@ -18,28 +18,6 @@ use std::sync::Arc;
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
 use std::thread;
 use std::time::{Duration, Instant};
-
-/// Every keyboard and mouse, with a clear message when we may not read them.
-fn open_devices() -> Result<Vec<capture::Found>, String> {
-    let devices = capture::find_devices().map_err(|err| match err.kind() {
-        std::io::ErrorKind::PermissionDenied => "cannot read /dev/input: permission denied; run \
-             `sudo usermod -aG input $USER`, then log in again (or use `newgrp input`)"
-            .to_string(),
-        _ => format!("cannot list input devices: {err}"),
-    })?;
-    if devices.is_empty() {
-        return Err("no keyboard or mouse found under /dev/input".into());
-    }
-    for found in &devices {
-        let kind = match found.kind {
-            capture::Kind::Keyboard => "keyboard",
-            capture::Kind::Mouse => "mouse",
-            capture::Kind::Touchpad => "touchpad",
-        };
-        println!("mickey: found {kind}: {}", found.name);
-    }
-    Ok(devices)
-}
 
 const PING_EVERY: Duration = Duration::from_secs(1);
 const KEYS_UP_POLL: Duration = Duration::from_millis(10);
@@ -125,7 +103,7 @@ pub fn run(configured: Vec<config::Peer>, touchpad_speed: i32) -> Result<(), Str
     if control::source_running() {
         return Err("another mickey source is already running".into());
     }
-    let devices = open_devices()?;
+    let input = Input::open()?;
     let data_dir = identity::data_dir()?;
     let identity = Identity::load_or_create(&data_dir)?;
     let mut trusted = TrustedPeers::load(&data_dir)?;
@@ -166,7 +144,7 @@ pub fn run(configured: Vec<config::Peer>, touchpad_speed: i32) -> Result<(), Str
     // One channel wakes the loop for input, a switcher pick or an order
     // from the control socket, so each is handled the moment it happens.
     let (wake, wakes) = mpsc::channel();
-    capture::spawn_readers(&devices, wake.clone(), touchpad_speed);
+    input.start(wake.clone(), touchpad_speed)?;
     let mut switcher_open = false;
     // The status for bars and commands; without a runtime directory Mickey
     // still works, just without them.
@@ -181,7 +159,7 @@ pub fn run(configured: Vec<config::Peer>, touchpad_speed: i32) -> Result<(), Str
     let mut switcher = Switcher::new();
     // Dropping a `Grab` gives its device back, on every way out of here,
     // including `?` and panics.
-    let mut grabs = Vec::new();
+    let mut grabbed = None;
     let mut next_ping = start;
     // Names never change; which peers are online is refreshed every turn.
     let names: Vec<String> = peers.iter().map(|peer| peer.name.clone()).collect();
@@ -196,15 +174,9 @@ pub fn run(configured: Vec<config::Peer>, touchpad_speed: i32) -> Result<(), Str
             peers[index].latency.add_round_trip(round_trip);
         }
         if let Focus::WaitingForKeysUp(index) = switcher.focus()
-            && !devices
-                .iter()
-                .any(|found| found.device.any_key_down().unwrap_or(true))
+            && !input.any_key_down()
         {
-            grabs = devices
-                .iter()
-                .map(|found| found.device.grab())
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(|err| format!("cannot grab the input devices: {err}"))?;
+            grabbed = Some(input.grab()?);
             switcher.grabbed();
             println!("mickey: focus is on {}", peers[index].name);
         }
@@ -275,7 +247,7 @@ pub fn run(configured: Vec<config::Peer>, touchpad_speed: i32) -> Result<(), Str
                 }
             }
             Action::Ungrab => {
-                grabs.clear();
+                grabbed = None;
                 if let Focus::Remote(index) = left {
                     report_latency(&mut peers[index]);
                 }
@@ -316,7 +288,7 @@ pub fn run(configured: Vec<config::Peer>, touchpad_speed: i32) -> Result<(), Str
             peers[index].link = None;
             println!("mickey: lost {}; retrying every 5 s", peers[index].name);
             switcher.peer_lost(index, |_ungrab| {
-                grabs.clear();
+                grabbed = None;
                 println!("mickey: focus is back here");
             });
             reconnect(index, peers[index].address, &shared, &back_sender);
@@ -390,7 +362,7 @@ fn open_switcher(peers: &[Peer], wake: &Sender<Wake>) {
     let wake = wake.clone();
     thread::spawn(move || {
         let pick = std::env::current_exe()
-            .map(|exe| exe.with_file_name("mickey-ui"))
+            .map(|exe| exe.with_file_name(format!("mickey-ui{}", std::env::consts::EXE_SUFFIX)))
             .and_then(|ui| Command::new(ui).args(&args).output())
             .map_err(|err| format!("mickey-ui: {err}"))
             .and_then(|output| match output.status.code() {
