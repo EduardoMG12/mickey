@@ -168,10 +168,11 @@ fn run(command: Command) -> Result<(), String> {
                 .map_or(config::Touchpad::default().speed, |config| {
                     config.touchpad.speed
                 });
-            let switcher_position = config.as_ref().map_or_else(
-                || config::Interface::default().switcher_position,
-                |config| config.interface.switcher_position.clone(),
-            );
+            let interface = config
+                .as_ref()
+                .map_or_else(config::Interface::default, |config| {
+                    config.interface.clone()
+                });
             let config_hotkeys = config.as_ref().map(config::Config::hotkeys).transpose()?;
             let peers = match (to, config) {
                 (Some(to), _) => vec![config::Peer {
@@ -206,7 +207,7 @@ fn run(command: Command) -> Result<(), String> {
                 peers,
                 hotkey::Hotkey::from_config(&set),
                 touchpad_speed,
-                switcher_position,
+                interface,
                 source::Services {
                     trusted: trust::shared(&identity::data_dir()?)?,
                     name: config::parse("")
@@ -294,7 +295,7 @@ fn run_from_config() -> Result<(), String> {
             config.peers,
             hotkeys,
             config.touchpad.speed,
-            config.interface.switcher_position,
+            config.interface,
             source::Services {
                 trusted,
                 name: this_pc.name(),
@@ -500,15 +501,20 @@ fn show_switcher_here(
     let Some(focused) = lines.next() else {
         return;
     };
-    let corner = config::Config::load().ok().flatten().map_or_else(
-        || "bottom-right".to_string(),
-        |config| config.interface.switcher_position,
-    );
+    let interface = config::Config::load()
+        .ok()
+        .flatten()
+        .map_or_else(config::Interface::default, |config| config.interface);
     let mut args = vec!["switcher".to_string()];
     if mirror {
         args.push("--mirror".to_string());
     }
-    args.extend(["--at".to_string(), corner, focused.to_string()]);
+    // This PC's own corner and direction; the order is the source's.
+    args.extend(["--at".to_string(), interface.switcher_position]);
+    if interface.switcher_vertical {
+        args.push("--vertical".to_string());
+    }
+    args.push(focused.to_string());
     args.extend(lines.map(str::to_string));
     let child = std::env::current_exe()
         .map(|exe| exe.with_file_name(format!("mickey-ui{}", std::env::consts::EXE_SUFFIX)))

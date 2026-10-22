@@ -36,6 +36,8 @@ struct Switcher {
     /// A copy shown on the other PCs: it takes no keys or clicks, and Mickey
     /// closes it once the owner picks on the PC in use.
     mirror: Option<std::time::Instant>,
+    /// Each card's least inner width, from `measure`: equal in a column.
+    card_width: f32,
 }
 
 impl eframe::App for Switcher {
@@ -100,24 +102,8 @@ impl eframe::App for Switcher {
             self.choice.move_by(-1);
         }
         let mut clicked = None;
-        let mut row = egui::Rect::NOTHING;
         egui::CentralPanel::default().show(ui, |ui| {
-            row = ui
-                .horizontal(|ui| {
-                    for (index, pc) in self.choice.pcs.iter().enumerate() {
-                        if card(
-                            ui,
-                            index,
-                            pc,
-                            index == self.choice.selected,
-                            index == self.choice.focused,
-                        ) {
-                            clicked = Some(index);
-                        }
-                    }
-                })
-                .response
-                .rect;
+            clicked = cards(ui, &self.choice, self.card_width).0;
         });
         if self.mirror.is_some() {
             clicked = None;
@@ -137,7 +123,14 @@ impl eframe::App for Switcher {
 
 /// One PC as a card: the chosen one filled with the accent and stitched
 /// around, like the mascot's patches. Returns whether it was clicked.
-fn card(ui: &mut egui::Ui, number: usize, pc: &choice::Pc, selected: bool, focused: bool) -> bool {
+fn card(
+    ui: &mut egui::Ui,
+    number: usize,
+    pc: &choice::Pc,
+    width: f32,
+    selected: bool,
+    focused: bool,
+) -> egui::Response {
     use theme::palette;
     // Text that can be selected takes the click for itself, before the card.
     ui.style_mut().interaction.selectable_labels = false;
@@ -152,7 +145,7 @@ fn card(ui: &mut egui::Ui, number: usize, pc: &choice::Pc, selected: bool, focus
         .corner_radius(8.0)
         .inner_margin(CARD_MARGIN)
         .show(ui, |ui| {
-            ui.set_min_size(CARD_SIZE);
+            ui.set_min_size(egui::vec2(width, CARD_SIZE.y));
             // One line: its number (the key that picks it), a status dot
             // (green in use, grey online, red offline) and its name.
             ui.horizontal(|ui| {
@@ -181,35 +174,57 @@ fn card(ui: &mut egui::Ui, number: usize, pc: &choice::Pc, selected: bool, focus
     if selected {
         theme::stitch(ui, response.rect.shrink(3.0), palette::BONE);
     }
-    pc.online && response.clicked()
+    response
 }
 
 /// The window size that fits every card exactly. The row is laid out once,
 /// off screen, with the same theme and `card`: a window that resizes itself
 /// after opening is not honoured by every compositor (Hyprland ignores it),
 /// and names differ in length from PC to PC.
-fn measure(choice: &Choice) -> egui::Vec2 {
+fn measure(choice: &Choice) -> (egui::Vec2, f32) {
     let ctx = egui::Context::default();
     theme::apply(&ctx);
-    let mut row = egui::Rect::NOTHING;
-    // Two passes: fonts only exist from the first one on.
-    for _ in 0..2 {
+    let (mut row, mut width) = (egui::Rect::NOTHING, CARD_SIZE.x);
+    // Fonts only exist from the first pass on; the third lays a column out
+    // with every card as wide as the widest.
+    for _ in 0..3 {
         let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
             egui::CentralPanel::default().show(ui, |ui| {
-                row = ui
-                    .horizontal(|ui| {
-                        for (index, pc) in choice.pcs.iter().enumerate() {
-                            card(ui, index, pc, false, false);
-                        }
-                    })
-                    .response
-                    .rect;
+                let (_, rect, widest) = cards(ui, choice, width);
+                row = rect;
+                if choice.vertical {
+                    width = width.max(widest - 2.0 * CARD_MARGIN - 2.0);
+                }
             });
         });
         // Nothing is drawn: the font textures it made are dropped on purpose.
         output.textures_delta.clear();
     }
-    egui::vec2(row.right() + 10.0, row.bottom() + 10.0).max(egui::vec2(160.0, 52.0))
+    let size = egui::vec2(row.right() + 10.0, row.bottom() + 10.0).max(egui::vec2(160.0, 52.0));
+    (size, width)
+}
+
+/// Draws every card, in a row or a column, each at least `width` wide.
+/// Returns the card clicked (if online), the cards' rectangle, and the
+/// widest card.
+fn cards(ui: &mut egui::Ui, choice: &Choice, width: f32) -> (Option<usize>, egui::Rect, f32) {
+    let (mut clicked, mut widest) = (None, 0.0f32);
+    let mut draw = |ui: &mut egui::Ui| {
+        for (index, pc) in choice.pcs.iter().enumerate() {
+            let selected = index == choice.selected;
+            let response = card(ui, index, pc, width, selected, index == choice.focused);
+            widest = widest.max(response.rect.width());
+            if pc.online && response.clicked() {
+                clicked = Some(index);
+            }
+        }
+    };
+    let rect = if choice.vertical {
+        ui.vertical(|ui| draw(ui)).response.rect
+    } else {
+        ui.horizontal(|ui| draw(ui)).response.rect
+    };
+    (clicked, rect, widest)
 }
 
 fn main() -> ExitCode {
@@ -235,7 +250,7 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
-    let size = measure(&choice);
+    let (size, card_width) = measure(&choice);
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("Mickey")
@@ -260,6 +275,7 @@ fn main() -> ExitCode {
                 needs_placing: !placed_by_compositor,
                 answer: window_answer,
                 mirror: mirror.then(std::time::Instant::now),
+                card_width,
             }))
         }),
     );

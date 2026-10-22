@@ -36,6 +36,10 @@ pub struct Form {
     /// How close the two taps must be, in milliseconds.
     pub double_tap_ms: u64,
     pub position: String,
+    /// The switcher as a column.
+    pub vertical: bool,
+    /// The switcher's custom order, by name; empty: as the layout goes.
+    pub order: Vec<String>,
     pub speed: i32,
 }
 
@@ -72,6 +76,8 @@ impl Form {
                 .double_tap_ms
                 .unwrap_or(config::DEFAULT_DOUBLE_TAP_MS),
             position: config.interface.switcher_position.clone(),
+            vertical: config.interface.switcher_vertical,
+            order: config.interface.switcher_order.clone(),
             speed: config.touchpad.speed,
         }
     }
@@ -140,6 +146,13 @@ impl Form {
         );
         out += "\n[interface]\n";
         out += &format!("switcher_position = {}\n", quote(&self.position));
+        if self.vertical {
+            out += "switcher_vertical = true\n";
+        }
+        if !self.order.is_empty() {
+            let names: Vec<String> = self.order.iter().map(|name| quote(name)).collect();
+            out += &format!("switcher_order = [{}]\n", names.join(", "));
+        }
         out += "\n[touchpad]\n";
         out += &format!("speed = {}    # higher is faster\n", self.speed);
         out
@@ -658,6 +671,10 @@ impl eframe::App for Settings {
                             }
                         });
                     ui.weak("Where the switcher window appears when the hotkey opens it.");
+                    ui.add_space(8.0);
+                    ui.checkbox(&mut form.vertical, "Show the PCs in a column");
+                    ui.add_space(8.0);
+                    switcher_order(ui, form);
                 }
             }
             });
@@ -677,6 +694,61 @@ impl eframe::App for Settings {
                 ui.label(&self.message);
             });
         });
+    }
+}
+
+/// The switcher's order: every PC with buttons to move it. Moving one saves
+/// the whole list as the custom order; "Like the layout" empties it.
+fn switcher_order(ui: &mut egui::Ui, form: &mut Form) {
+    let this_pc = if form.name.trim().is_empty() {
+        config::ThisPc::default().name()
+    } else {
+        form.name.trim().to_string()
+    };
+    let mut cards = vec![(this_pc.as_str(), Some([0, 0]))];
+    cards.extend(form.pcs.iter().map(|pc| (pc.name.as_str(), pc.position)));
+    let interface = config::Interface {
+        switcher_vertical: form.vertical,
+        switcher_order: form.order.clone(),
+        ..config::Interface::default()
+    };
+    let shown: Vec<String> = interface
+        .switcher_sort(&cards)
+        .into_iter()
+        .map(|index| cards[index].0.to_string())
+        .collect();
+    ui.horizontal(|ui| {
+        ui.label("Order in the switcher");
+        if form.order.is_empty() {
+            ui.weak("(as the layout places them)");
+        } else if ui.button("Like the layout").clicked() {
+            form.order.clear();
+        }
+    });
+    let mut moved = None;
+    for (i, name) in shown.iter().enumerate() {
+        ui.horizontal(|ui| {
+            let up = ui.add_enabled(
+                i > 0,
+                egui::Button::new(crate::theme::icon::ARROW_UP).small(),
+            );
+            let down = ui.add_enabled(
+                i + 1 < shown.len(),
+                egui::Button::new(crate::theme::icon::ARROW_DOWN).small(),
+            );
+            if up.clicked() {
+                moved = Some((i, i - 1));
+            }
+            if down.clicked() {
+                moved = Some((i, i + 1));
+            }
+            ui.label(format!("{i}  {name}"));
+        });
+    }
+    if let Some((from, to)) = moved {
+        let mut order = shown;
+        order.swap(from, to);
+        form.order = order;
     }
 }
 
