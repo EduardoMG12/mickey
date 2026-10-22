@@ -58,6 +58,10 @@ pub enum Message {
         x: i32,
         y: i32,
     },
+    /// To the source: this PC's system refused the input I was sent (on
+    /// Windows, a window running as administrator in front). Take the
+    /// keyboard and mouse back.
+    Refused,
     /// To the target: the source's keyboard and mouse now control you
     /// (`here`), or not any more (PRD 0009).
     Focus {
@@ -78,6 +82,7 @@ const ENTER: u8 = 10;
 const LEAVE: u8 = 11;
 const FOCUS: u8 = 12;
 const ARRANGE: u8 = 13;
+const REFUSED: u8 = 14;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum DecodeError {
@@ -162,6 +167,7 @@ pub fn encode(message: &Message, frame: &mut [u8; MAX_FRAME]) -> usize {
             put(&y.to_be_bytes());
         }
         Message::Focus { here } => put(&[FOCUS, u8::from(here)]),
+        Message::Refused => put(&[REFUSED]),
         Message::Arrange { x, y } => {
             put(&[ARRANGE]);
             put(&x.to_be_bytes());
@@ -232,6 +238,10 @@ pub fn decode(body: &[u8]) -> Result<Message, DecodeError> {
                 LEAVE => Message::Leave { x, y },
                 _ => Message::Arrange { x, y },
             }
+        }
+        REFUSED => {
+            let [] = exact(kind, payload)?;
+            Message::Refused
         }
         FOCUS => {
             let [here] = exact(kind, payload)?;
@@ -333,6 +343,7 @@ mod tests {
         round_trip(Message::Enter { x: -1536, y: 216 });
         round_trip(Message::Focus { here: true });
         round_trip(Message::Arrange { x: 1536, y: -216 });
+        round_trip(Message::Refused);
         round_trip(Message::Focus { here: false });
         assert_eq!(decode(&[FOCUS, 2]), Err(DecodeError::BadBool(2)));
         round_trip(Message::Leave {

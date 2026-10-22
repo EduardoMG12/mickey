@@ -9,7 +9,7 @@ use crate::protocol::{Message, VERSION};
 use crate::secure::Link;
 use std::io;
 use std::net::{SocketAddr, TcpStream};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// How long a send may wait for a target that stopped reading. The kernel
 /// buffers megabytes first, so this only fires when the target is gone or
@@ -122,7 +122,7 @@ pub enum Effect {
 pub fn serve(
     link: &mut Link,
     monitors: &[Monitor],
-    mut act: impl FnMut(Effect),
+    mut act: impl FnMut(Effect) -> bool,
     cursor: fn() -> Option<(i32, i32)>,
 ) -> io::Result<()> {
     let first = link.recv().map_err(|err| match err.kind() {
@@ -146,6 +146,7 @@ pub fn serve(
 
     // The last Leave sent, so pushing against a wall sends it once.
     let mut left = None;
+    let mut refused_at = None;
     let mut keys = HeldSet::new();
     let mut buttons = HeldSet::new();
     let result = loop {
@@ -161,7 +162,16 @@ pub fn serve(
                     InputEvent::Button { code, pressed } => buttons.set(code, pressed),
                     InputEvent::Motion { .. } | InputEvent::Scroll { .. } => {}
                 }
-                act(Effect::Input(event));
+                // The system refused it: tell the source, at most once a
+                // second, so the keyboard and mouse go back.
+                if !act(Effect::Input(event))
+                    && refused_at.is_none_or(|at: Instant| at.elapsed() > Duration::from_secs(1))
+                {
+                    refused_at = Some(Instant::now());
+                    if let Err(err) = link.send(&Message::Refused) {
+                        break Err(err);
+                    }
+                }
                 if let InputEvent::Motion { dx, dy } = event {
                     let off = cursor().and_then(|at| edges::beyond(monitors, at, (dx, dy)));
                     if let Some((x, y)) = off
@@ -183,9 +193,16 @@ pub fn serve(
                 left = None;
                 act(Effect::Place { x, y });
             }
-            Message::Focus { here } => act(Effect::Controlled(here)),
-            Message::Arrange { x, y } => act(Effect::Arranged([x, y])),
-            Message::Pong { .. } | Message::Monitors { .. } | Message::Leave { .. } => {}
+            Message::Focus { here } => {
+                act(Effect::Controlled(here));
+            }
+            Message::Arrange { x, y } => {
+                act(Effect::Arranged([x, y]));
+            }
+            Message::Pong { .. }
+            | Message::Monitors { .. }
+            | Message::Leave { .. }
+            | Message::Refused => {}
             Message::Hello { .. } => break Err(invalid("second Hello".into())),
         }
     };
@@ -193,18 +210,18 @@ pub fn serve(
     result
 }
 
-fn release_all(keys: &mut HeldSet, buttons: &mut HeldSet, act: &mut impl FnMut(Effect)) {
+fn release_all(keys: &mut HeldSet, buttons: &mut HeldSet, act: &mut impl FnMut(Effect) -> bool) {
     keys.release_all(|code| {
         act(Effect::Input(InputEvent::Key {
             code,
             pressed: false,
-        }))
+        }));
     });
     buttons.release_all(|code| {
         act(Effect::Input(InputEvent::Button {
             code,
             pressed: false,
-        }))
+        }));
     });
 }
 
@@ -244,6 +261,7 @@ mod tests {
                     if let Effect::Input(event) = effect {
                         emitted.push(event);
                     }
+                    true
                 },
                 || None,
             );
@@ -323,6 +341,7 @@ mod tests {
                     if let Effect::Place { x, y } = effect {
                         placed.push((x, y));
                     }
+                    true
                 },
                 || Some((1535, 284)),
             );
@@ -390,6 +409,26 @@ mod tests {
             data_address("192.0.2.7:4242".parse().unwrap()),
             "192.0.2.7:4243".parse().unwrap()
         );
+    }
+
+    #[test]
+    fn refused_input_is_reported_once_a_second() {
+        let (listener, addr) = listener();
+        let target = thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            let mut link = accept(stream, &Identity::generate().unwrap()).unwrap();
+            // A system that refuses every injected event.
+            serve(&mut link, &[], |_| false, || None)
+        });
+        let mut link = source(addr);
+        link.send(&Message::Input(KEY_A)).unwrap();
+        link.send(&Message::Input(KEY_A)).unwrap();
+        assert_eq!(link.recv().unwrap(), Message::Refused);
+        // The second refusal, within the second, is not sent again.
+        link.send(&Message::Ping { id: 3 }).unwrap();
+        assert_eq!(link.recv().unwrap(), Message::Pong { id: 3 });
+        drop(link);
+        assert!(target.join().unwrap().is_ok());
     }
 
     #[test]
