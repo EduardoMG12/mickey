@@ -141,6 +141,41 @@ fn run(command: Command) -> Result<(), String> {
             source::run(peers, touchpad_speed, switcher_position)
         }
         Command::Target { listen } => target(listen),
+        Command::Run => run_from_config(),
+    }
+}
+
+/// `mickey run`: the roles `[this_pc]` asks for, in one process. The target
+/// waits for peers on its own thread; the source runs here.
+fn run_from_config() -> Result<(), String> {
+    let config = config::Config::load()?.ok_or_else(|| {
+        format!(
+            "no {}; create it, e.g.\n\n{}",
+            config::path().map_or_else(|_| "config.toml".into(), |p| p.display().to_string()),
+            config::EXAMPLE
+        )
+    })?;
+    let this_pc = &config.this_pc;
+    let source_wanted = this_pc.controls_others && !config.peers.is_empty();
+    if !source_wanted && !this_pc.controlled {
+        return Err("[this_pc] says this PC neither controls others nor is controlled".into());
+    }
+    let target = this_pc.controlled.then(|| {
+        let listen = this_pc.listen;
+        std::thread::spawn(move || target(listen))
+    });
+    if source_wanted {
+        source::run(
+            config.peers,
+            config.touchpad.speed,
+            config.interface.switcher_position,
+        )
+    } else {
+        println!("mickey: this PC only waits to be controlled");
+        target
+            .expect("controlled is true here")
+            .join()
+            .map_err(|_| "the target stopped unexpectedly".to_string())?
     }
 }
 
