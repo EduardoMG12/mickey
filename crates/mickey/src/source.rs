@@ -78,7 +78,7 @@ fn obey(
         }
         Order::Switcher => "error: the focus is on another PC; press the hotkey".into(),
         // The main loop answers these, since it knows the answers.
-        Order::Peers | Order::Discover | Order::History | Order::HistoryCopy(_) => {
+        Order::Peers | Order::Discover | Order::History | Order::HistoryCopy(_) | Order::Quit => {
             "error: not an order".into()
         }
         Order::Go(name) => {
@@ -511,6 +511,10 @@ pub fn run(
             }
             Ok(Wake::Controlled(here)) => in_control.peer_says(here),
             Ok(Wake::Tray(tray::Click::Quit)) => quit = true,
+            Ok(Wake::Control(request)) if request.order == Order::Quit => {
+                let _ = request.reply.send("ok: Mickey is quitting".into());
+                quit = true;
+            }
             Ok(Wake::Tray(tray::Click::Settings)) => open_window("settings"),
             Ok(Wake::Tray(tray::Click::History)) => open_window("history"),
             Ok(Wake::Tray(tray::Click::Home)) => switcher.go_home(&mut act),
@@ -575,7 +579,7 @@ pub fn run(
         drop(act);
         if quit {
             // Returning drops the grab: the devices go back to this PC.
-            println!("mickey: quitting, as asked from the tray");
+            println!("mickey: quitting, as asked");
             return Ok(());
         }
         if let Some((x, y)) = home_at

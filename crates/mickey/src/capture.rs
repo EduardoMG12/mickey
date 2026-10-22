@@ -53,19 +53,34 @@ pub struct Found {
 /// Opens every keyboard, mouse and touchpad under `/dev/input` (the kernel's
 /// fixed location for evdev nodes). Other devices, like the power button,
 /// are skipped.
+///
+/// A device this user may not open is skipped, not fatal: one appearing
+/// right now is root's until udev hands it to the `input` group, and
+/// `mickey run` creates its own virtual device just as it starts. Only if
+/// every device is refused is that the answer.
 pub fn find_devices() -> io::Result<Vec<Found>> {
     let mut found = Vec::new();
+    let mut refused = None;
     for entry in std::fs::read_dir("/dev/input")? {
         let path = entry?.path();
         let is_event_node = path
             .file_name()
             .and_then(|name| name.to_str())
             .is_some_and(|name| name.starts_with("event"));
-        if is_event_node && let Some(device) = classify(&path)? {
-            found.push(device);
+        if !is_event_node {
+            continue;
+        }
+        match classify(&path) {
+            Ok(Some(device)) => found.push(device),
+            Ok(None) => {}
+            Err(err) if err.kind() == io::ErrorKind::PermissionDenied => refused = Some(err),
+            Err(err) => return Err(err),
         }
     }
-    Ok(found)
+    match refused {
+        Some(err) if found.is_empty() => Err(err),
+        _ => Ok(found),
+    }
 }
 
 fn classify(path: &Path) -> io::Result<Option<Found>> {
