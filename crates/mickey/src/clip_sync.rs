@@ -22,12 +22,33 @@ pub fn answer(
         match message {
             Wire::Ask => {
                 let reply = read().map_or(Wire::Nothing, Wire::Content);
-                link.send_bulk(&clip_wire::encode(&reply).map_err(io::Error::other)?)?;
+                link.send_bulk(&encode_or_nothing(&reply))?;
             }
             Wire::Content(content) => write(content),
+            Wire::Files(files) => {
+                if let Some(paths) = save(files) {
+                    write(Content::Files(paths));
+                }
+            }
             Wire::Nothing => {}
         }
     }
+}
+
+/// `wire` ready to send; what cannot be sent (files over the limit) goes
+/// as `Nothing`, with the reason in the log, so the link stays up.
+fn encode_or_nothing(wire: &Wire) -> Vec<u8> {
+    clip_wire::encode(wire).unwrap_or_else(|err| {
+        eprintln!("mickey: clipboard not shared: {err}");
+        clip_wire::encode(&Wire::Nothing).expect("Nothing always encodes")
+    })
+}
+
+/// Saves files from another PC (see `received`); `None`, logged, if not.
+fn save(files: Vec<(String, Vec<u8>)>) -> Option<Vec<std::path::PathBuf>> {
+    crate::received::save(files)
+        .inspect_err(|err| eprintln!("mickey: {err}"))
+        .ok()
 }
 
 /// The source's side: the clipboard follows the keyboard. When it moves
@@ -91,6 +112,7 @@ fn carry(
             });
             match asked {
                 Some(Ok(Wire::Content(content))) => Some(content),
+                Some(Ok(Wire::Files(files))) => save(files).map(Content::Files),
                 Some(Ok(_)) | None => None,
                 Some(Err(_)) => {
                     links.remove(&peer);
@@ -109,9 +131,8 @@ fn carry(
                 return;
             };
             let kind = format!("{content:?}");
-            let sent = clip_wire::encode(&Wire::Content(content))
-                .map_err(io::Error::other)
-                .and_then(|bytes| link.send_bulk(&bytes).map(|()| bytes.len()));
+            let bytes = encode_or_nothing(&Wire::Content(content));
+            let sent = link.send_bulk(&bytes).map(|()| bytes.len());
             match sent {
                 // The kind and size only: the content may be secret.
                 Ok(len) if len > 64 << 10 => println!(

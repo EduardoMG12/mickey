@@ -6,7 +6,12 @@
 //! 1  Text     UTF-8
 //! 2  Image    PNG, 8-bit RGBA
 //! 3  Nothing  nothing Mickey carries is copied     (no body)
+//! 4  Files    count: u32, then per file name length: u16, name (UTF-8),
+//!             size: u64, bytes
 //! ```
+//!
+//! Files cross whole, at most `MAX_FILES` bytes together; folders are left
+//! out for now.
 //!
 //! Images cross as PNG: a screenshot's raw pixels are several times larger.
 
@@ -17,6 +22,9 @@ const ASK: u8 = 0;
 const TEXT: u8 = 1;
 const IMAGE: u8 = 2;
 const NOTHING: u8 = 3;
+const FILES: u8 = 4;
+/// Room for the names under the data link's 64 MB.
+pub const MAX_FILES: u64 = 60 << 20;
 /// The most pixel bytes a received PNG may unpack to (an 8K screenshot is
 /// about 130 MB): a small PNG must not make us allocate gigabytes.
 const MAX_PIXELS: usize = 256 << 20;
@@ -26,6 +34,8 @@ pub enum Wire {
     Ask,
     Content(Content),
     Nothing,
+    /// Files as received: names (checked safe) and bytes, not yet saved.
+    Files(Vec<(String, Vec<u8>)>),
 }
 
 pub fn encode(wire: &Wire) -> Result<Vec<u8>, String> {
@@ -33,6 +43,21 @@ pub fn encode(wire: &Wire) -> Result<Vec<u8>, String> {
         Wire::Ask => vec![ASK],
         Wire::Nothing => vec![NOTHING],
         Wire::Content(Content::Text(text)) => [&[TEXT], text.as_bytes()].concat(),
+        Wire::Content(Content::Files(paths)) => {
+            let files = read_files(paths)?;
+            encode(&Wire::Files(files))?
+        }
+        Wire::Files(files) => {
+            let mut out = vec![FILES];
+            out.extend_from_slice(&(files.len() as u32).to_be_bytes());
+            for (name, bytes) in files {
+                out.extend_from_slice(&(name.len() as u16).to_be_bytes());
+                out.extend_from_slice(name.as_bytes());
+                out.extend_from_slice(&(bytes.len() as u64).to_be_bytes());
+                out.extend_from_slice(bytes);
+            }
+            out
+        }
         Wire::Content(Content::Image {
             width,
             height,
@@ -68,8 +93,59 @@ pub fn decode(bytes: &[u8]) -> Result<Wire, String> {
             .map(|text| Wire::Content(Content::Text(text)))
             .map_err(|_| "clipboard text that is not UTF-8".to_string()),
         IMAGE => image(body).map(Wire::Content),
+        FILES => files(body).map(Wire::Files),
         _ => Err(format!("unknown clipboard message {kind}")),
     }
+}
+
+/// The copied files' names and bytes; folders are skipped, and too much
+/// in total is an error rather than a slow crossing.
+fn read_files(paths: &[std::path::PathBuf]) -> Result<Vec<(String, Vec<u8>)>, String> {
+    let mut files = Vec::new();
+    let mut total = 0;
+    for path in paths.iter().filter(|path| path.is_file()) {
+        total += path.metadata().map_err(|err| err.to_string())?.len();
+        if total > MAX_FILES {
+            return Err(format!("the copied files are over {} MB", MAX_FILES >> 20));
+        }
+        let name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| format!("{} has no usable name", path.display()))?;
+        let bytes = std::fs::read(path).map_err(|err| format!("{}: {err}", path.display()))?;
+        files.push((name.to_string(), bytes));
+    }
+    Ok(files)
+}
+
+fn files(mut body: &[u8]) -> Result<Vec<(String, Vec<u8>)>, String> {
+    let short = || "a files message that ends too soon".to_string();
+    let mut take = |len: usize| -> Result<&[u8], String> {
+        let (head, rest) = body.split_at_checked(len).ok_or_else(short)?;
+        body = rest;
+        Ok(head)
+    };
+    let count = u32::from_be_bytes(take(4)?.try_into().map_err(|_| short())?);
+    let mut files = Vec::new();
+    let mut total = 0u64;
+    for _ in 0..count {
+        let name_len = u16::from_be_bytes(take(2)?.try_into().map_err(|_| short())?);
+        let name = std::str::from_utf8(take(name_len.into())?)
+            .map_err(|_| "a file name that is not UTF-8")?;
+        let name = crate::received::safe_name(name)
+            .ok_or_else(|| format!("refused a file name from the network: {name:?}"))?
+            .to_string();
+        let size = u64::from_be_bytes(take(8)?.try_into().map_err(|_| short())?);
+        total += size;
+        if total > MAX_FILES {
+            return Err("more file bytes than allowed".into());
+        }
+        files.push((name, take(size as usize)?.to_vec()));
+    }
+    if !body.is_empty() {
+        return Err("bytes after the last file".into());
+    }
+    Ok(files)
 }
 
 fn image(png_bytes: &[u8]) -> Result<Content, String> {
@@ -130,6 +206,20 @@ mod tests {
         }))
         .unwrap();
         assert!(sent.len() < width * height * 4 / 50, "{} bytes", sent.len());
+    }
+
+    #[test]
+    fn files_round_trip_and_bad_names_are_refused() {
+        let files = vec![
+            ("a.txt".to_string(), b"hello".to_vec()),
+            ("vazio".to_string(), vec![]),
+        ];
+        round_trip(Wire::Files(files));
+        let evil = encode(&Wire::Files(vec![("../evil".into(), vec![1])])).unwrap();
+        assert!(decode(&evil).is_err());
+        let mut short = encode(&Wire::Files(vec![("a".into(), vec![1, 2])])).unwrap();
+        short.pop();
+        assert!(decode(&short).is_err());
     }
 
     #[test]
