@@ -386,9 +386,65 @@ pub fn set_position(text: &str, name: &str, position: [i32; 2]) -> Result<String
     Ok(text)
 }
 
+/// `text` (a config.toml) with a new peer at its end. A name already
+/// taken gets " (2)", " (3)"… so two PCs never share one. Checked with
+/// `parse`; returns the text and the name used.
+pub fn add_peer(
+    text: &str,
+    name: &str,
+    address: SocketAddr,
+    position: Option<[i32; 2]>,
+) -> Result<(String, String), String> {
+    let taken = parse(text)?
+        .peers
+        .into_iter()
+        .map(|peer| peer.name)
+        .collect::<Vec<_>>();
+    let name = (1..)
+        .map(|n| {
+            if n == 1 {
+                name.to_string()
+            } else {
+                format!("{name} ({n})")
+            }
+        })
+        .find(|candidate| !taken.contains(candidate))
+        .expect("an unused name exists");
+    let mut block = format!(
+        "\n[[peer]]\nname = {}\naddress = \"{address}\"\n",
+        toml_string(&name)
+    );
+    if let Some([x, y]) = position {
+        block += &format!("position = [{x}, {y}]\n");
+    }
+    let mut text = text.trim_end().to_string();
+    text += "\n";
+    text += &block;
+    parse(&text)?;
+    Ok((text, name))
+}
+
+/// A TOML basic string: quotes and backslashes escaped.
+fn toml_string(text: &str) -> String {
+    format!("\"{}\"", text.replace('\\', "\\\\").replace('"', "\\\""))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_peer_is_added_at_the_end_with_a_free_name() {
+        let config = "[[peer]]\nname = \"Windows\"\naddress = \"192.0.2.7:4242\"\n\n[touchpad]\nspeed = 16\n";
+        let address = "192.0.2.64:4242".parse().unwrap();
+        let (text, name) = add_peer(config, "Notebook 2", address, Some([5, -6])).unwrap();
+        assert_eq!(name, "Notebook 2");
+        let parsed = parse(&text).unwrap();
+        assert_eq!(parsed.peers[1].position, Some([5, -6]));
+        assert_eq!(parsed.touchpad.speed, 16);
+        let (_, again) = add_peer(&text, "Windows", address, None).unwrap();
+        assert_eq!(again, "Windows (2)");
+    }
 
     #[test]
     fn a_position_is_set_without_touching_the_rest() {
