@@ -111,12 +111,17 @@ fn run(command: Command) -> Result<(), String> {
             }
             Ok(())
         }
-        Command::Discover => {
+        Command::Discover { lines } => {
             let mut any = false;
             for line in control::request("discover")? {
                 let line = line.map_err(|err| err.to_string())?;
                 if let Some(err) = line.strip_prefix("error: ") {
                     return Err(err.to_string());
+                }
+                if lines {
+                    println!("{line}");
+                    any = true;
+                    continue;
                 }
                 let fields: Vec<&str> = line.split('\t').collect();
                 if let [name, address, fingerprint] = fields.as_slice() {
@@ -124,7 +129,7 @@ fn run(command: Command) -> Result<(), String> {
                     any = true;
                 }
             }
-            if !any {
+            if !any && !lines {
                 println!("mickey: no other PC heard yet (they announce every 3 s)");
             }
             Ok(())

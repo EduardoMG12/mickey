@@ -53,6 +53,11 @@ pub enum Order {
     Arranged,
     /// Name the next keys pressed together, or a key tapped twice.
     Record,
+    /// Add the PC at this address, found on the network, and pair with it.
+    Connect {
+        address: std::net::SocketAddr,
+        name: String,
+    },
 }
 
 /// An order for the source's main loop, and where to send its one-line
@@ -420,6 +425,12 @@ fn accept<T: From<Request>>(
                         .and_then(|id| id.parse().ok())
                         .map(Order::HistoryCopy),
                     Some(("go", name)) => Some(Order::Go(name.to_string())),
+                    Some(("connect", rest)) => rest.split_once(' ').and_then(|(address, name)| {
+                        Some(Order::Connect {
+                            address: address.parse().ok()?,
+                            name: name.trim().to_string(),
+                        })
+                    }),
                     _ => None,
                 };
                 let answer = match order {
