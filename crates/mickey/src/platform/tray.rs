@@ -173,6 +173,10 @@ unsafe extern "system" {
     fn CreateIconIndirect(info: *const IconInfo) -> isize;
     fn DestroyIcon(icon: isize) -> i32;
     fn GetDC(hwnd: isize) -> isize;
+    fn FindWindowW(class: *const u16, name: *const u16) -> isize;
+    fn FindWindowExW(parent: isize, after: isize, class: *const u16, name: *const u16) -> isize;
+    fn GetClientRect(hwnd: isize, rect: *mut [i32; 4]) -> i32;
+    fn SendMessageW(hwnd: isize, message: u32, wparam: usize, lparam: isize) -> isize;
     fn ReleaseDC(hwnd: isize, dc: isize) -> i32;
 }
 
@@ -305,6 +309,7 @@ fn run(ready: &std::sync::mpsc::Sender<io::Result<()>>) {
     let shared = SHARED.get().expect("set before the thread starts");
     shared.hwnd.store(hwnd, Ordering::SeqCst);
     remove_icon(hwnd);
+    sweep_ghosts();
     if !notify(hwnd, NIM_ADD) {
         BY_GUID.store(false, Ordering::SeqCst);
     }
@@ -353,6 +358,38 @@ fn notify(hwnd: isize, message: u32) -> bool {
         unsafe { DestroyIcon(icon) };
     }
     done
+}
+
+/// Makes Windows drop icons whose programs are gone, Mickey's from before
+/// it had a GUID among them: Windows checks an icon's owner only when the
+/// mouse passes over it, so a mouse move is sent over every spot of the
+/// notification area and of its overflow ("^").
+fn sweep_ghosts() {
+    let class = |name: &str| wide(name);
+    // SAFETY: looking windows up by class only reads; the handles found
+    // are used right away, and a 0 handle makes each call fail harmlessly.
+    unsafe {
+        let null = std::ptr::null();
+        let taskbar = FindWindowW(class("Shell_TrayWnd").as_ptr(), null);
+        let notify = FindWindowExW(taskbar, 0, class("TrayNotifyWnd").as_ptr(), null);
+        let pager = FindWindowExW(notify, 0, class("SysPager").as_ptr(), null);
+        let shown = FindWindowExW(pager, 0, class("ToolbarWindow32").as_ptr(), null);
+        let overflow = FindWindowW(class("NotifyIconOverflowWindow").as_ptr(), null);
+        let hidden = FindWindowExW(overflow, 0, class("ToolbarWindow32").as_ptr(), null);
+        for toolbar in [shown, hidden] {
+            let mut rect = [0i32; 4];
+            if toolbar == 0 || GetClientRect(toolbar, &mut rect) == 0 {
+                continue;
+            }
+            const WM_MOUSEMOVE: u32 = 0x0200;
+            for y in (0..rect[3]).step_by(4) {
+                for x in (0..rect[2]).step_by(4) {
+                    let point = ((y as isize) << 16) | (x as isize & 0xFFFF);
+                    SendMessageW(toolbar, WM_MOUSEMOVE, 0, point);
+                }
+            }
+        }
+    }
 }
 
 /// Removes Mickey's icon: this run's, or a ghost a killed run left.
