@@ -75,6 +75,28 @@ Press and release **AltGr + Right Shift** to send the keyboard and touchpad
 (or mouse) to Windows; press it again to bring them back. `mickey --help`
 lists the commands.
 
+With **two or more PCs** in `config.toml`, the hotkey opens the **switcher**:
+one card per PC; pick one with the arrow keys and Enter, or click it; Esc
+cancels. From another PC, the hotkey brings you home and opens it. The
+switcher is a separate program, `mickey-ui`, which must sit next to `mickey`
+(`cargo build --release` builds both).
+
+On **Hyprland** the switcher tiles like any window unless a rule makes it
+float. Lua config (Hyprland 0.56+):
+
+```lua
+hl.window_rule({ name = "mickey-ui", match = { class = "^(mickey-ui)$" },
+                 float = true, center = true, pin = true })
+```
+
+Classic `hyprland.conf`:
+
+```ini
+windowrulev2 = float, class:^(mickey-ui)$
+windowrulev2 = center, class:^(mickey-ui)$
+windowrulev2 = pin, class:^(mickey-ui)$
+```
+
 ### Known limits
 
 - **Hotkey only**, no screen edges yet (M1a). The hotkey is fixed.

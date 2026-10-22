@@ -2,14 +2,18 @@
 //! peers (numbered 0, 1, … in config order).
 //!
 //! ```text
-//! Local --hotkey--> WaitingForKeysUp(p) --all keys up, grabbed--> Remote(p)
-//!   ^                       ^                                        |
-//!   |                       +----hotkey, next online peer q----------+
-//!   +------------------------hotkey, no peer after p------------------+
+//!           one peer: hotkey                 all keys up, grabbed
+//! Local ---------------------> WaitingForKeysUp(p) -----------> Remote(p)
+//!   |  ^                              ^                            |
+//!   |  |    2+ peers: OpenSwitcher,   |                            |
+//!   |  +--- go_to(p) from the window--+                            |
+//!   |                                                              |
+//!   +<---- hotkey: releases, Ungrab (and OpenSwitcher if 2+) ------+
 //! ```
 //!
-//! So the hotkey cycles This PC → peer 0 → peer 1 → … → This PC, skipping
-//! peers that are offline. With one peer that is the M0 toggle.
+//! With one peer the hotkey is the M0 toggle. With two or more it asks for
+//! the switcher window (`Action::OpenSwitcher`), and `go_to` follows the
+//! owner's pick; from a remote peer it first brings the devices home.
 
 use crate::event::InputEvent;
 use crate::held::HeldSet;
@@ -31,6 +35,8 @@ pub enum Action {
     /// Send this event to this peer.
     Send(usize, InputEvent),
     Ungrab,
+    /// Show the switcher window; its answer comes back through `go_to`.
+    OpenSwitcher,
 }
 
 pub struct Switcher {
@@ -67,10 +73,12 @@ impl Switcher {
         match self.focus {
             Focus::Local => {
                 // The desktop sees every event itself; we only watch.
-                if self.hotkey.feed(event, |_| {})
-                    && let Some(peer) = next_online(None, online)
-                {
-                    self.focus = Focus::WaitingForKeysUp(peer);
+                if self.hotkey.feed(event, |_| {}) {
+                    if online.len() >= 2 {
+                        act(Action::OpenSwitcher);
+                    } else if let Some(peer) = first_online(online) {
+                        self.focus = Focus::WaitingForKeysUp(peer);
+                    }
                 }
             }
             Focus::WaitingForKeysUp(_) => {
@@ -107,12 +115,23 @@ impl Switcher {
                         ))
                     });
                     act(Action::Ungrab);
-                    self.focus = match next_online(Some(peer), online) {
-                        Some(next) => Focus::WaitingForKeysUp(next),
-                        None => Focus::Local,
-                    };
+                    self.focus = Focus::Local;
+                    if online.len() >= 2 {
+                        act(Action::OpenSwitcher);
+                    }
                 }
             }
+        }
+    }
+
+    /// The owner picked `peer` in the switcher (`None`: this PC). Ignored
+    /// unless the focus is local and the peer is online.
+    pub fn go_to(&mut self, peer: Option<usize>, online: &[bool]) {
+        if self.focus == Focus::Local
+            && let Some(peer) = peer
+            && online.get(peer) == Some(&true)
+        {
+            self.focus = Focus::WaitingForKeysUp(peer);
         }
     }
 
@@ -132,10 +151,9 @@ impl Switcher {
     }
 }
 
-/// The first online peer after `after` (or from the start), if any.
-fn next_online(after: Option<usize>, online: &[bool]) -> Option<usize> {
-    let start = after.map_or(0, |peer| peer + 1);
-    (start..online.len()).find(|&peer| online[peer])
+/// The first online peer, if any.
+fn first_online(online: &[bool]) -> Option<usize> {
+    online.iter().position(|&up| up)
 }
 
 #[cfg(test)]
@@ -184,21 +202,45 @@ mod tests {
     }
 
     #[test]
-    fn the_hotkey_cycles_through_online_peers_and_home() {
+    fn with_two_peers_the_hotkey_asks_for_the_switcher() {
         let online = [true, false, true];
         let (mut switcher, mut actions) = (Switcher::new(), Vec::new());
         hotkey(&mut switcher, &online, &mut actions);
-        assert_eq!(switcher.focus(), Focus::Remote(0));
-        hotkey(&mut switcher, &online, &mut actions);
-        assert_eq!(switcher.focus(), Focus::Remote(2), "peer 1 is offline");
-        hotkey(&mut switcher, &online, &mut actions);
         assert_eq!(switcher.focus(), Focus::Local);
+        assert_eq!(actions, [Action::OpenSwitcher]);
+
+        switcher.go_to(Some(1), &online);
+        assert_eq!(switcher.focus(), Focus::Local, "peer 1 is offline");
+        switcher.go_to(Some(2), &online);
+        switcher.grabbed();
+        assert_eq!(switcher.focus(), Focus::Remote(2));
     }
 
     #[test]
-    fn with_every_peer_offline_the_hotkey_stays_home() {
+    fn from_a_peer_the_hotkey_comes_home_then_asks() {
+        let online = [true, true];
         let (mut switcher, mut actions) = (Switcher::new(), Vec::new());
-        hotkey(&mut switcher, &[false, false], &mut actions);
+        switcher.go_to(Some(1), &online);
+        switcher.grabbed();
+        switcher.handle(key(A, true), &online, |action| actions.push(action));
+        actions.clear();
+
+        hotkey(&mut switcher, &online, &mut actions);
+        assert_eq!(switcher.focus(), Focus::Local);
+        assert_eq!(
+            actions,
+            [
+                Action::Send(1, key(A, false)),
+                Action::Ungrab,
+                Action::OpenSwitcher,
+            ]
+        );
+    }
+
+    #[test]
+    fn with_its_only_peer_offline_the_hotkey_stays_home() {
+        let (mut switcher, mut actions) = (Switcher::new(), Vec::new());
+        hotkey(&mut switcher, &[false], &mut actions);
         assert_eq!(switcher.focus(), Focus::Local);
         assert!(actions.is_empty());
     }
@@ -206,7 +248,8 @@ mod tests {
     #[test]
     fn losing_the_focused_peer_brings_the_devices_home() {
         let (mut switcher, mut actions) = (Switcher::new(), Vec::new());
-        hotkey(&mut switcher, &[true, true], &mut actions);
+        switcher.go_to(Some(0), &[true, true]);
+        switcher.grabbed();
         switcher.handle(key(A, true), &[true, true], |action| actions.push(action));
         actions.clear();
 
