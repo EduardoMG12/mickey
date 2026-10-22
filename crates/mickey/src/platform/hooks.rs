@@ -39,6 +39,14 @@ const WS_EX_TOOLWINDOW: u32 = 0x0000_0080;
 const WS_EX_TOPMOST: u32 = 0x0000_0008;
 const WS_EX_LAYERED: u32 = 0x0008_0000;
 const SW_HIDE: i32 = 0;
+const WM_SETCURSOR: u32 = 0x0020;
+const LWA_ALPHA: u32 = 0x2;
+const HWND_TOPMOST: isize = -1;
+const SWP_NOACTIVATE: u32 = 0x0010;
+const SM_XVIRTUALSCREEN: i32 = 76;
+const SM_YVIRTUALSCREEN: i32 = 77;
+const SM_CXVIRTUALSCREEN: i32 = 78;
+const SM_CYVIRTUALSCREEN: i32 = 79;
 const SW_SHOWNA: i32 = 8;
 
 type WndProc = unsafe extern "system" fn(isize, u32, usize, isize) -> isize;
@@ -154,6 +162,11 @@ unsafe extern "system" {
     fn BringWindowToTop(hwnd: isize) -> i32;
     fn GetWindowThreadProcessId(hwnd: isize, process: *mut u32) -> u32;
     fn AttachThreadInput(attach: u32, to: u32, on: i32) -> i32;
+    fn SetLayeredWindowAttributes(hwnd: isize, key: u32, alpha: u8, flags: u32) -> i32;
+    fn SetWindowPos(hwnd: isize, after: isize, x: i32, y: i32, cx: i32, cy: i32, flags: u32)
+    -> i32;
+    fn GetSystemMetrics(index: i32) -> i32;
+    fn SetCursor(cursor: isize) -> isize;
     fn DispatchMessageW(msg: *const Msg) -> isize;
     fn RegisterRawInputDevices(devices: *const RawInputDevice, count: u32, size: u32) -> i32;
     fn GetRawInputData(
@@ -327,6 +340,11 @@ pub fn start(events: Sender<HookEvent>) -> io::Result<()> {
 /// another PC. Hooks cannot stop *raw input*, which games read the mouse
 /// and keyboard with, but Windows only delivers raw input to the window in
 /// the foreground: while this one is, a game sees nothing (PRD 0008).
+///
+/// It also covers every monitor while it is shown, almost transparent and
+/// with no cursor, so the cursor left behind disappears instead of sitting
+/// at the edge. It goes away with the process, so a crash cannot leave the
+/// owner without a cursor.
 struct FocusWindow {
     hwnd: isize,
     /// The window that had the foreground before, to give it back.
@@ -371,6 +389,9 @@ impl FocusWindow {
                 std::ptr::null(),
             )
         };
+        // Alpha 1 of 255: not visible, but there for the cursor to be over.
+        // SAFETY: `hwnd` is the window just created, or 0, which fails.
+        unsafe { SetLayeredWindowAttributes(hwnd, 0, 1, LWA_ALPHA) };
         (hwnd != 0).then_some(FocusWindow {
             hwnd,
             previous: std::cell::Cell::new(0),
@@ -383,8 +404,20 @@ impl FocusWindow {
         unsafe {
             let previous = GetForegroundWindow();
             self.previous.set(previous);
+            // Over the whole virtual desktop, every monitor included.
+            SetWindowPos(
+                self.hwnd,
+                HWND_TOPMOST,
+                GetSystemMetrics(SM_XVIRTUALSCREEN),
+                GetSystemMetrics(SM_YVIRTUALSCREEN),
+                GetSystemMetrics(SM_CXVIRTUALSCREEN),
+                GetSystemMetrics(SM_CYVIRTUALSCREEN),
+                SWP_NOACTIVATE,
+            );
             ShowWindow(self.hwnd, SW_SHOWNA);
             bring_to_front(self.hwnd, previous);
+            // The cursor is over our window now, so we may hide it.
+            SetCursor(0);
         }
     }
 
@@ -479,6 +512,12 @@ unsafe extern "system" fn default_proc(
     wparam: usize,
     lparam: isize,
 ) -> isize {
+    // Windows asks which cursor to show over the window: none.
+    if message == WM_SETCURSOR {
+        // SAFETY: 0 is "no cursor"; called on the window's own thread.
+        unsafe { SetCursor(0) };
+        return 1;
+    }
     // SAFETY: passes the window procedure's own arguments on unchanged.
     unsafe { DefWindowProcW(hwnd, message, wparam, lparam) }
 }
