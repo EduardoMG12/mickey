@@ -31,6 +31,10 @@ const WM_XBUTTONDOWN: usize = 0x020B;
 const WM_XBUTTONUP: usize = 0x020C;
 const WM_MOUSEHWHEEL: usize = 0x020E;
 const LLKHF_EXTENDED: u32 = 0x01;
+/// Set on the Left Ctrl that Windows invents when AltGr (Right Alt on
+/// layouts that have AltGr, such as US-International) is pressed.
+const FAKE_CTRL_SCAN: u32 = 0x200;
+const SCAN_RIGHT_SHIFT: u32 = 0x36;
 const LLKHF_INJECTED: u32 = 0x10;
 const LLMHF_INJECTED: u32 = 0x01;
 
@@ -186,6 +190,12 @@ pub fn any_key_down() -> bool {
     (1..=0xFE).any(|vk| unsafe { GetAsyncKeyState(vk) } < 0)
 }
 
+fn swallowing() -> bool {
+    SHARED
+        .get()
+        .is_some_and(|shared| shared.swallow.load(Ordering::SeqCst))
+}
+
 /// Sends the event and says whether to swallow it. Must be quick: Windows
 /// skips a hook that takes too long.
 fn report(event: HookEvent) -> bool {
@@ -195,7 +205,7 @@ fn report(event: HookEvent) -> bool {
     if let Ok(events) = shared.events.lock() {
         let _ = events.send(event);
     }
-    shared.swallow.load(Ordering::SeqCst)
+    swallowing()
 }
 
 unsafe extern "system" fn keyboard_proc(code: i32, wparam: usize, lparam: isize) -> isize {
@@ -205,13 +215,24 @@ unsafe extern "system" fn keyboard_proc(code: i32, wparam: usize, lparam: isize)
         let info = unsafe { &*(lparam as *const KeyboardInfo) };
         // Injected events (ours from SendInput, or other programs') pass.
         if info.flags & LLKHF_INJECTED == 0 {
-            let scan = ScanCode {
-                code: info.scan_code as u8,
-                extended: info.flags & LLKHF_EXTENDED != 0,
-            };
-            let pressed = wparam == WM_KEYDOWN || wparam == WM_SYSKEYDOWN;
-            if report(HookEvent::Key { scan, pressed }) {
-                return 1;
+            if info.scan_code & FAKE_CTRL_SCAN != 0 {
+                // Not a real key: never sent on, and the hotkey must not see
+                // it as "another key pressed". Swallowed with the rest.
+                if swallowing() {
+                    return 1;
+                }
+            } else {
+                let scan = ScanCode {
+                    code: info.scan_code as u8,
+                    // Hooks mark Right Shift as extended, though its scan
+                    // code is a plain 0x36; ignore that.
+                    extended: info.flags & LLKHF_EXTENDED != 0
+                        && info.scan_code != SCAN_RIGHT_SHIFT,
+                };
+                let pressed = wparam == WM_KEYDOWN || wparam == WM_SYSKEYDOWN;
+                if report(HookEvent::Key { scan, pressed }) {
+                    return 1;
+                }
             }
         }
     }
