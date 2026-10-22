@@ -119,6 +119,7 @@ fn run(command: Command) -> Result<(), String> {
                 || config::Interface::default().switcher_position,
                 |config| config.interface.switcher_position.clone(),
             );
+            let config_hotkeys = config.as_ref().map(config::Config::hotkeys).transpose()?;
             let peers = match (to, config) {
                 (Some(to), _) => vec![config::Peer {
                     name: to.to_string(),
@@ -134,7 +135,23 @@ fn run(command: Command) -> Result<(), String> {
                     ));
                 }
             };
-            source::run(peers, touchpad_speed, switcher_position)
+            // `--to` has no config: the defaults, for one peer.
+            let set = match &config_hotkeys {
+                Some(set) if to.is_none() => set.clone(),
+                // Same defaults as an empty config.toml, for these peers.
+                _ => config::HotkeySet {
+                    peers: vec![None; peers.len()],
+                    ..config::parse("")
+                        .and_then(|empty| empty.hotkeys())
+                        .expect("the defaults are valid")
+                },
+            };
+            source::run(
+                peers,
+                hotkey::Hotkey::from_config(&set),
+                touchpad_speed,
+                switcher_position,
+            )
         }
         Command::Target { listen } => target(listen),
         Command::Run => run_from_config(),
@@ -172,8 +189,10 @@ fn run_from_config() -> Result<(), String> {
         std::thread::spawn(move || target(listen))
     });
     if source_wanted {
+        let hotkeys = hotkey::Hotkey::from_config(&config.hotkeys()?);
         source::run(
             config.peers,
+            hotkeys,
             config.touchpad.speed,
             config.interface.switcher_position,
         )

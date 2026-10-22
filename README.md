@@ -89,8 +89,12 @@ address = "192.0.2.10:4242"
 speed = 16      # higher is faster (1-200)
 ```
 
-Press and release **AltGr + Right Shift** to send the keyboard and touchpad
-(or mouse) to Windows; press it again to bring them back. `mickey --help`
+Press and release **AltGr + Right Shift** (Right Alt + Right Shift on
+keyboards without AltGr: it is the same key) to send the keyboard and
+touchpad (or mouse) to Windows; press it again to bring them back. To jump
+straight to a PC, add its number: **AltGr + Right Shift + 1** goes to the
+first PC in `config.toml`, **+ 2** to the second, and **+ 0** comes home.
+All of them can be changed in the settings window. `mickey --help`
 lists the commands.
 
 With **two or more PCs** in `config.toml`, the hotkey opens the **switcher**:
