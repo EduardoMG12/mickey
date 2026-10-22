@@ -11,6 +11,7 @@ use crate::secure::Link;
 use crate::transport;
 use crate::trust::{self, TrustedPeers};
 use std::net::SocketAddr;
+use std::process::Command;
 use std::sync::Arc;
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
 use std::thread;
@@ -102,6 +103,8 @@ pub fn run(configured: Vec<config::Peer>, touchpad_speed: i32) -> Result<(), Str
 
     let (sender, events) = mpsc::channel();
     capture::spawn_readers(&devices, sender, touchpad_speed);
+    let (pick_sender, picks) = mpsc::channel();
+    let mut switcher_open = false;
     let mut switcher = Switcher::new();
     // Dropping a `Grab` gives its device back, on every way out of here,
     // including `?` and panics.
@@ -115,6 +118,18 @@ pub fn run(configured: Vec<config::Peer>, touchpad_speed: i32) -> Result<(), Str
         }
         for (index, round_trip) in pongs.try_iter() {
             peers[index].latency.add_round_trip(round_trip);
+        }
+        for pick in picks.try_iter() {
+            switcher_open = false;
+            let online: Vec<bool> = peers.iter().map(|peer| peer.link.is_some()).collect();
+            match pick {
+                Ok(peer) => switcher.go_to(peer, &online),
+                Err(err) => {
+                    // Without the window, behave like the M0 hotkey.
+                    eprintln!("mickey: cannot show the switcher: {err}");
+                    switcher.go_to(online.iter().position(|&up| up), &online);
+                }
+            }
         }
 
         if let Focus::WaitingForKeysUp(index) = switcher.focus()
@@ -150,14 +165,16 @@ pub fn run(configured: Vec<config::Peer>, touchpad_speed: i32) -> Result<(), Str
         // Sleep until there is input or the next ping is due; poll often only
         // while waiting for keys to go up, so an idle source wakes once a second.
         let mut wait = next_ping.saturating_duration_since(now);
-        if matches!(switcher.focus(), Focus::WaitingForKeysUp(_)) {
+        if switcher_open || matches!(switcher.focus(), Focus::WaitingForKeysUp(_)) {
             wait = wait.min(KEYS_UP_POLL);
         }
         match events.recv_timeout(wait) {
             Ok(event) => {
                 let online: Vec<bool> = peers.iter().map(|peer| peer.link.is_some()).collect();
                 let left = switcher.focus();
+                let mut open = false;
                 switcher.handle(event, &online, |action| match action {
+                    Action::OpenSwitcher => open = true,
                     Action::Send(index, event) => {
                         if let Some(link) = &mut peers[index].link
                             && link.send(&Message::Input(event)).is_err()
@@ -172,10 +189,12 @@ pub fn run(configured: Vec<config::Peer>, touchpad_speed: i32) -> Result<(), Str
                         }
                     }
                 });
-                // Going to the next peer also ungrabs for a moment; only
-                // say "back here" when the focus really is local.
                 if switcher.focus() == Focus::Local && left != Focus::Local {
                     println!("mickey: focus is back here");
+                }
+                if open && !switcher_open {
+                    switcher_open = true;
+                    open_switcher(&peers, &pick_sender);
                 }
             }
             Err(RecvTimeoutError::Timeout) => {}
@@ -238,6 +257,44 @@ fn reconnect(index: usize, to: SocketAddr, shared: &Arc<Shared>, back: &Sender<(
                 return;
             }
         }
+    });
+}
+
+/// Shows `mickey-ui switcher` (installed next to this program) on its own
+/// thread, and sends the owner's pick when the window closes: `Some(peer)`,
+/// `None` for this PC or Esc, or an error if the window could not run.
+/// The GUI is a separate program so this one stays small (PRD 0003).
+fn open_switcher(peers: &[Peer], picks: &Sender<Result<Option<usize>, String>>) {
+    let mut args = vec![
+        "switcher".to_string(),
+        "0".to_string(),
+        "online:This PC".to_string(),
+    ];
+    for peer in peers {
+        let state = if peer.link.is_some() {
+            "online"
+        } else {
+            "offline"
+        };
+        args.push(format!("{state}:{}", peer.name));
+    }
+    let picks = picks.clone();
+    thread::spawn(move || {
+        let pick = std::env::current_exe()
+            .map(|exe| exe.with_file_name("mickey-ui"))
+            .and_then(|ui| Command::new(ui).args(&args).output())
+            .map_err(|err| format!("mickey-ui: {err}"))
+            .and_then(|output| match output.status.code() {
+                // The window prints the card index; card 0 is this PC.
+                Some(0) => String::from_utf8_lossy(&output.stdout)
+                    .trim()
+                    .parse::<usize>()
+                    .map(|card| card.checked_sub(1))
+                    .map_err(|err| format!("mickey-ui answered badly: {err}")),
+                Some(1) => Ok(None),
+                _ => Err(String::from_utf8_lossy(&output.stderr).trim().to_string()),
+            });
+        let _ = picks.send(pick);
     });
 }
 

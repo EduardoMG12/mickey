@@ -181,3 +181,21 @@ arrows/Enter/Esc/click, and a second thread sending a message every second.
   day and holds the keyboard, stays small, never links the GUI crates, and
   cannot be stuck by a GUI that hangs or crashes.
 
+### Ticket 4 — the switcher (2026-10-21)
+
+- **The source talks to `mickey-ui` through its command line and exit
+  code**: `mickey-ui switcher <focused> online:<name>|offline:<name>...`
+  prints the picked card and exits 0, exits 1 on Esc. A thread waits for it
+  and hands the pick to the main loop, which polls every 10 ms while the
+  window is open. If `mickey-ui` cannot run, the hotkey falls back to going
+  to the first online peer.
+- **From a remote peer the hotkey first comes home** (releases, ungrab),
+  then opens the switcher, because the window lives on this PC's screen.
+- **Hyprland 0.56 uses a Lua config**; `hyprctl keyword` no longer accepts
+  rules. `hyprctl eval 'hl.window_rule({...})'` adds one at runtime, which
+  is how the float/center/pin rule in the README was checked: the window
+  opened floating, pinned and centred (580, 347 on a 1536×864 logical
+  screen).
+- **The built-in egui fonts have no arrows or bullets**; the labels are
+  plain ASCII.
+
