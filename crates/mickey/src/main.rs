@@ -134,14 +134,17 @@ fn run(command: Command) -> Result<(), String> {
                         .expect("the defaults are valid")
                 },
             };
+            // Alone, no target tells this source it is controlled.
+            let (_, controlled) = std::sync::mpsc::channel();
             source::run(
                 peers,
                 hotkey::Hotkey::from_config(&set),
                 touchpad_speed,
                 switcher_position,
+                controlled,
             )
         }
-        Command::Target { listen } => target(listen),
+        Command::Target { listen } => target(listen, std::sync::mpsc::channel().0),
         Command::Run => run_from_config(),
         Command::Monitors => {
             for (i, m) in monitors::this_pc()?.iter().enumerate() {
@@ -178,9 +181,12 @@ fn run_from_config() -> Result<(), String> {
     if !source_wanted && !this_pc.controlled {
         return Err("[this_pc] says this PC neither controls others nor is controlled".into());
     }
+    // The target tells the source when a peer's keyboard comes over, for
+    // the status and the tray (PRD 0009).
+    let (controlled_sender, controlled) = std::sync::mpsc::channel();
     let target = this_pc.controlled.then(|| {
         let listen = this_pc.listen;
-        std::thread::spawn(move || target(listen))
+        std::thread::spawn(move || target(listen, controlled_sender))
     });
     if source_wanted {
         let hotkeys = hotkey::Hotkey::from_config(&config.hotkeys()?);
@@ -189,6 +195,7 @@ fn run_from_config() -> Result<(), String> {
             hotkeys,
             config.touchpad.speed,
             config.interface.switcher_position,
+            controlled,
         )
     } else {
         println!("mickey: this PC only waits to be controlled");
@@ -227,7 +234,8 @@ fn follow_for_waybar() -> ! {
 }
 
 /// Serves one source at a time, forever, injecting what it sends.
-fn target(listen: SocketAddr) -> Result<(), String> {
+/// `controlled` hears whether a source's keyboard and mouse control this PC.
+fn target(listen: SocketAddr, controlled: std::sync::mpsc::Sender<bool>) -> Result<(), String> {
     use std::io::ErrorKind;
     use std::net::TcpListener;
 
@@ -277,6 +285,11 @@ fn target(listen: SocketAddr) -> Result<(), String> {
         let output = |effect| match effect {
             transport::Effect::Input(event) => emitter.emit(event),
             transport::Effect::Place { x, y } => emitter.place(x, y),
+            transport::Effect::Controlled(here) => {
+                // Nobody listens when this PC only waits to be controlled.
+                let _ = controlled.send(here);
+                Ok(())
+            }
         };
         let mut output = output;
         let result = transport::serve(

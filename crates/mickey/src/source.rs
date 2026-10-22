@@ -35,6 +35,8 @@ enum Wake {
     /// Esc, or why the window could not run.
     Pick(Result<Option<usize>, String>),
     Control(Request),
+    /// A peer's keyboard and mouse came over to this PC, or left.
+    Controlled(bool),
 }
 
 impl From<InputEvent> for Wake {
@@ -107,6 +109,46 @@ fn edge_crossed(
     (!input.button_down()).then_some((index, there))
 }
 
+/// Whether the keyboard and mouse in use control this PC (PRD 0009). Two
+/// things change it: this PC's own keyboard going to a peer or coming home,
+/// and a peer's keyboard coming over or leaving. The last change wins.
+struct InControl {
+    here: bool,
+    /// Where this PC's own keyboard is: `None` here, or a peer.
+    focus: Option<usize>,
+}
+
+impl Default for InControl {
+    fn default() -> InControl {
+        InControl {
+            here: true,
+            focus: None,
+        }
+    }
+}
+
+impl InControl {
+    fn here(&self) -> bool {
+        self.here
+    }
+
+    /// This PC's keyboard is on `focus` now. If it moved, returns where it
+    /// was, so the peers can be told.
+    fn focus_is(&mut self, focus: Option<usize>) -> Option<Option<usize>> {
+        if focus == self.focus {
+            return None;
+        }
+        let was = std::mem::replace(&mut self.focus, focus);
+        self.here = focus.is_none();
+        Some(was)
+    }
+
+    /// A peer's keyboard came over (`true`) or left (`false`).
+    fn peer_says(&mut self, here: bool) {
+        self.here = here;
+    }
+}
+
 /// The answer to `mickey peers`.
 fn peers_text(this_pc: &[Monitor], peers: &[Peer], online: &[bool]) -> String {
     Peers {
@@ -150,6 +192,7 @@ pub fn run(
     hotkeys: Hotkey,
     touchpad_speed: i32,
     switcher_position: String,
+    controlled: mpsc::Receiver<bool>,
 ) -> Result<(), String> {
     // Two sources would both capture the keyboard and fight over the grab.
     if control::source_running() {
@@ -210,6 +253,17 @@ pub fn run(
         }
     };
     let mut published = None;
+    {
+        let wake = wake.clone();
+        thread::spawn(move || {
+            for here in controlled {
+                if wake.send(Wake::Controlled(here)).is_err() {
+                    return;
+                }
+            }
+        });
+    }
+    let mut in_control = InControl::default();
     let mut switcher = Switcher::with_hotkeys(hotkeys);
     // Dropping a `Grab` gives its device back, on every way out of here,
     // including `?` and panics.
@@ -269,8 +323,18 @@ pub fn run(
             Focus::Remote(peer) => Some(peer),
             Focus::Local | Focus::WaitingForKeysUp(_) => None,
         };
+        if let Some(was) = in_control.focus_is(focus) {
+            // Tell the peers the keyboard left and where it went.
+            for (index, now_here) in [(was, false), (focus, true)] {
+                if let Some(link) = index.and_then(|index| peers[index].link.as_mut()) {
+                    let _ = link.send(&Message::Focus { here: now_here });
+                }
+            }
+        }
+        let here = in_control.here();
         let changed = published.as_ref().is_none_or(|last: &Status| {
             last.focus != focus
+                || last.here != here
                 || last
                     .peers
                     .iter()
@@ -280,6 +344,7 @@ pub fn run(
         if changed {
             let status = Status {
                 focus,
+                here,
                 peers: peers
                     .iter()
                     .map(|peer| (peer.name.clone(), peer.link.is_some()))
@@ -349,6 +414,7 @@ pub fn run(
                     pushed = Some((dx, dy));
                 }
             }
+            Ok(Wake::Controlled(here)) => in_control.peer_says(here),
             Ok(Wake::Pick(pick)) => {
                 switcher_open = false;
                 match pick {
@@ -578,5 +644,25 @@ mod tests {
         assert!(answer.starts_with("ok"));
         assert_eq!(actions, [Action::Ungrab]);
         assert_eq!(switcher.focus(), Focus::Local);
+    }
+
+    #[test]
+    fn the_last_change_wins() {
+        let mut in_control = InControl::default();
+        assert!(in_control.here());
+        // This PC's keyboard goes to peer 0: not here; peer 0 is told.
+        assert_eq!(in_control.focus_is(Some(0)), Some(None));
+        assert!(!in_control.here());
+        // Another peer's keyboard comes over: here again.
+        in_control.peer_says(true);
+        assert!(in_control.here());
+        // No move of our own keyboard: nothing to tell, still here.
+        assert_eq!(in_control.focus_is(Some(0)), None);
+        assert!(in_control.here());
+        // Our keyboard comes home: here, and peer 0 is told it left.
+        assert_eq!(in_control.focus_is(None), Some(Some(0)));
+        assert!(in_control.here());
+        in_control.peer_says(false);
+        assert!(!in_control.here());
     }
 }

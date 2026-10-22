@@ -13,7 +13,7 @@ use crate::monitors::Monitor;
 use std::fmt;
 
 /// 2: messages travel inside the secure link (PRD 0002).
-/// 3: `Monitors`, `Enter` and `Leave` (PRD 0005).
+/// 3: `Monitors`, `Enter` and `Leave` (PRD 0005), `Focus` (PRD 0009).
 pub const VERSION: u8 = 3;
 
 /// Longest frame: length byte, type byte and an 8-byte payload.
@@ -51,6 +51,11 @@ pub enum Message {
         x: i32,
         y: i32,
     },
+    /// To the target: the source's keyboard and mouse now control you
+    /// (`here`), or not any more (PRD 0009).
+    Focus {
+        here: bool,
+    },
 }
 
 const HELLO: u8 = 1;
@@ -64,6 +69,7 @@ const PONG: u8 = 8;
 const MONITORS: u8 = 9;
 const ENTER: u8 = 10;
 const LEAVE: u8 = 11;
+const FOCUS: u8 = 12;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum DecodeError {
@@ -147,6 +153,7 @@ pub fn encode(message: &Message, frame: &mut [u8; MAX_FRAME]) -> usize {
             put(&x.to_be_bytes());
             put(&y.to_be_bytes());
         }
+        Message::Focus { here } => put(&[FOCUS, u8::from(here)]),
     }
     // At most MAX_FRAME (131), so it always fits in the length byte.
     frame[0] = (len - 1) as u8;
@@ -211,6 +218,14 @@ pub fn decode(body: &[u8]) -> Result<Message, DecodeError> {
                 Message::Enter { x, y }
             } else {
                 Message::Leave { x, y }
+            }
+        }
+        FOCUS => {
+            let [here] = exact(kind, payload)?;
+            match here {
+                0 => Message::Focus { here: false },
+                1 => Message::Focus { here: true },
+                other => return Err(DecodeError::BadBool(other)),
             }
         }
         MONITORS => {
@@ -303,6 +318,9 @@ mod tests {
         round_trip(Message::Ping { id: 7 });
         round_trip(Message::Pong { id: u32::MAX });
         round_trip(Message::Enter { x: -1536, y: 216 });
+        round_trip(Message::Focus { here: true });
+        round_trip(Message::Focus { here: false });
+        assert_eq!(decode(&[FOCUS, 2]), Err(DecodeError::BadBool(2)));
         round_trip(Message::Leave {
             x: i32::MIN,
             y: i32::MAX,
