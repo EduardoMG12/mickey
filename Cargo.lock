@@ -1569,6 +1569,7 @@ dependencies = [
  "arboard",
  "ksni",
  "mickey-config",
+ "png",
  "snow",
 ]
 
