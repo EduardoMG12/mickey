@@ -4,6 +4,9 @@
 mod capture;
 mod cli;
 mod control;
+// ponytail: used once the source crosses edges (#89).
+#[allow(dead_code)]
+mod edges;
 mod emit;
 mod event;
 mod focus;
