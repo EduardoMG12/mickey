@@ -148,13 +148,12 @@ fn run(command: Command) -> Result<(), String> {
 /// `mickey run`: the roles `[this_pc]` asks for, in one process. The target
 /// waits for peers on its own thread; the source runs here.
 fn run_from_config() -> Result<(), String> {
-    let config = config::Config::load()?.ok_or_else(|| {
-        format!(
-            "no {}; create it, e.g.\n\n{}",
-            config::path().map_or_else(|_| "config.toml".into(), |p| p.display().to_string()),
-            config::EXAMPLE
-        )
-    })?;
+    // Right after installing there is no config yet: with no peers, this PC
+    // just waits to be controlled until some are added.
+    let config = match config::Config::load()? {
+        Some(config) => config,
+        None => config::parse("").expect("an empty config is valid"),
+    };
     let this_pc = &config.this_pc;
     let source_wanted = this_pc.controls_others && !config.peers.is_empty();
     if !source_wanted && !this_pc.controlled {
