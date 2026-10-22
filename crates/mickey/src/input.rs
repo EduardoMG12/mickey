@@ -165,6 +165,10 @@ mod windows {
             HookEvent::Button { button, pressed } => BUTTONS
                 .get(usize::from(button))
                 .map(|&code| InputEvent::Button { code, pressed }),
+            HookEvent::Delta { dx, dy } => Some(InputEvent::Motion { dx, dy }),
+            // With raw input, positions are not motion (a game may pin the
+            // cursor); without it, motion is measured from the anchor.
+            HookEvent::Move { .. } if hooks::raw_mouse_active() => None,
             HookEvent::Move { x, y } => {
                 let anchor = anchor?;
                 let (dx, dy) = (x - anchor.x, y - anchor.y);
