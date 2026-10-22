@@ -119,6 +119,10 @@ fn run(command: Command) -> Result<(), String> {
                 .map_or(config::Touchpad::default().speed, |config| {
                     config.touchpad.speed
                 });
+            let switcher_position = config.as_ref().map_or_else(
+                || config::Interface::default().switcher_position,
+                |config| config.interface.switcher_position.clone(),
+            );
             let peers = match (to, config) {
                 (Some(to), _) => vec![config::Peer {
                     name: to.to_string(),
@@ -134,7 +138,7 @@ fn run(command: Command) -> Result<(), String> {
                     ));
                 }
             };
-            source::run(peers, touchpad_speed)
+            source::run(peers, touchpad_speed, switcher_position)
         }
         Command::Target { listen } => target(listen),
     }
