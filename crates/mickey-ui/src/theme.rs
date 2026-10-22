@@ -31,6 +31,8 @@ pub mod palette {
 
 /// Line icons from the Phosphor font (see `assets/README.md`).
 pub mod icon {
+    pub const ARROW_DOWN: &str = "\u{E03E}";
+    pub const ARROW_UP: &str = "\u{E08E}";
     pub const CHECK: &str = "\u{E182}";
     pub const CLIPBOARD: &str = "\u{E198}";
     pub const DESKTOP: &str = "\u{E560}";

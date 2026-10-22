@@ -421,7 +421,7 @@ pub fn run(
     configured: Vec<config::Peer>,
     hotkeys: Hotkey,
     touchpad_speed: i32,
-    switcher_position: String,
+    mut interface: config::Interface,
     services: Services,
 ) -> Result<(), String> {
     let Services {
@@ -870,6 +870,7 @@ pub fn run(
             // The hotkeys saved with it: used here at once, and shared.
             if let Ok(Some(config)) = config::Config::load() {
                 use_hotkeys(&config, &mut switcher, &mut double_tap_window);
+                interface = config.interface.clone();
                 if let Some(mover) = &mover {
                     mover.share_hotkeys(&config.hotkeys.to_lines());
                 }
@@ -980,21 +981,27 @@ pub fn run(
             None => None,
         };
         if let Some(in_use) = in_use {
-            let cards = switcher_cards(in_use.map_or(0, |peer| peer + 1), &my_name, &peers);
+            let cards = switcher_cards(
+                in_use.map_or(0, |peer| peer + 1),
+                &my_name,
+                &peers,
+                &positions,
+                &interface,
+            );
             if let Some(mover) = &mover {
                 for (peer, other) in peers.iter().enumerate() {
                     if Some(peer) == in_use {
-                        mover.show_switcher(peer, &cards);
+                        mover.show_switcher(peer, &cards.join("\n"));
                     } else if other.link.is_some() {
-                        mover.mirror_switcher(peer, &cards);
+                        mover.mirror_switcher(peer, &cards.join("\n"));
                     }
                 }
             }
             match in_use {
-                Some(_) => mirror = open_mirror(&cards, &switcher_position).or(mirror),
+                Some(_) => mirror = open_mirror(&cards, &interface).or(mirror),
                 None => {
                     switcher_open = true;
-                    open_switcher(&peers, &switcher_position, &wake);
+                    open_switcher(&cards, &interface, &wake);
                 }
             }
             copies_out = true;
@@ -1116,53 +1123,61 @@ fn reconnect(index: usize, to: SocketAddr, shared: &Arc<Shared>, back: &Sender<(
 /// thread, and sends the owner's pick when the window closes: `Some(peer)`,
 /// `None` for this PC or Esc, or an error if the window could not run.
 /// The GUI is a separate program so this one stays small (PRD 0003).
-/// The switcher's cards as sent to a peer: the focused card first, then
-/// this PC and every peer, one per line, as `online:name` or `offline:name`.
-fn switcher_cards(focused: usize, my_name: &str, peers: &[Peer]) -> String {
-    let mut cards = vec![focused.to_string(), format!("online:{my_name}")];
-    for peer in peers {
-        let state = if peer.link.is_some() {
-            "online"
-        } else {
-            "offline"
-        };
-        cards.push(format!("{state}:{}", peer.name));
+/// The switcher's cards: the focused card's id first, then one card per
+/// PC, as `id=online:name` or `id=offline:name`, in the order to show them
+/// (`Interface::switcher_sort`). Id 0 is this PC, `i + 1` is peer `i`.
+fn switcher_cards(
+    focused: usize,
+    my_name: &str,
+    peers: &[Peer],
+    positions: &[Option<[i32; 2]>],
+    interface: &config::Interface,
+) -> Vec<String> {
+    let mut all = vec![(my_name, Some([0, 0]), true)];
+    for (peer, place) in peers.iter().zip(positions) {
+        all.push((peer.name.as_str(), *place, peer.link.is_some()));
     }
-    cards.join("\n")
+    let sortable: Vec<(&str, Option<[i32; 2]>)> =
+        all.iter().map(|&(name, place, _)| (name, place)).collect();
+    let mut cards = vec![focused.to_string()];
+    for id in interface.switcher_sort(&sortable) {
+        let (name, _, online) = all[id];
+        let state = if online { "online" } else { "offline" };
+        cards.push(format!("{id}={state}:{name}"));
+    }
+    cards
 }
 
-/// Opens a view-only copy of the switcher on this PC (`cards` as made by
-/// `switcher_cards`); the caller kills it once a pick is made.
-fn open_mirror(cards: &str, position: &str) -> Option<std::process::Child> {
-    let mut args = vec!["switcher", "--mirror", "--at", position];
-    args.extend(cards.lines());
+/// `mickey-ui` arguments for the switcher (a view-only copy if `mirror`).
+fn switcher_args(cards: &[String], interface: &config::Interface, mirror: bool) -> Vec<String> {
+    let mut args = vec!["switcher".to_string()];
+    if mirror {
+        args.push("--mirror".to_string());
+    }
+    args.extend(["--at".to_string(), interface.switcher_position.clone()]);
+    if interface.switcher_vertical {
+        args.push("--vertical".to_string());
+    }
+    args.extend(cards.iter().cloned());
+    args
+}
+
+/// Opens a view-only copy of the switcher on this PC; the caller kills it
+/// once a pick is made.
+fn open_mirror(cards: &[String], interface: &config::Interface) -> Option<std::process::Child> {
     std::env::current_exe()
         .map(|exe| exe.with_file_name(format!("mickey-ui{}", std::env::consts::EXE_SUFFIX)))
         .and_then(|ui| {
             Command::new(ui)
-                .args(&args)
+                .args(switcher_args(cards, interface, true))
                 .stdout(std::process::Stdio::null())
                 .spawn()
         })
         .ok()
 }
 
-fn open_switcher(peers: &[Peer], position: &str, wake: &Sender<Wake>) {
-    let mut args = vec![
-        "switcher".to_string(),
-        "--at".to_string(),
-        position.to_string(),
-        "0".to_string(),
-        "online:This PC".to_string(),
-    ];
-    for peer in peers {
-        let state = if peer.link.is_some() {
-            "online"
-        } else {
-            "offline"
-        };
-        args.push(format!("{state}:{}", peer.name));
-    }
+fn open_switcher(cards: &[String], interface: &config::Interface, wake: &Sender<Wake>) {
+    let args = switcher_args(cards, interface, false);
     let wake = wake.clone();
     thread::spawn(move || {
         let pick = std::env::current_exe()
