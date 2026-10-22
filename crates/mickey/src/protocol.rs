@@ -62,6 +62,11 @@ pub enum Message {
     /// Windows, a window running as administrator in front). Take the
     /// keyboard and mouse back.
     Refused,
+    /// To the source: the owner picked this card in the switcher shown on
+    /// me (0 is the source itself, `i + 1` its peer `i`); 255: none.
+    Picked {
+        card: u8,
+    },
     /// To the target: the source's keyboard and mouse now control you
     /// (`here`), or not any more (PRD 0009).
     Focus {
@@ -83,6 +88,7 @@ const LEAVE: u8 = 11;
 const FOCUS: u8 = 12;
 const ARRANGE: u8 = 13;
 const REFUSED: u8 = 14;
+const PICKED: u8 = 15;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum DecodeError {
@@ -168,6 +174,7 @@ pub fn encode(message: &Message, frame: &mut [u8; MAX_FRAME]) -> usize {
         }
         Message::Focus { here } => put(&[FOCUS, u8::from(here)]),
         Message::Refused => put(&[REFUSED]),
+        Message::Picked { card } => put(&[PICKED, card]),
         Message::Arrange { x, y } => {
             put(&[ARRANGE]);
             put(&x.to_be_bytes());
@@ -238,6 +245,10 @@ pub fn decode(body: &[u8]) -> Result<Message, DecodeError> {
                 LEAVE => Message::Leave { x, y },
                 _ => Message::Arrange { x, y },
             }
+        }
+        PICKED => {
+            let [card] = exact(kind, payload)?;
+            Message::Picked { card }
         }
         REFUSED => {
             let [] = exact(kind, payload)?;
@@ -344,6 +355,7 @@ mod tests {
         round_trip(Message::Focus { here: true });
         round_trip(Message::Arrange { x: 1536, y: -216 });
         round_trip(Message::Refused);
+        round_trip(Message::Picked { card: 2 });
         round_trip(Message::Focus { here: false });
         assert_eq!(decode(&[FOCUS, 2]), Err(DecodeError::BadBool(2)));
         round_trip(Message::Leave {
