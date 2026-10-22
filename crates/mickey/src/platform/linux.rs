@@ -26,7 +26,8 @@ const fn eviocgbit(ev_type: u16) -> u64 {
 const EVENT_SIZE: usize = 24;
 
 unsafe extern "C" {
-    fn ioctl(fd: i32, request: u64, ...) -> i32;
+    /// Shared with `uinput.rs`.
+    pub(super) fn ioctl(fd: i32, request: u64, ...) -> i32;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
