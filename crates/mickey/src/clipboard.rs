@@ -115,7 +115,6 @@ impl Keeper {
     }
 
     /// Only the text, if any: cheap, never an image.
-    #[allow(dead_code)]
     pub fn read_text(&self) -> Option<String> {
         let (answer, wait) = std::sync::mpsc::channel();
         self.0.send(Job::ReadText(answer)).ok()?;
