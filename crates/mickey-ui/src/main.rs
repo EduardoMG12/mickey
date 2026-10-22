@@ -119,12 +119,6 @@ impl eframe::App for Switcher {
                 .response
                 .rect;
         });
-        // Grow until every card fits: names, fonts and scales differ per PC.
-        let window = ctx.content_rect().size();
-        let needed = egui::vec2(row.right() + 10.0, row.bottom() + 10.0);
-        if needed.x > window.x + 0.5 || needed.y > window.y + 0.5 {
-            ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(window.max(needed)));
-        }
         if self.mirror.is_some() {
             clicked = None;
         }
@@ -188,6 +182,34 @@ fn card(ui: &mut egui::Ui, number: usize, pc: &choice::Pc, selected: bool, focus
     pc.online && response.clicked()
 }
 
+/// The window size that fits every card exactly. The row is laid out once,
+/// off screen, with the same theme and `card`: a window that resizes itself
+/// after opening is not honoured by every compositor (Hyprland ignores it),
+/// and names differ in length from PC to PC.
+fn measure(choice: &Choice) -> egui::Vec2 {
+    let ctx = egui::Context::default();
+    theme::apply(&ctx);
+    let mut row = egui::Rect::NOTHING;
+    // Two passes: fonts only exist from the first one on.
+    for _ in 0..2 {
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
+                row = ui
+                    .horizontal(|ui| {
+                        for (index, pc) in choice.pcs.iter().enumerate() {
+                            card(ui, index, pc, false, false);
+                        }
+                    })
+                    .response
+                    .rect;
+            });
+        });
+        // Nothing is drawn: the font textures it made are dropped on purpose.
+        output.textures_delta.clear();
+    }
+    egui::vec2(row.right() + 10.0, row.bottom() + 10.0).max(egui::vec2(160.0, 52.0))
+}
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.first().map(String::as_str) == Some("settings") {
@@ -211,17 +233,16 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
-    let card = CARD_SIZE.x + 2.0 * CARD_MARGIN + 8.0;
-    let width = choice.pcs.len() as f32 * card + 16.0;
+    let size = measure(&choice);
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("Mickey")
             .with_app_id(APP_ID)
-            .with_inner_size([width.max(160.0), 52.0])
-            .with_resizable(false)
+            .with_inner_size(size)
             .with_always_on_top()
-            .with_active(!mirror)
-            .with_mouse_passthrough(mirror),
+            // Not mouse passthrough for the copy: on Windows that makes the
+            // whole window transparent.
+            .with_active(!mirror),
         ..Default::default()
     };
     let placed_by_compositor = place::ask_compositor(choice.corner, APP_ID);
