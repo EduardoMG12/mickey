@@ -66,6 +66,17 @@ mod linux {
                 .any(|found| found.device.any_key_down().unwrap_or(true))
         }
 
+        pub fn button_down(&self) -> bool {
+            self.devices
+                .iter()
+                .any(|found| found.device.button_down().unwrap_or(true))
+        }
+
+        /// Where the cursor is on this desktop, if the compositor says.
+        pub fn cursor(&self) -> Option<(i32, i32)> {
+            crate::monitors::hyprland::cursor().ok()
+        }
+
         pub fn grab(&self) -> Result<Grabbed<'_>, String> {
             let grabs = self
                 .devices
@@ -141,6 +152,15 @@ mod windows {
 
         pub fn any_key_down(&self) -> bool {
             hooks::any_key_down()
+        }
+
+        pub fn button_down(&self) -> bool {
+            hooks::button_down()
+        }
+
+        pub fn cursor(&self) -> Option<(i32, i32)> {
+            let point = hooks::cursor_pos();
+            Some((point.x, point.y))
         }
 
         /// Pins the cursor where it is and starts swallowing.

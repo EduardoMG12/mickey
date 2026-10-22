@@ -36,6 +36,49 @@ impl Emitter {
             } => windows::scroll(vertical, horizontal),
         }
     }
+
+    /// Puts the cursor at `x, y` of the desktop, where it came in.
+    pub fn place(&mut self, x: i32, y: i32) -> io::Result<()> {
+        place(x, y)
+    }
+}
+
+/// Puts this PC's cursor at `x, y` of its desktop.
+#[cfg(windows)]
+pub fn place(x: i32, y: i32) -> io::Result<()> {
+    crate::platform::windows::set_cursor_pos(x, y)
+}
+
+/// Puts this PC's cursor at `x, y` of its desktop. uinput moves are
+/// relative, so Hyprland places it (PRD 0005 *Discoveries*).
+#[cfg(target_os = "linux")]
+pub fn place(x: i32, y: i32) -> io::Result<()> {
+    use crate::monitors::hyprland;
+    // A Lua config (Hyprland 0.55+) takes Lua; the older config language
+    // takes the plain dispatcher. Try the first, then the second.
+    let lua = format!("dispatch hl.dsp.cursor.move({{x={x},y={y}}})");
+    let mut answer = hyprland::ask(&lua).map_err(io::Error::other)?;
+    if answer.trim() != "ok" {
+        answer =
+            hyprland::ask(&format!("dispatch movecursor {x} {y}")).map_err(io::Error::other)?;
+    }
+    match answer.trim() {
+        "ok" => Ok(()),
+        _ => Err(io::Error::other(format!("Hyprland answered `{answer}`"))),
+    }
+}
+
+/// Where this PC's cursor is, in the coordinates of its monitors.
+#[cfg(windows)]
+pub fn cursor() -> Option<(i32, i32)> {
+    let point = crate::platform::hooks::cursor_pos();
+    Some((point.x, point.y))
+}
+
+/// Where this PC's cursor is, if the compositor says (Hyprland only).
+#[cfg(target_os = "linux")]
+pub fn cursor() -> Option<(i32, i32)> {
+    crate::monitors::hyprland::cursor().ok()
 }
 
 #[cfg(target_os = "linux")]
@@ -103,5 +146,10 @@ impl Emitter {
             }
         }
         self.device.sync()
+    }
+
+    /// Puts the cursor at `x, y` of the desktop, where it came in.
+    pub fn place(&mut self, x: i32, y: i32) -> io::Result<()> {
+        place(x, y)
     }
 }

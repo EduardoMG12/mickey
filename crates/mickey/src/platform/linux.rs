@@ -65,6 +65,14 @@ impl Device {
         Ok(state.iter().any(|&byte| byte != 0))
     }
 
+    /// Whether a mouse button (`BTN_LEFT` to `BTN_TASK`) is down. Unlike
+    /// `any_key_down`, a finger resting on a touchpad does not count.
+    pub fn button_down(&self) -> io::Result<bool> {
+        let state = self.bitmap(EVIOCGKEY)?;
+        // BTN_LEFT is 0x110: bits 0 to 7 of byte 0x22.
+        Ok(state.get(0x110 / 8).is_some_and(|&byte| byte != 0))
+    }
+
     /// Whether the device can send `code` of `ev_type`, e.g. `EV_KEY`, `KEY_A`.
     pub fn supports(&self, ev_type: u16, code: u16) -> io::Result<bool> {
         let bits = self.bitmap(eviocgbit(ev_type))?;
