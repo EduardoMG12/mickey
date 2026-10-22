@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Mickey settings
+Comment=One keyboard and mouse for all your computers
+Exec=mickey-ui settings
+Icon=input-keyboard
+Categories=Settings;Utility;

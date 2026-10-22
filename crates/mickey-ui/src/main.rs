@@ -6,6 +6,7 @@
 
 mod choice;
 mod place;
+mod settings;
 
 use choice::Choice;
 use eframe::egui;
@@ -127,6 +128,9 @@ fn card(ui: &mut egui::Ui, pc: &choice::Pc, selected: bool, focused: bool) -> bo
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().map(String::as_str) == Some("settings") {
+        return settings_window();
+    }
     let choice = match Choice::from_args(&args) {
         Ok(choice) => choice,
         Err(err) => {
@@ -168,5 +172,28 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         None => ExitCode::from(1),
+    }
+}
+
+/// `mickey-ui settings`: the settings window (`mickey settings` starts it).
+fn settings_window() -> ExitCode {
+    let options = eframe::NativeOptions {
+        viewport: egui::ViewportBuilder::default()
+            .with_title("Mickey settings")
+            .with_app_id("mickey-settings")
+            .with_inner_size([640.0, 420.0]),
+        ..Default::default()
+    };
+    let result = eframe::run_native(
+        "mickey-settings",
+        options,
+        Box::new(|_| Ok(Box::new(settings::Settings::load()))),
+    );
+    match result {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(err) => {
+            eprintln!("mickey-ui: cannot open a window: {err}");
+            ExitCode::from(2)
+        }
     }
 }

@@ -38,7 +38,9 @@ Download the latest release from the repository's **Releases** page:
   keyboard), installs to `~/.local/bin` and starts Mickey with your desktop
   session (`systemctl --user status mickey`). `./uninstall.sh` removes it.
 
-Then list your other PCs in `config.toml` (below) and pair them: the first
+Then open **Mickey settings** (from the applications or Start menu, or
+`mickey settings`) to add your other PCs, choose what this PC does and where
+the switcher appears; it writes `config.toml` for you. Pair new PCs: the first
 time two PCs meet, run Mickey in a terminal on both (on Windows: Start menu
 → *Mickey (terminal, for pairing)*) and confirm the fingerprints.
 

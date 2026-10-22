@@ -23,6 +23,11 @@ if ! id -nG "$USER" | grep -qw input; then
     relogin=1
 fi
 
+echo "Adding 'Mickey settings' to your applications menu"
+apps="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
+mkdir -p "$apps"
+sed "s|^Exec=mickey-ui|Exec=$bin/mickey-ui|" "$here/mickey-settings.desktop" > "$apps/mickey-settings.desktop"
+
 echo "Starting Mickey with your graphical session"
 mkdir -p "$units"
 install -m 644 "$here/mickey.service" "$units/mickey.service"
