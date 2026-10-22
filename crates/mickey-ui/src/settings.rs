@@ -20,6 +20,8 @@ pub struct PcRow {
 /// Everything editable, as the text the fields show.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Form {
+    /// Empty: the host name.
+    pub name: String,
     pub controls_others: bool,
     pub controlled: bool,
     pub listen: String,
@@ -39,6 +41,7 @@ impl Form {
     pub fn from_config(config: &Config) -> Form {
         let text = |value: &Option<String>| value.clone().unwrap_or_default();
         Form {
+            name: text(&config.this_pc.name),
             controls_others: config.this_pc.controls_others,
             controlled: config.this_pc.controlled,
             listen: config.this_pc.listen.to_string(),
@@ -73,6 +76,12 @@ impl Form {
         let mut out =
             String::from("# Mickey settings; the settings window rewrites this file.\n\n");
         out += "[this_pc]\n";
+        if !self.name.trim().is_empty() {
+            out += &format!(
+                "name = {}    # how the other PCs see this one\n",
+                quote(self.name.trim())
+            );
+        }
         out += &format!(
             "controls_others = {}    # send this PC's keyboard and mouse to the PCs below\n",
             self.controls_others
@@ -248,6 +257,13 @@ impl eframe::App for Settings {
             match self.tab {
                 Tab::ThisPc => {
                     ui.label(format!("Fingerprint: {}", self.fingerprint));
+                    ui.horizontal(|ui| {
+                        ui.label("Name");
+                        ui.add(
+                            egui::TextEdit::singleline(&mut form.name)
+                                .hint_text("the computer's name"),
+                        );
+                    });
                     ui.checkbox(
                         &mut form.controls_others,
                         "Control other PCs with this keyboard and mouse",
@@ -377,7 +393,7 @@ mod tests {
     #[test]
     fn what_the_form_writes_parses_back_to_the_same_form() {
         let original = config::parse(
-            "[[peer]]\nname = \"Windows \\\"main\\\"\"\naddress = \"192.0.2.10:4242\"\nhotkey = \"AltGr+RightShift+1\"\nposition = [-1920, 0]\n\n[hotkeys]\nhome = \"AltGr+RightShift+H\"\n\n[interface]\nswitcher_position = \"top-left\"\n\n[this_pc]\ncontrolled = false\n",
+            "[[peer]]\nname = \"Windows \\\"main\\\"\"\naddress = \"192.0.2.10:4242\"\nhotkey = \"AltGr+RightShift+1\"\nposition = [-1920, 0]\n\n[hotkeys]\nhome = \"AltGr+RightShift+H\"\n\n[interface]\nswitcher_position = \"top-left\"\n\n[this_pc]\ncontrolled = false\nname = \"Desk\"\n",
         )
         .unwrap();
         let form = Form::from_config(&original);

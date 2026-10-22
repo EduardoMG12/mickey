@@ -63,7 +63,7 @@ impl Identity {
         &self.private
     }
 
-    #[cfg(test)]
+    /// Safe to share: discovery announces it (PRD 0010).
     pub fn public(&self) -> &[u8; KEY_LEN] {
         &self.public
     }
