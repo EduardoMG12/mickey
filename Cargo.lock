@@ -1571,6 +1571,8 @@ dependencies = [
  "mickey-config",
  "png",
  "snow",
+ "wayland-client",
+ "wayland-protocols-wlr",
 ]
 
 [[package]]

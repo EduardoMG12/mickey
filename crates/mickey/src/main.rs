@@ -4,6 +4,9 @@
 mod capture;
 mod cli;
 mod clip_sync;
+// ponytail: the history uses it, next.
+#[allow(dead_code)]
+mod clip_watch;
 mod clip_wire;
 mod clipboard;
 mod control;

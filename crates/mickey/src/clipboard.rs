@@ -79,6 +79,7 @@ pub struct Keeper(std::sync::mpsc::Sender<Job>);
 
 enum Job {
     Read(std::sync::mpsc::Sender<Option<Content>>),
+    ReadText(std::sync::mpsc::Sender<Option<String>>),
     Write(Content),
 }
 
@@ -91,6 +92,9 @@ impl Keeper {
                 match job {
                     Job::Read(answer) => {
                         let _ = answer.send(board.read());
+                    }
+                    Job::ReadText(answer) => {
+                        let _ = answer.send(board.0.get_text().ok());
                     }
                     Job::Write(content) => {
                         if let Err(err) = board.write(&content) {
@@ -107,6 +111,14 @@ impl Keeper {
     pub fn read(&self) -> Option<Content> {
         let (answer, wait) = std::sync::mpsc::channel();
         self.0.send(Job::Read(answer)).ok()?;
+        wait.recv().ok().flatten()
+    }
+
+    /// Only the text, if any: cheap, never an image.
+    #[allow(dead_code)]
+    pub fn read_text(&self) -> Option<String> {
+        let (answer, wait) = std::sync::mpsc::channel();
+        self.0.send(Job::ReadText(answer)).ok()?;
         wait.recv().ok().flatten()
     }
 
