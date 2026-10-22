@@ -92,13 +92,25 @@ unsafe extern "system" {
 /// What the hooks saw, before any translation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HookEvent {
-    Key { scan: ScanCode, pressed: bool },
+    Key {
+        scan: ScanCode,
+        pressed: bool,
+    },
     /// 0 left, 1 right, 2 middle, 3 back (X1), 4 forward (X2).
-    Button { button: u8, pressed: bool },
+    Button {
+        button: u8,
+        pressed: bool,
+    },
     /// Where the cursor would go, in screen pixels.
-    Move { x: i32, y: i32 },
+    Move {
+        x: i32,
+        y: i32,
+    },
     /// 120 per notch; positive is up or right.
-    Wheel { vertical: i32, horizontal: i32 },
+    Wheel {
+        vertical: i32,
+        horizontal: i32,
+    },
 }
 
 struct Shared {

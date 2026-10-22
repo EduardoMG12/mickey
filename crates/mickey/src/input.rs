@@ -1,0 +1,182 @@
+//! The source's keyboard and mouse, per platform (PRD 0008): evdev devices
+//! on Linux, low-level hooks on Windows. `mickey source` only uses this
+//! interface, so the focus, hotkey and switcher work the same on both.
+
+use crate::event::InputEvent;
+use std::sync::mpsc::Sender;
+
+#[cfg(target_os = "linux")]
+pub use linux::Input;
+#[cfg(windows)]
+pub use windows::Input;
+
+#[cfg(target_os = "linux")]
+mod linux {
+    use super::*;
+    use crate::capture;
+    use crate::platform::linux::Grab;
+
+    pub struct Input {
+        devices: Vec<capture::Found>,
+    }
+
+    /// While this lives, the devices are taken from the desktop.
+    pub struct Grabbed<'a> {
+        _grabs: Vec<Grab<'a>>,
+    }
+
+    impl Input {
+        /// Every keyboard, mouse and touchpad, with a clear message when we
+        /// may not read them.
+        pub fn open() -> Result<Input, String> {
+            let devices = capture::find_devices().map_err(|err| match err.kind() {
+                std::io::ErrorKind::PermissionDenied => {
+                    "cannot read /dev/input: permission denied; run \
+                     `sudo usermod -aG input $USER`, then log in again (or use `newgrp input`)"
+                        .to_string()
+                }
+                _ => format!("cannot list input devices: {err}"),
+            })?;
+            if devices.is_empty() {
+                return Err("no keyboard or mouse found under /dev/input".into());
+            }
+            for found in &devices {
+                let kind = match found.kind {
+                    capture::Kind::Keyboard => "keyboard",
+                    capture::Kind::Mouse => "mouse",
+                    capture::Kind::Touchpad => "touchpad",
+                };
+                println!("mickey: found {kind}: {}", found.name);
+            }
+            Ok(Input { devices })
+        }
+
+        pub fn start<T: From<InputEvent> + Send + 'static>(
+            &self,
+            events: Sender<T>,
+            touchpad_speed: i32,
+        ) -> Result<(), String> {
+            capture::spawn_readers(&self.devices, events, touchpad_speed);
+            Ok(())
+        }
+
+        pub fn any_key_down(&self) -> bool {
+            self.devices
+                .iter()
+                .any(|found| found.device.any_key_down().unwrap_or(true))
+        }
+
+        pub fn grab(&self) -> Result<Grabbed<'_>, String> {
+            let grabs = self
+                .devices
+                .iter()
+                .map(|found| found.device.grab())
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|err| format!("cannot grab the input devices: {err}"))?;
+            Ok(Grabbed { _grabs: grabs })
+        }
+    }
+}
+
+#[cfg(windows)]
+mod windows {
+    use super::*;
+    use crate::keymap;
+    use crate::platform::hooks::{self, HookEvent, Point};
+    use std::marker::PhantomData;
+    use std::sync::{Arc, Mutex};
+
+    /// evdev codes for left, right, middle, back and forward.
+    const BUTTONS: [u16; 5] = [0x110, 0x111, 0x112, 0x113, 0x114];
+
+    pub struct Input {
+        /// Where the cursor was pinned when the focus left; `None` while
+        /// local. Motion is measured from it.
+        anchor: Arc<Mutex<Option<Point>>>,
+    }
+
+    /// While this lives, the hooks swallow every event.
+    pub struct Grabbed<'a> {
+        anchor: Arc<Mutex<Option<Point>>>,
+        _input: PhantomData<&'a Input>,
+    }
+
+    impl Drop for Grabbed<'_> {
+        fn drop(&mut self) {
+            hooks::set_swallow(false);
+            *self.anchor.lock().unwrap_or_else(|p| p.into_inner()) = None;
+        }
+    }
+
+    impl Input {
+        pub fn open() -> Result<Input, String> {
+            println!("mickey: capturing the keyboard and mouse with low-level hooks");
+            Ok(Input {
+                anchor: Arc::new(Mutex::new(None)),
+            })
+        }
+
+        /// Installs the hooks; a thread turns what they see into
+        /// `InputEvent`s with evdev codes.
+        pub fn start<T: From<InputEvent> + Send + 'static>(
+            &self,
+            events: Sender<T>,
+            _touchpad_speed: i32,
+        ) -> Result<(), String> {
+            let (raw_sender, raw) = std::sync::mpsc::channel();
+            hooks::start(raw_sender).map_err(|err| format!("cannot install the hooks: {err}"))?;
+            let anchor = Arc::clone(&self.anchor);
+            std::thread::spawn(move || {
+                for event in raw {
+                    let anchor = *anchor.lock().unwrap_or_else(|p| p.into_inner());
+                    if let Some(event) = translate(event, anchor)
+                        && events.send(T::from(event)).is_err()
+                    {
+                        return;
+                    }
+                }
+            });
+            Ok(())
+        }
+
+        pub fn any_key_down(&self) -> bool {
+            hooks::any_key_down()
+        }
+
+        /// Pins the cursor where it is and starts swallowing.
+        pub fn grab(&self) -> Result<Grabbed<'_>, String> {
+            *self.anchor.lock().unwrap_or_else(|p| p.into_inner()) = Some(hooks::cursor_pos());
+            hooks::set_swallow(true);
+            Ok(Grabbed {
+                anchor: Arc::clone(&self.anchor),
+                _input: PhantomData,
+            })
+        }
+    }
+
+    /// Hook events to Mickey's events. Motion only counts while the cursor
+    /// is pinned: swallowed moves leave it at `anchor`, so each reported
+    /// position minus the anchor is exactly one movement.
+    fn translate(event: HookEvent, anchor: Option<Point>) -> Option<InputEvent> {
+        match event {
+            HookEvent::Key { scan, pressed } => {
+                keymap::evdev_code(scan).map(|code| InputEvent::Key { code, pressed })
+            }
+            HookEvent::Button { button, pressed } => BUTTONS
+                .get(usize::from(button))
+                .map(|&code| InputEvent::Button { code, pressed }),
+            HookEvent::Move { x, y } => {
+                let anchor = anchor?;
+                let (dx, dy) = (x - anchor.x, y - anchor.y);
+                (dx != 0 || dy != 0).then_some(InputEvent::Motion { dx, dy })
+            }
+            HookEvent::Wheel {
+                vertical,
+                horizontal,
+            } => Some(InputEvent::Scroll {
+                vertical,
+                horizontal,
+            }),
+        }
+    }
+}
