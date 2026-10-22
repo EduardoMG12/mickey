@@ -77,9 +77,9 @@ impl Link {
         format!("{:03} {:03}", self.code / 1000, self.code % 1000)
     }
 
-    // Only the source clones a link (for its pong reader), so the Windows
-    // build never calls this in M0.
-    #[cfg_attr(windows, allow(dead_code))]
+    /// Another handle on the same link: the source reads pongs with one,
+    /// the target sends a switcher pick back with one. They share the
+    /// cipher state, so nonces stay in order.
     pub fn try_clone(&self) -> io::Result<Link> {
         Ok(Link {
             stream: self.stream.try_clone()?,

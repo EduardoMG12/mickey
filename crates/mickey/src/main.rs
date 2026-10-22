@@ -358,6 +358,7 @@ fn target(
 
     let data_dir = identity::data_dir()?;
     let identity = Arc::new(identity::Identity::load_or_create(&data_dir)?);
+    let sources = Sources::default();
     // One virtual keyboard and mouse for every source that connects.
     let emitter = Arc::new(Mutex::new(emit::Emitter::new()?));
     let listener = TcpListener::bind(listen).map_err(|err| match err.kind() {
@@ -367,7 +368,7 @@ fn target(
     })?;
     println!("mickey: listening on {listen}");
     if let Some(keeper) = keeper {
-        serve_clipboard(listen, &identity, &trusted, keeper, &controlled);
+        serve_clipboard(listen, &identity, &trusted, keeper, &controlled, &sources);
     }
     loop {
         let (stream, peer) = match listener.accept() {
@@ -380,17 +381,13 @@ fn target(
         // Each source on its own thread: a PC asking to pair, its window
         // still open, must not hold up a paired PC that reconnects.
         let (identity, trusted, emitter) = (identity.clone(), trusted.clone(), emitter.clone());
-        let (controlled, found) = (controlled.clone(), found.clone());
+        let around = Around {
+            controlled: controlled.clone(),
+            found: found.clone(),
+            sources: sources.clone(),
+        };
         std::thread::spawn(move || {
-            serve_source(
-                stream,
-                peer,
-                &identity,
-                &trusted,
-                &emitter,
-                &controlled,
-                found.as_ref(),
-            );
+            serve_source(stream, peer, &identity, &trusted, &emitter, &around);
         });
     }
 }
@@ -403,6 +400,7 @@ fn serve_clipboard(
     trusted: &std::sync::Arc<std::sync::Mutex<trust::TrustedPeers>>,
     keeper: clipboard::Keeper,
     controlled: &std::sync::mpsc::Sender<source::TargetNews>,
+    sources: &Sources,
 ) {
     let data = transport::data_address(listen);
     let listener = match std::net::TcpListener::bind(data) {
@@ -413,10 +411,11 @@ fn serve_clipboard(
         }
     };
     let (identity, trusted, controlled) = (identity.clone(), trusted.clone(), controlled.clone());
+    let sources = sources.clone();
     std::thread::spawn(move || {
         for stream in listener.incoming().flatten() {
             let (identity, trusted, keeper) = (identity.clone(), trusted.clone(), keeper.clone());
-            let controlled = controlled.clone();
+            let (controlled, sources) = (controlled.clone(), sources.clone());
             let Ok(from) = stream.peer_addr().map(|address| address.ip()) else {
                 continue;
             };
@@ -437,6 +436,12 @@ fn serve_clipboard(
                                 }
                                 Err(err) => eprintln!("mickey: {err}"),
                             },
+                            group::SWITCHER => {
+                                let (text, sources) = (text.to_string(), sources.clone());
+                                std::thread::spawn(move || {
+                                    show_switcher_here(&text, from, &sources)
+                                });
+                            }
                             group::HOTKEYS => {
                                 let _ =
                                     controlled.send(source::TargetNews::Hotkeys(text.to_string()));
@@ -457,6 +462,56 @@ fn serve_clipboard(
     });
 }
 
+/// The sources driving this PC, by address: their input links, for what
+/// goes back to them outside `serve` (a pick in the switcher shown here).
+type Sources =
+    std::sync::Arc<std::sync::Mutex<std::collections::HashMap<std::net::IpAddr, secure::Link>>>;
+
+/// What every source's thread on the target shares.
+struct Around {
+    controlled: std::sync::mpsc::Sender<source::TargetNews>,
+    found: Option<discovery::Table>,
+    sources: Sources,
+}
+
+/// Shows the switcher a source asked for (PRD 0007), here where the owner
+/// is looking, in this PC's own corner, and sends the card picked back.
+fn show_switcher_here(text: &str, from: std::net::IpAddr, sources: &Sources) {
+    let mut lines = text.lines();
+    let Some(focused) = lines.next() else {
+        return;
+    };
+    let corner = config::Config::load().ok().flatten().map_or_else(
+        || "bottom-right".to_string(),
+        |config| config.interface.switcher_position,
+    );
+    let mut args = vec![
+        "switcher".to_string(),
+        "--at".to_string(),
+        corner,
+        focused.to_string(),
+    ];
+    args.extend(lines.map(str::to_string));
+    let ui = std::env::current_exe()
+        .map(|exe| exe.with_file_name(format!("mickey-ui{}", std::env::consts::EXE_SUFFIX)));
+    // 255: closed without a pick.
+    let card = ui
+        .and_then(|ui| std::process::Command::new(ui).args(&args).output())
+        .ok()
+        .filter(|output| output.status.success())
+        .and_then(|output| {
+            String::from_utf8_lossy(&output.stdout)
+                .trim()
+                .parse::<u8>()
+                .ok()
+        })
+        .unwrap_or(u8::MAX);
+    let mut sources = sources.lock().unwrap_or_else(|p| p.into_inner());
+    if let Some(link) = sources.get_mut(&from) {
+        let _ = link.send(&protocol::Message::Picked { card });
+    }
+}
+
 /// Pairs with one source if needed, then plays what it sends until it
 /// leaves.
 fn serve_source(
@@ -465,9 +520,14 @@ fn serve_source(
     identity: &identity::Identity,
     trusted: &std::sync::Mutex<trust::TrustedPeers>,
     emitter: &std::sync::Mutex<emit::Emitter>,
-    controlled: &std::sync::mpsc::Sender<source::TargetNews>,
-    found: Option<&discovery::Table>,
+    around: &Around,
 ) {
+    let Around {
+        controlled,
+        found,
+        sources,
+    } = around;
+    let found = found.as_ref();
     let mut link = match transport::accept(stream, identity) {
         Ok(link) => link,
         Err(err) => {
@@ -501,6 +561,13 @@ fn serve_source(
         }
     }
     println!("mickey: source {peer} connected");
+    // Kept so a switcher shown here can send the pick back to this source.
+    if let Ok(clone) = link.try_clone() {
+        sources
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .insert(peer.ip(), clone);
+    }
     let mut reported = false;
     // Asked per connection: monitors may have changed since the last one.
     let monitors = monitors::this_pc().unwrap_or_else(|err| {
@@ -539,6 +606,10 @@ fn serve_source(
         },
         emit::cursor,
     );
+    sources
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .remove(&peer.ip());
     match result {
         Ok(()) => println!("mickey: source {peer} disconnected"),
         Err(err) => eprintln!("mickey: source {peer} dropped: {err}"),
