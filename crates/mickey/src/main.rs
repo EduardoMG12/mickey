@@ -164,7 +164,7 @@ fn run(command: Command) -> Result<(), String> {
                 None,
             )
         }
-        Command::Target { listen } => target(listen, std::sync::mpsc::channel().0),
+        Command::Target { listen } => target(listen, std::sync::mpsc::channel().0, None),
         Command::Run => run_from_config(),
         Command::Monitors => {
             for (i, m) in monitors::this_pc()?.iter().enumerate() {
@@ -216,8 +216,8 @@ fn run_from_config() -> Result<(), String> {
     // the status and the tray (PRD 0009).
     let (controlled_sender, controlled) = std::sync::mpsc::channel();
     let target = this_pc.controlled.then(|| {
-        let listen = this_pc.listen;
-        std::thread::spawn(move || target(listen, controlled_sender))
+        let (listen, found) = (this_pc.listen, found.clone());
+        std::thread::spawn(move || target(listen, controlled_sender, found))
     });
     if source_wanted {
         let hotkeys = hotkey::Hotkey::from_config(&config.hotkeys()?);
@@ -266,15 +266,22 @@ fn follow_for_waybar() -> ! {
 }
 
 /// Serves one source at a time, forever, injecting what it sends.
-/// `controlled` hears whether a source's keyboard and mouse control this PC.
-fn target(listen: SocketAddr, controlled: std::sync::mpsc::Sender<bool>) -> Result<(), String> {
+/// `controlled` hears whether a source's keyboard and mouse control this PC;
+/// `found`, when discovery runs, names a PC asking to pair.
+fn target(
+    listen: SocketAddr,
+    controlled: std::sync::mpsc::Sender<bool>,
+    found: Option<discovery::Table>,
+) -> Result<(), String> {
     use std::io::ErrorKind;
     use std::net::TcpListener;
+    use std::sync::{Arc, Mutex};
 
     let data_dir = identity::data_dir()?;
-    let identity = identity::Identity::load_or_create(&data_dir)?;
-    let mut trusted = trust::TrustedPeers::load(&data_dir)?;
-    let mut emitter = emit::Emitter::new()?;
+    let identity = Arc::new(identity::Identity::load_or_create(&data_dir)?);
+    let trusted = Arc::new(Mutex::new(trust::TrustedPeers::load(&data_dir)?));
+    // One virtual keyboard and mouse for every source that connects.
+    let emitter = Arc::new(Mutex::new(emit::Emitter::new()?));
     let listener = TcpListener::bind(listen).map_err(|err| match err.kind() {
         ErrorKind::AddrInUse => format!("{listen} is already in use; is another Mickey running?"),
         ErrorKind::AddrNotAvailable => format!("{listen} is not an address of this machine"),
@@ -289,33 +296,77 @@ fn target(listen: SocketAddr, controlled: std::sync::mpsc::Sender<bool>) -> Resu
                 continue;
             }
         };
-        let mut link = match transport::accept(stream, &identity) {
-            Ok(link) => link,
-            Err(err) => {
-                eprintln!("mickey: {peer} failed the secure handshake: {err}");
-                continue;
+        // Each source on its own thread: a PC asking to pair, its window
+        // still open, must not hold up a paired PC that reconnects.
+        let (identity, trusted, emitter) = (identity.clone(), trusted.clone(), emitter.clone());
+        let (controlled, found) = (controlled.clone(), found.clone());
+        std::thread::spawn(move || {
+            serve_source(
+                stream,
+                peer,
+                &identity,
+                &trusted,
+                &emitter,
+                &controlled,
+                found.as_ref(),
+            );
+        });
+    }
+}
+
+/// Pairs with one source if needed, then plays what it sends until it
+/// leaves.
+fn serve_source(
+    stream: std::net::TcpStream,
+    peer: SocketAddr,
+    identity: &identity::Identity,
+    trusted: &std::sync::Mutex<trust::TrustedPeers>,
+    emitter: &std::sync::Mutex<emit::Emitter>,
+    controlled: &std::sync::mpsc::Sender<bool>,
+    found: Option<&discovery::Table>,
+) {
+    let mut link = match transport::accept(stream, identity) {
+        Ok(link) => link,
+        Err(err) => {
+            eprintln!("mickey: {peer} failed the secure handshake: {err}");
+            return;
+        }
+    };
+    let peer_key = *link.peer_key();
+    let lock = || trusted.lock().unwrap_or_else(|p| p.into_inner());
+    // The list is not held while the person decides.
+    if !lock().is_trusted(&peer_key) {
+        let who = found
+            .and_then(|table| table.name_of(&peer_key))
+            .unwrap_or_else(|| peer.ip().to_string());
+        match trust::ask(&peer_key, peer, &link.pairing_code(), &who) {
+            Ok(true) => {
+                if let Err(err) = lock().add(peer_key, &peer.to_string()) {
+                    eprintln!("mickey: {err}");
+                    return;
+                }
+                println!("mickey: paired with {who}");
             }
-        };
-        let peer_key = *link.peer_key();
-        let code = link.pairing_code();
-        match trust::trust_or_ask(&mut trusted, &peer_key, peer, &code) {
-            Ok(true) => println!("mickey: source {peer} connected"),
             Ok(false) => {
                 println!("mickey: refused {peer}");
-                continue;
+                return;
             }
             Err(err) => {
                 eprintln!("mickey: {err}");
-                continue;
+                return;
             }
         }
-        let mut reported = false;
-        // Asked per connection: monitors may have changed since the last one.
-        let monitors = monitors::this_pc().unwrap_or_else(|err| {
-            eprintln!("mickey: {err}; the source will not see this PC's monitors");
-            Vec::new()
-        });
-        let output = |effect| match effect {
+    }
+    println!("mickey: source {peer} connected");
+    let mut reported = false;
+    // Asked per connection: monitors may have changed since the last one.
+    let monitors = monitors::this_pc().unwrap_or_else(|err| {
+        eprintln!("mickey: {err}; the source will not see this PC's monitors");
+        Vec::new()
+    });
+    let output = |effect| {
+        let mut emitter = emitter.lock().unwrap_or_else(|p| p.into_inner());
+        match effect {
             transport::Effect::Input(event) => emitter.emit(event),
             transport::Effect::Place { x, y } => emitter.place(x, y),
             transport::Effect::Controlled(here) => {
@@ -323,24 +374,23 @@ fn target(listen: SocketAddr, controlled: std::sync::mpsc::Sender<bool>) -> Resu
                 let _ = controlled.send(here);
                 Ok(())
             }
-        };
-        let mut output = output;
-        let result = transport::serve(
-            &mut link,
-            &monitors,
-            |effect| {
-                if let Err(err) = output(effect)
-                    && !reported
-                {
-                    eprintln!("mickey: input injection failed: {err} (not reported again)");
-                    reported = true;
-                }
-            },
-            emit::cursor,
-        );
-        match result {
-            Ok(()) => println!("mickey: source {peer} disconnected"),
-            Err(err) => eprintln!("mickey: source {peer} dropped: {err}"),
         }
+    };
+    let result = transport::serve(
+        &mut link,
+        &monitors,
+        |effect| {
+            if let Err(err) = output(effect)
+                && !reported
+            {
+                eprintln!("mickey: input injection failed: {err} (not reported again)");
+                reported = true;
+            }
+        },
+        emit::cursor,
+    );
+    match result {
+        Ok(()) => println!("mickey: source {peer} disconnected"),
+        Err(err) => eprintln!("mickey: source {peer} dropped: {err}"),
     }
 }
