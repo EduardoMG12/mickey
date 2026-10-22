@@ -16,6 +16,8 @@ pub enum Click {
     /// Send them to this peer.
     Go(usize),
     Settings,
+    /// Open the clipboard history window.
+    History,
     Quit,
 }
 
@@ -93,6 +95,7 @@ impl ksni::Tray for Icon {
             menu.push(item(name.clone(), *online, Click::Go(index)));
         }
         menu.push(ksni::MenuItem::Separator);
+        menu.push(item("Clipboard history".into(), true, Click::History));
         menu.push(item("Settings".into(), true, Click::Settings));
         menu.push(item("Quit Mickey".into(), true, Click::Quit));
         menu
@@ -129,6 +132,8 @@ pub struct Tray(crate::platform::tray::Icon);
 const SETTINGS: u32 = 1000;
 #[cfg(windows)]
 const QUIT: u32 = 1001;
+#[cfg(windows)]
+const HISTORY: u32 = 1002;
 
 #[cfg(windows)]
 impl Tray {
@@ -138,6 +143,7 @@ impl Tray {
         let picked = move |id: u32| {
             let click = match id {
                 SETTINGS => Click::Settings,
+                HISTORY => Click::History,
                 QUIT => Click::Quit,
                 1 => Click::Home,
                 peer => Click::Go(peer as usize - 2),
@@ -168,6 +174,7 @@ fn look(status: &Status) -> crate::platform::tray::Look {
         menu.push(item(name, *online, index as u32 + 2));
     }
     menu.push(item("", true, 0));
+    menu.push(item("Clipboard history", true, HISTORY));
     menu.push(item("Settings", true, SETTINGS));
     menu.push(item("Quit Mickey", true, QUIT));
     Look {

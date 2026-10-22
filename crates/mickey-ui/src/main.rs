@@ -5,6 +5,7 @@
 #![windows_subsystem = "windows"]
 
 mod choice;
+mod history;
 mod layout;
 mod pair;
 mod place;
@@ -148,6 +149,9 @@ fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.first().map(String::as_str) == Some("settings") {
         return settings_window();
+    }
+    if args.first().map(String::as_str) == Some("history") {
+        return history::window();
     }
     if let [command, who, code] = args.as_slice()
         && command == "pair"
