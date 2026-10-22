@@ -8,30 +8,26 @@ mod capture;
 mod chord;
 mod cli;
 mod config;
-#[cfg(target_os = "linux")]
+#[cfg(unix)]
+mod control;
+#[cfg(not(unix))]
+#[path = "control_off.rs"]
 mod control;
 mod emit;
 mod event;
-#[cfg(target_os = "linux")]
 mod focus;
 mod held;
-#[cfg(target_os = "linux")]
 mod hotkey;
 mod identity;
-#[cfg(target_os = "linux")]
+mod input;
 mod latency;
-// The source never translates keys for Windows; only the target does.
+// The Linux build never translates keys for Windows.
 #[cfg_attr(not(windows), allow(dead_code))]
 mod keymap;
 mod platform;
-// ponytail: in M0 Linux is only a source and Windows only a target, so each
-// build uses half of these. Both halves run on Linux in M1a (`uinput`).
-#[allow(dead_code)]
 mod protocol;
 mod secure;
-#[cfg(target_os = "linux")]
 mod source;
-#[allow(dead_code)]
 mod transport;
 mod trust;
 
@@ -138,13 +134,7 @@ fn run(command: Command) -> Result<(), String> {
                     ));
                 }
             };
-            #[cfg(target_os = "linux")]
-            return source::run(peers, touchpad_speed);
-            #[cfg(not(target_os = "linux"))]
-            {
-                let _ = (peers, touchpad_speed);
-                Err("in M0 the source runs only on Linux (Windows sources come in M2)".into())
-            }
+            source::run(peers, touchpad_speed)
         }
         Command::Target { listen } => target(listen),
     }
