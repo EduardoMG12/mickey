@@ -204,7 +204,15 @@ impl Settings {
         self.message = match written {
             Ok(()) => {
                 self.saved = self.form.clone();
-                "Saved. Restart Mickey for it to take effect.".into()
+                // The layout is used at once and the other PCs follow it;
+                // other settings still wait for a restart.
+                match ask_mickey("arranged") {
+                    Ok(_) => {
+                        "Saved. The other PCs follow the new layout; restart Mickey for the rest."
+                            .into()
+                    }
+                    Err(_) => "Saved. Restart Mickey for it to take effect.".into(),
+                }
             }
             Err(err) => format!("Not saved: {err}"),
         };

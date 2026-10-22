@@ -101,6 +101,8 @@ pub enum Effect {
     /// The source's keyboard and mouse now control this PC, or not any
     /// more (PRD 0009).
     Controlled(bool),
+    /// The source sits at this point of this PC's desktop (PRD 0005).
+    Arranged([i32; 2]),
 }
 
 /// Serves one source until it disconnects, passing every input event to
@@ -174,6 +176,7 @@ pub fn serve(
                 act(Effect::Place { x, y });
             }
             Message::Focus { here } => act(Effect::Controlled(here)),
+            Message::Arrange { x, y } => act(Effect::Arranged([x, y])),
             Message::Pong { .. } | Message::Monitors { .. } | Message::Leave { .. } => {}
             Message::Hello { .. } => break Err(invalid("second Hello".into())),
         }
