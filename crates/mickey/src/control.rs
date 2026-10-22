@@ -45,6 +45,8 @@ pub enum Order {
     History,
     /// Put this history entry back in the clipboard.
     HistoryCopy(u64),
+    /// End Mickey cleanly: devices released, tray icon removed.
+    Quit,
 }
 
 /// An order for the source's main loop, and where to send its one-line
@@ -404,6 +406,7 @@ fn accept<T: From<Request>>(
                     _ if other == "peers" => Some(Order::Peers),
                     _ if other == "discover" => Some(Order::Discover),
                     _ if other == "history" => Some(Order::History),
+                    _ if other == "quit" => Some(Order::Quit),
                     Some(("history", id)) => id
                         .strip_prefix("copy ")
                         .and_then(|id| id.parse().ok())

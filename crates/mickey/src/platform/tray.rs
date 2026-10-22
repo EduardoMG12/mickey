@@ -52,6 +52,15 @@ const NIM_DELETE: u32 = 2;
 const NIF_MESSAGE: u32 = 1;
 const NIF_ICON: u32 = 2;
 const NIF_TIP: u32 = 4;
+const NIF_GUID: u32 = 0x20;
+/// Mickey's icon, the same in every run: a run killed without removing its
+/// icon leaves a ghost in the tray, and the next run removes it by this.
+const ICON_GUID: [u8; 16] = [
+    0x6d, 0x69, 0x63, 0x6b, 0x65, 0x79, 0x4e, 0x01, 0x9a, 0x2f, 0x41, 0x7c, 0x0e, 0x53, 0x88, 0xb4,
+];
+/// Windows ties a GUID to the program's path; if it refuses ours (Mickey
+/// moved), the icon goes by window and id instead, ghosts and all.
+static BY_GUID: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
 const MF_STRING: u32 = 0;
 const MF_GRAYED: u32 = 1;
 const MF_SEPARATOR: u32 = 0x800;
@@ -202,7 +211,10 @@ fn wide(text: &str) -> Vec<u16> {
 }
 
 /// The icon, while this lives.
-pub struct Icon;
+pub struct Icon {
+    /// The window's thread, which removes the icon before it ends.
+    thread: Option<thread::JoinHandle<()>>,
+}
 
 impl Icon {
     /// Shows the icon; `picked` gets the id of each menu line picked.
@@ -216,11 +228,13 @@ impl Icon {
             .set(shared)
             .map_err(|_| io::Error::other("the tray icon is already shown"))?;
         let (ready, started) = std::sync::mpsc::channel();
-        thread::spawn(move || run(&ready));
+        let thread = thread::spawn(move || run(&ready));
         started
             .recv()
             .map_err(|_| io::Error::other("the tray thread stopped"))??;
-        Ok(Icon)
+        Ok(Icon {
+            thread: Some(thread),
+        })
     }
 
     pub fn show(&self, look: Look) {
@@ -233,11 +247,15 @@ impl Icon {
 }
 
 impl Drop for Icon {
-    /// Removes the icon, or it would stay in the tray until hovered.
+    /// Removes the icon, or it would stay in the tray until hovered, and
+    /// waits until it is gone: Mickey may be about to exit.
     fn drop(&mut self) {
         if let Some(shared) = SHARED.get() {
             // SAFETY: as in `show`.
             unsafe { PostMessageW(shared.hwnd.load(Ordering::SeqCst), WM_GOODBYE, 0, 0) };
+        }
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
         }
     }
 }
@@ -286,7 +304,11 @@ fn run(ready: &std::sync::mpsc::Sender<io::Result<()>>) {
     }
     let shared = SHARED.get().expect("set before the thread starts");
     shared.hwnd.store(hwnd, Ordering::SeqCst);
+    remove_icon(hwnd);
     if !notify(hwnd, NIM_ADD) {
+        BY_GUID.store(false, Ordering::SeqCst);
+    }
+    if !BY_GUID.load(Ordering::SeqCst) && !notify(hwnd, NIM_ADD) {
         let _ = ready.send(Err(io::Error::other("Windows refused the tray icon")));
         return;
     }
@@ -315,6 +337,10 @@ fn notify(hwnd: isize, message: u32) -> bool {
     data.hwnd = hwnd;
     data.id = ICON_ID;
     data.flags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
+    if BY_GUID.load(Ordering::SeqCst) {
+        data.flags |= NIF_GUID;
+        data.guid = ICON_GUID;
+    }
     data.callback_message = WM_TRAY;
     data.icon = icon;
     for (slot, unit) in data.tip.iter_mut().zip(look.tip.encode_utf16().take(127)) {
@@ -327,6 +353,23 @@ fn notify(hwnd: isize, message: u32) -> bool {
         unsafe { DestroyIcon(icon) };
     }
     done
+}
+
+/// Removes Mickey's icon: this run's, or a ghost a killed run left.
+fn remove_icon(hwnd: isize) {
+    // SAFETY: NOTIFYICONDATAW is plain data; removing needs only the GUID,
+    // or the window and the id.
+    unsafe {
+        let mut data: NotifyIconData = std::mem::zeroed();
+        data.size = size_of::<NotifyIconData>() as u32;
+        data.hwnd = hwnd;
+        data.id = ICON_ID;
+        if BY_GUID.load(Ordering::SeqCst) {
+            data.flags = NIF_GUID;
+            data.guid = ICON_GUID;
+        }
+        Shell_NotifyIconW(NIM_DELETE, &data);
+    }
 }
 
 /// An icon from 32x32 RGBA; 0 if Windows could not make it.
@@ -450,14 +493,9 @@ unsafe extern "system" fn window_proc(
             notify(hwnd, NIM_MODIFY);
         }
         WM_GOODBYE => {
-            // SAFETY: NOTIFYICONDATAW is plain data; only the window and
-            // the id matter to remove the icon.
+            remove_icon(hwnd);
+            // SAFETY: our own window, from its own thread.
             unsafe {
-                let mut data: NotifyIconData = std::mem::zeroed();
-                data.size = size_of::<NotifyIconData>() as u32;
-                data.hwnd = hwnd;
-                data.id = ICON_ID;
-                Shell_NotifyIconW(NIM_DELETE, &data);
                 DestroyWindow(hwnd);
                 PostQuitMessage(0);
             }

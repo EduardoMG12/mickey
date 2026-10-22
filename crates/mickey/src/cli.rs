@@ -14,6 +14,7 @@ usage:
   mickey go <name>                   send the keyboard and mouse to that PC
   mickey home                        bring them back to this PC
   mickey switcher                    show the switcher window
+  mickey quit                        end the running Mickey cleanly
   mickey settings                    open the settings window
   mickey id                          show this machine's fingerprint
   mickey monitors                    list this machine's monitors
@@ -87,7 +88,7 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
             Ok(Command::Clipboard { write_test: true })
         }
         [command] if command == "settings" => Ok(Command::Settings),
-        [command] if command == "home" || command == "switcher" => {
+        [command] if command == "home" || command == "switcher" || command == "quit" => {
             Ok(Command::Order(command.clone()))
         }
         [command, name] if command == "go" => Ok(Command::Order(format!("go {name}"))),
