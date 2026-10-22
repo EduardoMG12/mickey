@@ -21,8 +21,8 @@ use std::rc::Rc;
 
 /// The window's app id; Hyprland window rules match it (see the README).
 const APP_ID: &str = "mickey-ui";
-const CARD_SIZE: egui::Vec2 = egui::vec2(118.0, 42.0);
-const CARD_MARGIN: f32 = 6.0;
+const CARD_SIZE: egui::Vec2 = egui::vec2(96.0, 22.0);
+const CARD_MARGIN: f32 = 7.0;
 
 struct Switcher {
     choice: Choice,
@@ -96,7 +96,6 @@ impl eframe::App for Switcher {
                     }
                 }
             });
-            ui.small("number or arrows · Enter: go · Esc: cancel");
         });
 
         let answer = match (clicked.or(digit), enter) {
@@ -114,7 +113,7 @@ impl eframe::App for Switcher {
 /// One PC as a card: the chosen one filled with the accent and stitched
 /// around, like the mascot's patches. Returns whether it was clicked.
 fn card(ui: &mut egui::Ui, number: usize, pc: &choice::Pc, selected: bool, focused: bool) -> bool {
-    use theme::{icon, palette};
+    use theme::palette;
     let fill = if selected {
         palette::BRUISE
     } else {
@@ -127,29 +126,26 @@ fn card(ui: &mut egui::Ui, number: usize, pc: &choice::Pc, selected: bool, focus
         .inner_margin(CARD_MARGIN)
         .show(ui, |ui| {
             ui.set_min_size(CARD_SIZE);
-            ui.vertical(|ui| {
-                // Card 0 is always this PC.
-                let kind = if number == 0 {
-                    icon::LAPTOP
-                } else {
-                    icon::DESKTOP
+            // One line: its number (the key that picks it), a status dot
+            // (green in use, grey online, red offline) and its name.
+            ui.horizontal(|ui| {
+                ui.label(
+                    egui::RichText::new(number.to_string())
+                        .small()
+                        .color(palette::FUR),
+                );
+                let dot = match (pc.online, focused) {
+                    (_, true) => palette::HERE,
+                    (true, false) => palette::FUR,
+                    (false, false) => palette::AWAY,
                 };
-                let title = egui::RichText::new(format!("{kind}  {}", pc.name));
-                let (dot, state) = match (pc.online, focused) {
-                    (_, true) => (palette::HERE, "in use"),
-                    (true, false) => (palette::FUR, "online"),
-                    (false, false) => (palette::AWAY, "offline"),
-                };
-                if pc.online {
-                    ui.label(title.strong());
+                let (spot, _) = ui.allocate_exact_size(egui::vec2(8.0, 8.0), egui::Sense::hover());
+                ui.painter().circle_filled(spot.center(), 3.5, dot);
+                let name = egui::RichText::new(&pc.name);
+                ui.label(if pc.online {
+                    name.strong()
                 } else {
-                    ui.label(title.color(palette::FUR));
-                }
-                ui.horizontal(|ui| {
-                    let (spot, _) =
-                        ui.allocate_exact_size(egui::vec2(8.0, 8.0), egui::Sense::hover());
-                    ui.painter().circle_filled(spot.center(), 3.5, dot);
-                    ui.small(format!("{number} · {state}"));
+                    name.color(palette::FUR)
                 });
             });
         })
@@ -187,7 +183,7 @@ fn main() -> ExitCode {
         viewport: egui::ViewportBuilder::default()
             .with_title("Mickey")
             .with_app_id(APP_ID)
-            .with_inner_size([width.max(220.0), 100.0])
+            .with_inner_size([width.max(160.0), 52.0])
             .with_resizable(false)
             .with_always_on_top(),
         ..Default::default()

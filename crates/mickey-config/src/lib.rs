@@ -168,7 +168,7 @@ pub struct Hotkeys {
 pub struct HotkeySet {
     pub next: Chord,
     pub home: Option<Chord>,
-    pub switcher: Option<Chord>,
+    pub switcher: Chord,
     pub forward: Chord,
     pub back: Chord,
     /// `None` when turned off.
@@ -188,6 +188,8 @@ pub const DEFAULT_NEXT: &str = "AltGr+RightShift";
 /// it, and a double tap on Right Shift.
 pub const DEFAULT_FORWARD: &str = "AltGr+Right";
 pub const DEFAULT_BACK: &str = "AltGr+Left";
+/// The switcher with one hand too: AltGr and the arrow above the others.
+pub const DEFAULT_SWITCHER: &str = "AltGr+Up";
 pub const DEFAULT_DOUBLE_TAP: &str = "RightShift";
 
 #[derive(Debug, Deserialize, PartialEq)]
@@ -261,7 +263,8 @@ impl Config {
         let set = HotkeySet {
             next: one("hotkeys.next", &self.hotkeys.next)?.unwrap_or_else(|| default(DEFAULT_NEXT)),
             home: one("hotkeys.home", &self.hotkeys.home)?,
-            switcher: one("hotkeys.switcher", &self.hotkeys.switcher)?,
+            switcher: one("hotkeys.switcher", &self.hotkeys.switcher)?
+                .unwrap_or_else(|| default(DEFAULT_SWITCHER)),
             forward: one("hotkeys.forward", &self.hotkeys.forward)?
                 .unwrap_or_else(|| default(DEFAULT_FORWARD)),
             back: one("hotkeys.back", &self.hotkeys.back)?.unwrap_or_else(|| default(DEFAULT_BACK)),
@@ -276,7 +279,7 @@ impl Config {
         let all: Vec<&Chord> = [
             Some(&set.next),
             set.home.as_ref(),
-            set.switcher.as_ref(),
+            Some(&set.switcher),
             Some(&set.forward),
             Some(&set.back),
         ]
@@ -652,7 +655,8 @@ mod tests {
     fn hotkeys_default_to_the_m0_one_and_parse_per_peer() {
         let set = parse(EXAMPLE).unwrap().hotkeys().unwrap();
         assert_eq!(set.next, chord::parse(DEFAULT_NEXT).unwrap());
-        assert_eq!((set.home, set.switcher), (None, None));
+        assert_eq!(set.home, None);
+        assert_eq!(set.switcher, chord::parse(DEFAULT_SWITCHER).unwrap());
 
         let text = "[hotkeys]\nhome = \"AltGr+RightShift+H\"\n\n[[peer]]\nname = \"W\"\naddress = \"192.0.2.10:1\"\nhotkey = \"AltGr+RightShift+1\"\n";
         let set = parse(text).unwrap().hotkeys().unwrap();

@@ -85,9 +85,7 @@ impl Hotkey {
                 chords.push((chord, trigger));
             }
         };
-        if let Some(switcher) = &set.switcher {
-            add(switcher.clone(), Trigger::Switcher);
-        }
+        add(set.switcher.clone(), Trigger::Switcher);
         add(set.forward.clone(), Trigger::Forward);
         add(set.back.clone(), Trigger::Back);
         add(
