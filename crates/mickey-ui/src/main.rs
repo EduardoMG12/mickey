@@ -5,6 +5,7 @@
 #![windows_subsystem = "windows"]
 
 mod choice;
+mod place;
 
 use choice::Choice;
 use eframe::egui;
@@ -18,6 +19,9 @@ const CARD_SIZE: egui::Vec2 = egui::vec2(150.0, 90.0);
 
 struct Switcher {
     choice: Choice,
+    /// Whether the window still has to move itself to its corner (not when
+    /// the compositor places it, as on Hyprland).
+    needs_placing: bool,
     /// Shared with `main`, which prints it after the window closes.
     answer: Rc<Cell<Option<usize>>>,
 }
@@ -25,6 +29,23 @@ struct Switcher {
 impl eframe::App for Switcher {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        if self.needs_placing {
+            let (screen, window) = ctx.input(|input| {
+                let viewport = input.viewport();
+                (
+                    viewport.monitor_size,
+                    viewport.outer_rect.map(|rect| rect.size()),
+                )
+            });
+            if let (Some(screen), Some(window)) = (screen, window) {
+                let [x, y] = self
+                    .choice
+                    .corner
+                    .position([screen.x, screen.y], [window.x, window.y]);
+                ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(egui::pos2(x, y)));
+                self.needs_placing = false;
+            }
+        }
         let (next, previous, enter, escape) = ctx.input(|input| {
             (
                 input.key_pressed(egui::Key::ArrowRight) || input.key_pressed(egui::Key::Tab),
@@ -123,6 +144,7 @@ fn main() -> ExitCode {
             .with_always_on_top(),
         ..Default::default()
     };
+    let placed_by_compositor = place::ask_compositor(choice.corner, APP_ID);
     let answer = Rc::new(Cell::new(None));
     let window_answer = Rc::clone(&answer);
     let result = eframe::run_native(
@@ -131,6 +153,7 @@ fn main() -> ExitCode {
         Box::new(|_| {
             Ok(Box::new(Switcher {
                 choice,
+                needs_placing: !placed_by_compositor,
                 answer: window_answer,
             }))
         }),
