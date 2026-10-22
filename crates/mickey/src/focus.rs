@@ -17,7 +17,7 @@
 
 use crate::event::InputEvent;
 use crate::held::HeldSet;
-use crate::hotkey::Hotkey;
+use crate::hotkey::{Hotkey, Trigger};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Focus {
@@ -48,10 +48,16 @@ pub struct Switcher {
 }
 
 impl Switcher {
+    /// With only the M0 hotkey.
+    #[cfg(test)]
     pub fn new() -> Switcher {
+        Switcher::with_hotkeys(Hotkey::new())
+    }
+
+    pub fn with_hotkeys(hotkey: Hotkey) -> Switcher {
         Switcher {
             focus: Focus::Local,
-            hotkey: Hotkey::new(),
+            hotkey,
             keys: HeldSet::new(),
             buttons: HeldSet::new(),
         }
@@ -73,12 +79,19 @@ impl Switcher {
         match self.focus {
             Focus::Local => {
                 // The desktop sees every event itself; we only watch.
-                if self.hotkey.feed(event, |_| {}) {
-                    if online.len() >= 2 {
-                        act(Action::OpenSwitcher);
-                    } else if let Some(peer) = first_online(online) {
-                        self.focus = Focus::WaitingForKeysUp(peer);
+                match self.hotkey.feed(event, |_| {}) {
+                    Some(Trigger::Next) if online.len() >= 2 => act(Action::OpenSwitcher),
+                    Some(Trigger::Next) => {
+                        if let Some(peer) = first_online(online) {
+                            self.focus = Focus::WaitingForKeysUp(peer);
+                        }
                     }
+                    Some(Trigger::Switcher) => act(Action::OpenSwitcher),
+                    Some(Trigger::Go(peer)) => self.go_to(Some(peer), online),
+                    Some(trigger @ (Trigger::Forward | Trigger::Back)) => {
+                        self.go_to(step(None, trigger, online), online);
+                    }
+                    Some(Trigger::Home) | None => {}
                 }
             }
             Focus::WaitingForKeysUp(_) => {
@@ -94,31 +107,33 @@ impl Switcher {
                     }
                     act(Action::Send(peer, out));
                 });
-                if fired {
-                    // Release on that peer before giving the devices back.
-                    self.keys.release_all(|code| {
-                        act(Action::Send(
-                            peer,
-                            InputEvent::Key {
-                                code,
-                                pressed: false,
-                            },
-                        ))
-                    });
-                    self.buttons.release_all(|code| {
-                        act(Action::Send(
-                            peer,
-                            InputEvent::Button {
-                                code,
-                                pressed: false,
-                            },
-                        ))
-                    });
-                    act(Action::Ungrab);
-                    self.focus = Focus::Local;
-                    if online.len() >= 2 {
+                match fired {
+                    // Already there.
+                    Some(Trigger::Go(target)) if target == peer => {}
+                    Some(Trigger::Go(target)) => {
+                        if online.get(target) == Some(&true) {
+                            self.go_home(&mut act);
+                            self.focus = Focus::WaitingForKeysUp(target);
+                        }
+                    }
+                    Some(Trigger::Home) => self.go_home(&mut act),
+                    Some(trigger @ (Trigger::Forward | Trigger::Back)) => {
+                        self.go_home(&mut act);
+                        if let Some(target) = step(Some(peer), trigger, online) {
+                            self.focus = Focus::WaitingForKeysUp(target);
+                        }
+                    }
+                    Some(Trigger::Switcher) => {
+                        self.go_home(&mut act);
                         act(Action::OpenSwitcher);
                     }
+                    Some(Trigger::Next) => {
+                        self.go_home(&mut act);
+                        if online.len() >= 2 {
+                            act(Action::OpenSwitcher);
+                        }
+                    }
+                    None => {}
                 }
             }
         }
@@ -177,6 +192,27 @@ impl Switcher {
             }
             Focus::WaitingForKeysUp(waiting) if waiting == peer => self.focus = Focus::Local,
             _ => {}
+        }
+    }
+}
+
+/// One step through the list "this PC, peer 0, peer 1, …" (wrapping),
+/// skipping offline peers. `from` is the focused peer (`None`: this PC);
+/// the result is the peer to go to, or `None` for this PC.
+fn step(from: Option<usize>, trigger: Trigger, online: &[bool]) -> Option<usize> {
+    // Positions: 0 is this PC, p + 1 is peer p.
+    let len = online.len() + 1;
+    let mut position = from.map_or(0, |peer| peer + 1);
+    loop {
+        position = match trigger {
+            Trigger::Back => (position + len - 1) % len,
+            _ => (position + 1) % len,
+        };
+        if position == 0 {
+            return None;
+        }
+        if online[position - 1] {
+            return Some(position - 1);
         }
     }
 }
@@ -292,6 +328,56 @@ mod tests {
         switcher.peer_lost(0, |action| actions.push(action));
         assert_eq!(switcher.focus(), Focus::Local);
         assert_eq!(actions, [Action::Ungrab], "no releases to a gone peer");
+    }
+
+    #[test]
+    fn a_direct_hotkey_hops_from_one_peer_to_another() {
+        use crate::hotkey::Hotkey;
+        let set = mickey_config::parse(
+            "[[peer]]\nname = \"A\"\naddress = \"192.0.2.10:1\"\n\n[[peer]]\nname = \"B\"\naddress = \"192.0.2.11:1\"\n",
+        )
+        .unwrap()
+        .hotkeys()
+        .unwrap();
+        let mut switcher = Switcher::with_hotkeys(Hotkey::from_config(&set));
+        let mut actions = Vec::new();
+        let two = 3; // KEY_2
+        for event in [
+            key(KEY_RIGHTALT, true),
+            key(KEY_RIGHTSHIFT, true),
+            key(two, true),
+            key(two, false),
+            key(KEY_RIGHTSHIFT, false),
+            key(KEY_RIGHTALT, false),
+        ] {
+            switcher.handle(event, &[true, true], |action| actions.push(action));
+        }
+        switcher.grabbed();
+        assert_eq!(
+            switcher.focus(),
+            Focus::Remote(1),
+            "straight to the second PC"
+        );
+        assert!(actions.is_empty(), "no switcher window");
+    }
+
+    #[test]
+    fn forward_and_back_walk_the_list_and_skip_offline_peers() {
+        let online = [true, false, true];
+        assert_eq!(step(None, Trigger::Forward, &online), Some(0));
+        assert_eq!(
+            step(Some(0), Trigger::Forward, &online),
+            Some(2),
+            "peer 1 is offline"
+        );
+        assert_eq!(step(Some(2), Trigger::Forward, &online), None, "back home");
+        assert_eq!(step(None, Trigger::Back, &online), Some(2));
+        assert_eq!(step(Some(0), Trigger::Back, &online), None);
+        assert_eq!(
+            step(None, Trigger::Forward, &[false]),
+            None,
+            "nobody online"
+        );
     }
 
     #[test]
