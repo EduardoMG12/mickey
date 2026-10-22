@@ -8,6 +8,8 @@ use std::io::{self, Write};
 use std::os::fd::AsRawFd;
 
 const PATH: &str = "/dev/uinput";
+/// The name Mickey gives its virtual device, so capture can skip it.
+pub const DEVICE_NAME: &str = "Mickey virtual input";
 
 // ioctl numbers from <linux/uinput.h>, checked against the C headers.
 const UI_SET_EVBIT: u64 = 0x4004_5564;
