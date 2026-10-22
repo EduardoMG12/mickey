@@ -34,6 +34,7 @@ mod transport;
 mod tray;
 mod tray_picture;
 mod trust;
+mod window;
 
 use cli::Command;
 use mickey_config as config;
@@ -448,7 +449,7 @@ fn serve_clipboard(
                             }
                             group::CLOSE => {
                                 let shown = shown.clone();
-                                std::thread::spawn(move || close_switcher_here(&shown));
+                                std::thread::spawn(move || window::close(&shown));
                             }
                             group::HOTKEYS => {
                                 let _ =
@@ -484,7 +485,7 @@ struct Around {
 
 /// The switcher window open on this PC for a source, if any, so a later
 /// "close" from the source can close it.
-type Shown = std::sync::Arc<std::sync::Mutex<Option<std::process::Child>>>;
+type Shown = window::Slot;
 
 /// Runs `mickey-ui switcher` with the cards a source sent (PRD 0007), in
 /// this PC's own corner: the first line is the focused card, then one card
@@ -516,55 +517,20 @@ fn show_switcher_here(
     }
     args.push(focused.to_string());
     args.extend(lines.map(str::to_string));
-    let child = std::env::current_exe()
-        .map(|exe| exe.with_file_name(format!("mickey-ui{}", std::env::consts::EXE_SUFFIX)))
-        .and_then(|ui| {
-            std::process::Command::new(ui)
-                .args(&args)
-                .stdout(std::process::Stdio::piped())
-                .spawn()
-        });
-    let Ok(child) = child else {
-        return;
-    };
-    close_switcher_here(shown);
-    *shown.lock().unwrap_or_else(|p| p.into_inner()) = Some(child);
     if mirror {
+        // A copy only shows: nobody waits for an answer.
+        let slot = shown.clone();
+        std::thread::spawn(move || window::run(&args, &slot));
         return;
     }
-    // Waits without holding the slot, so "close" can still kill the window.
-    let status = loop {
-        std::thread::sleep(std::time::Duration::from_millis(50));
-        let mut slot = shown.lock().unwrap_or_else(|p| p.into_inner());
-        let Some(child) = slot.as_mut() else {
-            break None;
-        };
-        match child.try_wait() {
-            Ok(None) => continue,
-            Ok(Some(status)) => break slot.take().map(|child| (status, child)),
-            Err(_) => break None,
-        }
-    };
     // 255: closed without a pick.
-    let card = status
-        .filter(|(status, _)| status.success())
-        .and_then(|(_, child)| {
-            let mut out = String::new();
-            std::io::Read::read_to_string(&mut child.stdout?, &mut out).ok()?;
-            out.trim().parse::<u8>().ok()
-        })
-        .unwrap_or(u8::MAX);
+    let card = match window::run(&args, shown) {
+        window::Outcome::Answered(text) => text.parse::<u8>().unwrap_or(u8::MAX),
+        window::Outcome::Closed | window::Outcome::Failed(_) => u8::MAX,
+    };
     let mut sources = sources.lock().unwrap_or_else(|p| p.into_inner());
     if let Some(link) = sources.get_mut(&from) {
         let _ = link.send(&protocol::Message::Picked { card });
-    }
-}
-
-/// Closes the switcher window open here for a source, if any.
-fn close_switcher_here(shown: &Shown) {
-    if let Some(mut child) = shown.lock().unwrap_or_else(|p| p.into_inner()).take() {
-        let _ = child.kill();
-        let _ = child.wait();
     }
 }
 
