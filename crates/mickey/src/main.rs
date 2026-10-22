@@ -328,7 +328,7 @@ fn follow_for_waybar() -> ! {
 /// the clipboard is reachable, lets paired PCs read and write it.
 fn target(
     listen: SocketAddr,
-    controlled: std::sync::mpsc::Sender<bool>,
+    controlled: std::sync::mpsc::Sender<source::TargetNews>,
     found: Option<discovery::Table>,
     keeper: Option<clipboard::Keeper>,
 ) -> Result<(), String> {
@@ -426,7 +426,7 @@ fn serve_source(
     identity: &identity::Identity,
     trusted: &std::sync::Mutex<trust::TrustedPeers>,
     emitter: &std::sync::Mutex<emit::Emitter>,
-    controlled: &std::sync::mpsc::Sender<bool>,
+    controlled: &std::sync::mpsc::Sender<source::TargetNews>,
     found: Option<&discovery::Table>,
 ) {
     let mut link = match transport::accept(stream, identity) {
@@ -473,9 +473,14 @@ fn serve_source(
         match effect {
             transport::Effect::Input(event) => emitter.emit(event),
             transport::Effect::Place { x, y } => emitter.place(x, y),
+            // Nobody listens when this PC only waits to be controlled.
             transport::Effect::Controlled(here) => {
-                // Nobody listens when this PC only waits to be controlled.
-                let _ = controlled.send(here);
+                let _ = controlled.send(source::TargetNews::Controlled(here));
+                Ok(())
+            }
+            transport::Effect::Arranged(position) => {
+                let from = peer.ip();
+                let _ = controlled.send(source::TargetNews::Arranged { from, position });
                 Ok(())
             }
         }

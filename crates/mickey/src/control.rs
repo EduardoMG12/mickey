@@ -47,6 +47,8 @@ pub enum Order {
     HistoryCopy(u64),
     /// End Mickey cleanly: devices released, tray icon removed.
     Quit,
+    /// The owner placed PCs: use config.toml's positions and tell the peers.
+    Arranged,
 }
 
 /// An order for the source's main loop, and where to send its one-line
@@ -407,6 +409,7 @@ fn accept<T: From<Request>>(
                     _ if other == "discover" => Some(Order::Discover),
                     _ if other == "history" => Some(Order::History),
                     _ if other == "quit" => Some(Order::Quit),
+                    _ if other == "arranged" => Some(Order::Arranged),
                     Some(("history", id)) => id
                         .strip_prefix("copy ")
                         .and_then(|id| id.parse().ok())
