@@ -34,6 +34,9 @@ use std::time::{Duration, Instant};
 const PING_EVERY: Duration = Duration::from_secs(1);
 const KEYS_UP_POLL: Duration = Duration::from_millis(10);
 const RETRY_EVERY: Duration = Duration::from_secs(5);
+/// A peer that has answered nothing (no pong) for this long is treated as
+/// gone: frozen or unplugged, it must not keep the keyboard and mouse.
+const SILENT_LIMIT: Duration = Duration::from_secs(4);
 
 /// What wakes the main loop.
 enum Wake {
@@ -255,6 +258,7 @@ fn join(
         name,
         address: member.address,
         link: None,
+        heard: Instant::now(),
         key: Some(member.key),
         latency: Latency::new(),
         monitors: Vec::new(),
@@ -320,6 +324,8 @@ struct Peer {
     name: String,
     address: SocketAddr,
     link: Option<Link>,
+    /// When it last answered (a pong, its monitors…).
+    heard: Instant,
     /// Its public key, once it has connected; how the group knows it.
     key: Option<[u8; 32]>,
     latency: Latency,
@@ -395,42 +401,35 @@ pub fn run(
     let (pong_sender, pongs) = mpsc::channel();
     let (back_sender, back) = mpsc::channel();
 
-    // Connect at start, asking to pair where needed (devices are not grabbed
-    // yet, so the terminal still gets the keyboard).
-    let mut peers = Vec::new();
     let mut positions: Vec<Option<[i32; 2]>> =
         configured.iter().map(|peer| peer.position).collect();
-    for (index, peer) in configured.into_iter().enumerate() {
-        let link = match connect_and_pair(&identity, &trusted, &peer) {
-            Ok(link) => {
-                println!("mickey: {} ({}) is connected", peer.name, peer.address);
-                read_peer(index, &link, &pong_sender, start);
-                Some(link)
-            }
-            Err(err) => {
-                println!("mickey: {} ({}) is offline: {err}", peer.name, peer.address);
-                None
-            }
-        };
-        peers.push(Peer {
+    let mut peers: Vec<Peer> = configured
+        .into_iter()
+        .map(|peer| Peer {
             name: peer.name,
             address: peer.address,
-            key: link.as_ref().map(|link| *link.peer_key()),
-            link,
+            key: None,
+            link: None,
+            heard: start,
             latency: Latency::new(),
             monitors: Vec::new(),
-        });
-    }
+        })
+        .collect();
     let shared = Arc::new(Shared { identity, trusted });
+    // Every peer is connected on its own thread, asking to pair where
+    // needed: one that hangs (frozen, or waiting for its owner to answer
+    // a pair window) never holds up the others. Links arrive on `back`.
+    for (index, peer) in peers.iter().enumerate() {
+        connect_first(
+            index,
+            peer.name.clone(),
+            peer.address,
+            &shared,
+            &back_sender,
+        );
+    }
     // The clipboard follows the keyboard (PRD 0011), over data links.
     let mover = keeper.clone().map(Mover::start);
-    for (index, peer) in peers.iter().enumerate() {
-        if peer.link.is_none() {
-            reconnect(index, peer.address, &shared, &back_sender);
-        } else if let Some(mover) = &mover {
-            open_data_link(index, peer.address, &shared, mover);
-        }
-    }
     println!("mickey: AltGr + Right Shift switches focus");
 
     // One channel wakes the loop for input, a switcher pick or an order
@@ -511,11 +510,13 @@ pub fn run(
             }
             peers[index].key = Some(*link.peer_key());
             peers[index].link = Some(link);
-            println!("mickey: {} is back online", peers[index].name);
+            peers[index].heard = Instant::now();
+            println!("mickey: {} is online", peers[index].name);
         }
         // Where to put the cursor here, coming back from a peer's edge.
         let mut home_at = None;
         for (index, news) in pongs.try_iter() {
+            peers[index].heard = Instant::now();
             match news {
                 News::Leave(x, y) => {
                     if switcher.focus() == Focus::Remote(index)
@@ -600,9 +601,13 @@ pub fn run(
                 id: latency::ping_id(start),
             };
             for (index, peer) in peers.iter_mut().enumerate() {
-                if let Some(link) = &mut peer.link
-                    && link.send(&ping).is_err()
-                {
+                let Some(link) = &mut peer.link else {
+                    continue;
+                };
+                if peer.heard.elapsed() > SILENT_LIMIT {
+                    println!("mickey: {} stopped answering", peer.name);
+                    lost.push(index);
+                } else if link.send(&ping).is_err() {
                     lost.push(index);
                 }
             }
@@ -850,19 +855,42 @@ pub fn run(
 
 /// Connects, asks to pair if the key is unknown, and waits for the peer to
 /// accept us.
+/// A peer's first connection, on its own thread: pairs if needed, then
+/// hands the link to the main loop; if it fails, retries like any peer.
+fn connect_first(
+    index: usize,
+    name: String,
+    to: SocketAddr,
+    shared: &Arc<Shared>,
+    back: &Sender<(usize, Link)>,
+) {
+    let (shared, back) = (Arc::clone(shared), back.clone());
+    thread::spawn(
+        move || match connect_and_pair(&shared.identity, &shared.trusted, &name, to) {
+            Ok(link) => {
+                let _ = back.send((index, link));
+            }
+            Err(err) => {
+                println!("mickey: {name} ({to}) is offline: {err}");
+                reconnect(index, to, &shared, &back);
+            }
+        },
+    );
+}
+
 fn connect_and_pair(
     identity: &Identity,
     trusted: &trust::Shared,
-    peer: &config::Peer,
+    name: &str,
+    to: SocketAddr,
 ) -> Result<Link, String> {
-    let to = peer.address;
     let mut link = transport::connect(to, identity).map_err(|err| err.to_string())?;
     let peer_key = *link.peer_key();
     let code = link.pairing_code();
-    if !trust::trust_or_ask(trusted, &peer_key, to, &code, &peer.name)? {
+    if !trust::trust_or_ask(trusted, &peer_key, to, &code, name)? {
         return Err("not paired; nothing was sent".into());
     }
-    println!("mickey: waiting for {} to accept this PC", peer.name);
+    println!("mickey: waiting for {name} to accept this PC");
     transport::hello(&mut link).map_err(|err| match err.kind() {
         std::io::ErrorKind::UnexpectedEof => "it refused to pair with this PC".to_string(),
         _ => err.to_string(),
