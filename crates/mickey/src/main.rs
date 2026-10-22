@@ -590,7 +590,7 @@ fn serve_source(
         let who = found
             .and_then(|table| table.name_of(&peer_key))
             .unwrap_or_else(|| peer.ip().to_string());
-        match trust::ask(&peer_key, peer, &link.pairing_code(), &who) {
+        match trust::ask_once(&peer_key, peer, &link.pairing_code(), &who) {
             Ok(true) => {
                 if let Err(err) = lock().add(peer_key, &peer.to_string()) {
                     eprintln!("mickey: {err}");

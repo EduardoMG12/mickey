@@ -123,7 +123,7 @@ pub fn trust_or_ask(
         return Ok(true);
     }
     // The list is not held while the person decides.
-    if !ask(peer_key, address, code, who)? {
+    if !ask_once(peer_key, address, code, who)? {
         return Ok(false);
     }
     lock().add(*peer_key, &address.to_string())?;
@@ -131,14 +131,68 @@ pub fn trust_or_ask(
     Ok(true)
 }
 
-/// Asks the person at this PC whether to pair with the PC whose key is
-/// `peer_key`: in a window, or on the terminal when there is no window.
-pub fn ask(
+/// How long a PC whose request was refused must wait to ask again.
+const REFUSED_WAIT: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// Whether a pairing question is on screen now: one at a time.
+static ASKING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// When each address was last refused.
+static REFUSED: std::sync::Mutex<Vec<(std::net::IpAddr, std::time::Instant)>> =
+    std::sync::Mutex::new(Vec::new());
+
+/// Whether `ip` was refused less than `REFUSED_WAIT` before `now`; older
+/// refusals are forgotten on the way.
+fn refused_recently(
+    refused: &mut Vec<(std::net::IpAddr, std::time::Instant)>,
+    ip: std::net::IpAddr,
+    now: std::time::Instant,
+) -> bool {
+    refused.retain(|(_, at)| now.duration_since(*at) < REFUSED_WAIT);
+    refused.iter().any(|(known, _)| *known == ip)
+}
+
+/// `ask`, guarded against a PC on the network that is not paired opening
+/// window after window (#181): one question at a time, the others refused
+/// at once; an address refused waits `REFUSED_WAIT`; the address shows
+/// beside the name, which anyone can announce.
+pub fn ask_once(
     peer_key: &[u8; 32],
     address: SocketAddr,
     code: &str,
     who: &str,
 ) -> Result<bool, String> {
+    use std::sync::atomic::Ordering;
+    let ip = address.ip();
+    {
+        let mut refused = REFUSED.lock().unwrap_or_else(|p| p.into_inner());
+        if refused_recently(&mut refused, ip, std::time::Instant::now()) {
+            return Ok(false);
+        }
+    }
+    if ASKING.swap(true, Ordering::SeqCst) {
+        println!("mickey: {address} asked to pair while another PC was asking; refused");
+        return Ok(false);
+    }
+    let shown = if who == ip.to_string() {
+        who.to_string()
+    } else {
+        format!("{who} ({ip})")
+    };
+    let answer = ask(peer_key, address, code, &shown);
+    ASKING.store(false, Ordering::SeqCst);
+    if answer != Ok(true) {
+        REFUSED
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .push((ip, std::time::Instant::now()));
+    }
+    answer
+}
+
+/// Asks the person at this PC whether to pair with the PC whose key is
+/// `peer_key`: in a window, or on the terminal when there is no window.
+fn ask(peer_key: &[u8; 32], address: SocketAddr, code: &str, who: &str) -> Result<bool, String> {
     println!("mickey: new PC at {address} ({})", fingerprint(peer_key));
     println!("mickey: pairing code: {code}");
     match ask_in_window(who, code) {
@@ -236,6 +290,22 @@ mod tests {
         let err = TrustedPeers::load(&dir).err().unwrap();
         assert!(err.contains("line 1 is damaged"), "{err}");
         fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_refused_address_waits_then_may_ask_again() {
+        let ip: std::net::IpAddr = "192.0.2.9".parse().unwrap();
+        let other: std::net::IpAddr = "192.0.2.10".parse().unwrap();
+        let then = std::time::Instant::now();
+        let mut refused = vec![(ip, then)];
+        assert!(refused_recently(
+            &mut refused,
+            ip,
+            then + std::time::Duration::from_secs(5)
+        ));
+        assert!(!refused_recently(&mut refused, other, then));
+        assert!(!refused_recently(&mut refused, ip, then + REFUSED_WAIT));
+        assert!(refused.is_empty(), "old refusals are forgotten");
     }
 
     #[test]
