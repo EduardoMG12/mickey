@@ -1,5 +1,6 @@
 //! The connection from source to target: TCP carrying the secure link.
 
+use crate::edges;
 use crate::event::InputEvent;
 use crate::held::HeldSet;
 use crate::identity::Identity;
@@ -60,11 +61,18 @@ pub fn accept(stream: TcpStream, identity: &Identity) -> io::Result<Link> {
 /// is released through `emit` before returning.
 /// `monitors` are this PC's, sent to the source after `Hello` so it can
 /// lay the PCs out and cross their edges (PRD 0005).
-pub fn serve(
-    link: &mut Link,
-    monitors: &[Monitor],
-    mut emit: impl FnMut(InputEvent),
-) -> io::Result<()> {
+/// What the target does for the source.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Effect {
+    Input(InputEvent),
+    /// Put the cursor at this point of the desktop.
+    Place {
+        x: i32,
+        y: i32,
+    },
+}
+
+pub fn serve(link: &mut Link, monitors: &[Monitor], mut act: impl FnMut(Effect)) -> io::Result<()> {
     let first = link.recv().map_err(|err| match err.kind() {
         io::ErrorKind::UnexpectedEof => {
             invalid("the source left before saying hello (it may have refused to pair)".into())
@@ -99,34 +107,40 @@ pub fn serve(
                     InputEvent::Button { code, pressed } => buttons.set(code, pressed),
                     InputEvent::Motion { .. } | InputEvent::Scroll { .. } => {}
                 }
-                emit(event);
+                act(Effect::Input(event));
             }
-            Message::ReleaseAll => release_all(&mut keys, &mut buttons, &mut emit),
+            Message::ReleaseAll => release_all(&mut keys, &mut buttons, &mut act),
             Message::Ping { id } => {
                 if let Err(err) = link.send(&Message::Pong { id }) {
                     break Err(err);
+                }
+            }
+            Message::Enter { side, fraction } => {
+                let fraction = f32::from(fraction) / f32::from(u16::MAX);
+                if let Some((x, y)) = edges::entering(monitors, side, fraction) {
+                    act(Effect::Place { x, y });
                 }
             }
             Message::Pong { .. } | Message::Monitors { .. } => {}
             Message::Hello { .. } => break Err(invalid("second Hello".into())),
         }
     };
-    release_all(&mut keys, &mut buttons, &mut emit);
+    release_all(&mut keys, &mut buttons, &mut act);
     result
 }
 
-fn release_all(keys: &mut HeldSet, buttons: &mut HeldSet, emit: &mut impl FnMut(InputEvent)) {
+fn release_all(keys: &mut HeldSet, buttons: &mut HeldSet, act: &mut impl FnMut(Effect)) {
     keys.release_all(|code| {
-        emit(InputEvent::Key {
+        act(Effect::Input(InputEvent::Key {
             code,
             pressed: false,
-        })
+        }))
     });
     buttons.release_all(|code| {
-        emit(InputEvent::Button {
+        act(Effect::Input(InputEvent::Button {
             code,
             pressed: false,
-        })
+        }))
     });
 }
 
@@ -159,7 +173,11 @@ mod tests {
             let identity = Identity::generate().unwrap();
             let mut link = accept(stream, &identity).expect("handshake");
             let mut emitted = Vec::new();
-            let result = serve(&mut link, &[], |event| emitted.push(event));
+            let result = serve(&mut link, &[], |effect| {
+                if let Effect::Input(event) = effect {
+                    emitted.push(event);
+                }
+            });
             (result, emitted)
         });
         (addr, handle)
@@ -216,6 +234,49 @@ mod tests {
             pressed: false,
         });
         assert_eq!(emitted, expected);
+    }
+
+    #[test]
+    fn entering_places_the_cursor_on_the_targets_own_monitors() {
+        let (listener, addr) = listener();
+        let target = thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            let mut link = accept(stream, &Identity::generate().unwrap()).unwrap();
+            let laptop = [Monitor {
+                x: 0,
+                y: 0,
+                width: 1536,
+                height: 864,
+            }];
+            let mut placed = Vec::new();
+            let result = serve(&mut link, &laptop, |effect| {
+                if let Effect::Place { x, y } = effect {
+                    placed.push((x, y));
+                }
+            });
+            (result, placed)
+        });
+        let mut link = connect(addr, &Identity::generate().unwrap()).unwrap();
+        hello(&mut link).unwrap();
+        assert!(matches!(
+            link.recv().unwrap(),
+            Message::Monitors { count: 1, .. }
+        ));
+        // Half way down the right edge, and the top of the bottom edge.
+        link.send(&Message::Enter {
+            side: mickey_config::Side::Right,
+            fraction: u16::MAX / 2,
+        })
+        .unwrap();
+        link.send(&Message::Enter {
+            side: mickey_config::Side::Below,
+            fraction: 0,
+        })
+        .unwrap();
+        drop(link);
+        let (result, placed) = target.join().unwrap();
+        assert!(result.is_ok());
+        assert_eq!(placed, [(1535, 431), (0, 863)]);
     }
 
     #[test]

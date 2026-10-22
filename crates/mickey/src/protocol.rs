@@ -10,10 +10,11 @@
 
 use crate::event::InputEvent;
 use crate::monitors::Monitor;
+use mickey_config::Side;
 use std::fmt;
 
 /// 2: messages travel inside the secure link (PRD 0002).
-/// 3: `Monitors` (PRD 0005).
+/// 3: `Monitors` and `Enter` (PRD 0005).
 pub const VERSION: u8 = 3;
 
 /// Longest frame: length byte, type byte and an 8-byte payload.
@@ -40,6 +41,13 @@ pub enum Message {
         count: u8,
         list: [Monitor; MAX_MONITORS],
     },
+    /// The cursor crossed into the receiver through its `side` edge, at
+    /// `fraction` along it (0 = top or left, `u16::MAX` = bottom or right).
+    /// The receiver knows its own monitors, so it picks the point.
+    Enter {
+        side: Side,
+        fraction: u16,
+    },
 }
 
 const HELLO: u8 = 1;
@@ -51,6 +59,9 @@ const RELEASE_ALL: u8 = 6;
 const PING: u8 = 7;
 const PONG: u8 = 8;
 const MONITORS: u8 = 9;
+const ENTER: u8 = 10;
+
+const SIDES: [Side; 4] = Side::ALL;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum DecodeError {
@@ -58,6 +69,7 @@ pub enum DecodeError {
     UnknownType(u8),
     WrongLength { kind: u8, len: usize },
     BadBool(u8),
+    BadSide(u8),
 }
 
 impl fmt::Display for DecodeError {
@@ -69,6 +81,7 @@ impl fmt::Display for DecodeError {
                 write!(f, "message type {kind} has a {len}-byte payload")
             }
             DecodeError::BadBool(byte) => write!(f, "{byte} is not 0 or 1"),
+            DecodeError::BadSide(byte) => write!(f, "{byte} is not a side"),
         }
     }
 }
@@ -123,6 +136,11 @@ pub fn encode(message: &Message, frame: &mut [u8; MAX_FRAME]) -> usize {
                     put(&value.to_be_bytes());
                 }
             }
+        }
+        Message::Enter { side, fraction } => {
+            let code = SIDES.iter().position(|&known| known == side).unwrap_or(0);
+            put(&[ENTER, code as u8]);
+            put(&fraction.to_be_bytes());
         }
     }
     // At most MAX_FRAME (131), so it always fits in the length byte.
@@ -180,6 +198,15 @@ pub fn decode(body: &[u8]) -> Result<Message, DecodeError> {
         PONG => Message::Pong {
             id: u32::from_be_bytes(exact(kind, payload)?),
         },
+        ENTER => {
+            let [code, high, low] = exact(kind, payload)?;
+            Message::Enter {
+                side: *SIDES
+                    .get(usize::from(code))
+                    .ok_or(DecodeError::BadSide(code))?,
+                fraction: u16::from_be_bytes([high, low]),
+            }
+        }
         MONITORS => {
             let (&count, rects) = payload
                 .split_first()
@@ -269,6 +296,12 @@ mod tests {
         round_trip(Message::ReleaseAll);
         round_trip(Message::Ping { id: 7 });
         round_trip(Message::Pong { id: u32::MAX });
+        for side in Side::ALL {
+            round_trip(Message::Enter {
+                side,
+                fraction: 12345,
+            });
+        }
         round_trip(monitors(&[
             Monitor {
                 x: 0,
@@ -291,6 +324,8 @@ mod tests {
         assert!(decode(&[MONITORS, 1]).is_err());
         assert!(decode(&[MONITORS, 9]).is_err());
         assert!(decode(&[MONITORS]).is_err());
+        assert_eq!(decode(&[ENTER, 4, 0, 0]), Err(DecodeError::BadSide(4)));
+        assert!(decode(&[ENTER, 0, 0]).is_err());
     }
 
     #[test]

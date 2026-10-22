@@ -36,6 +36,11 @@ impl Emitter {
             } => windows::scroll(vertical, horizontal),
         }
     }
+
+    /// Puts the cursor at `x, y` of the desktop, where it came in.
+    pub fn place(&mut self, x: i32, y: i32) -> io::Result<()> {
+        crate::platform::windows::set_cursor_pos(x, y)
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -103,5 +108,16 @@ impl Emitter {
             }
         }
         self.device.sync()
+    }
+
+    /// Puts the cursor at `x, y` of the desktop, where it came in. uinput
+    /// moves are relative, so Hyprland places it (PRD 0005 *Discoveries*).
+    pub fn place(&mut self, x: i32, y: i32) -> io::Result<()> {
+        use crate::monitors::hyprland;
+        match hyprland::ask(&format!("dispatch movecursor {x} {y}")) {
+            Ok(answer) if answer.trim() == "ok" => Ok(()),
+            Ok(answer) => Err(io::Error::other(format!("Hyprland answered `{answer}`"))),
+            Err(err) => Err(io::Error::other(err)),
+        }
     }
 }

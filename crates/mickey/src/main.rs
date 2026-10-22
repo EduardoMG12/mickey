@@ -276,8 +276,12 @@ fn target(listen: SocketAddr) -> Result<(), String> {
             eprintln!("mickey: {err}; the source will not see this PC's monitors");
             Vec::new()
         });
-        let result = transport::serve(&mut link, &monitors, |event| {
-            if let Err(err) = emitter.emit(event)
+        let result = transport::serve(&mut link, &monitors, |effect| {
+            let done = match effect {
+                transport::Effect::Input(event) => emitter.emit(event),
+                transport::Effect::Place { x, y } => emitter.place(x, y),
+            };
+            if let Err(err) = done
                 && !reported
             {
                 eprintln!("mickey: input injection failed: {err} (not reported again)");
