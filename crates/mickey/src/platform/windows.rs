@@ -148,3 +148,57 @@ fn send(inputs: &[Input]) -> io::Result<()> {
         Err(io::Error::last_os_error())
     }
 }
+
+/// `RECT` from `windef.h`.
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+struct Rect {
+    left: i32,
+    top: i32,
+    right: i32,
+    bottom: i32,
+}
+
+type MonitorEnumProc = unsafe extern "system" fn(isize, isize, *mut Rect, isize) -> i32;
+
+#[link(name = "user32")]
+unsafe extern "system" {
+    fn EnumDisplayMonitors(
+        hdc: isize,
+        clip: *const Rect,
+        proc: MonitorEnumProc,
+        data: isize,
+    ) -> i32;
+}
+
+/// Every monitor's rectangle on the virtual desktop.
+pub fn monitors() -> io::Result<Vec<crate::monitors::Monitor>> {
+    unsafe extern "system" fn add(
+        _monitor: isize,
+        _hdc: isize,
+        rect: *mut Rect,
+        data: isize,
+    ) -> i32 {
+        // SAFETY: `data` is the `&mut Vec` passed below, alive for the whole
+        // EnumDisplayMonitors call, and only this callback touches it;
+        // `rect` points to the monitor's rectangle for this call.
+        let (found, rect) = unsafe { (&mut *(data as *mut Vec<crate::monitors::Monitor>), *rect) };
+        found.push(crate::monitors::Monitor {
+            x: rect.left,
+            y: rect.top,
+            width: rect.right - rect.left,
+            height: rect.bottom - rect.top,
+        });
+        1 // keep going
+    }
+    let mut found: Vec<crate::monitors::Monitor> = Vec::new();
+    // SAFETY: no device context and no clip rectangle means "every monitor";
+    // `add` matches `MonitorEnumProc`; the pointer to `found` outlives the
+    // call, which is synchronous.
+    let ok =
+        unsafe { EnumDisplayMonitors(0, std::ptr::null(), add, &mut found as *mut _ as isize) };
+    if ok == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(found)
+}
