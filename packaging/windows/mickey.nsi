@@ -36,9 +36,12 @@ Section "Mickey"
   File "${BIN}\mickey-ui.exe"
   File "start-hidden.vbs"
 
-  ; Start at login, hidden (mickey.exe is a console program).
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "Mickey" \
-    'wscript.exe "$INSTDIR\start-hidden.vbs"'
+  ; Start at login, hidden (mickey.exe is a console program), and with the
+  ; highest privileges: Windows refuses injected input in windows running as
+  ; administrator to a program that is not, and Mickey must reach every
+  ; window. A scheduled task can start elevated without asking each time.
+  DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "Mickey"
+  nsExec::Exec 'schtasks /create /tn "Mickey" /tr "wscript.exe \"$INSTDIR\start-hidden.vbs\"" /sc onlogon /ru "$%USERDOMAIN%\$%USERNAME%" /it /rl highest /f'
 
   ; Peers connect to the target; private networks only, never public ones.
   nsExec::Exec 'netsh advfirewall firewall delete rule name="Mickey"'
@@ -46,9 +49,6 @@ Section "Mickey"
 
   CreateDirectory "$SMPROGRAMS\Mickey"
   CreateShortcut "$SMPROGRAMS\Mickey\Mickey settings.lnk" "$INSTDIR\mickey-ui.exe" "settings"
-  ; Pairing asks questions in a terminal, so this shortcut shows one.
-  CreateShortcut "$SMPROGRAMS\Mickey\Mickey (terminal, for pairing).lnk" "$SYSDIR\cmd.exe" \
-    '/k taskkill /im mickey.exe /f >nul 2>&1 & "$INSTDIR\mickey.exe" run'
   CreateShortcut "$SMPROGRAMS\Mickey\Uninstall Mickey.lnk" "$INSTDIR\uninstall.exe"
 
   WriteUninstaller "$INSTDIR\uninstall.exe"
@@ -56,14 +56,15 @@ Section "Mickey"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Mickey" "DisplayVersion" "${VERSION}"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Mickey" "UninstallString" '"$INSTDIR\uninstall.exe"'
 
-  ; Start it now, as it will start at every login.
-  Exec 'wscript.exe "$INSTDIR\start-hidden.vbs"'
+  ; Start it now, elevated, as it will start at every login.
+  nsExec::Exec 'schtasks /run /tn "Mickey"'
 SectionEnd
 
 Section "Uninstall"
   nsExec::Exec 'taskkill /im mickey.exe /f'
   nsExec::Exec 'taskkill /im mickey-ui.exe /f'
   DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "Mickey"
+  nsExec::Exec 'schtasks /delete /tn "Mickey" /f'
   nsExec::Exec 'netsh advfirewall firewall delete rule name="Mickey"'
   Delete "$INSTDIR\mickey.exe"
   Delete "$INSTDIR\mickey-ui.exe"
