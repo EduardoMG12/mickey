@@ -92,13 +92,17 @@ fn run(command: Command) -> Result<(), String> {
             }
             Ok(())
         }
-        Command::History => {
+        Command::History { lines } => {
             for line in control::request("history")? {
                 let line = line.map_err(|err| err.to_string())?;
                 if let Some(err) = line.strip_prefix("error: ") {
                     return Err(err.to_string());
                 }
-                if let [id, kind, ago, preview] = line.splitn(4, '\t').collect::<Vec<_>>()[..] {
+                if lines {
+                    println!("{line}");
+                } else if let [id, kind, ago, preview] =
+                    line.splitn(4, '\t').collect::<Vec<_>>()[..]
+                {
                     println!("{id:>4}  {ago:>5} s ago  {kind:<5}  {preview}");
                 }
             }
