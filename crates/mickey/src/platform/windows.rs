@@ -67,6 +67,13 @@ const _: () = assert!(size_of::<Input>() == 40);
 unsafe extern "system" {
     fn SendInput(count: u32, inputs: *const Input, size: i32) -> u32;
     fn SetCursorPos(x: i32, y: i32) -> i32;
+    fn GetClipboardSequenceNumber() -> u32;
+}
+
+/// A number Windows bumps on every clipboard change (PRD 0011).
+pub fn clipboard_sequence() -> u32 {
+    // SAFETY: no arguments; only reads a counter.
+    unsafe { GetClipboardSequenceNumber() }
 }
 
 /// Puts the cursor at a point of the virtual desktop.

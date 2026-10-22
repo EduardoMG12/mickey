@@ -27,3 +27,8 @@ png = "0.18"
 # the small async-io executor, on a thread of its own.
 [target.'cfg(target_os = "linux")'.dependencies]
 ksni = { version = "0.3", default-features = false, features = ["blocking", "async-io"] }
+# Hearing every copy on Wayland without reading the clipboard over and
+# over (PRD 0011): the data-control protocol's selection events. Both are
+# already in the tree through arboard.
+wayland-client = "0.31"
+wayland-protocols-wlr = { version = "0.3", features = ["client"] }
