@@ -619,6 +619,19 @@ impl eframe::App for Settings {
                         crate::theme::keycaps(ui, "AltGr", false, false);
                         ui.weak("2 s, and let go: works whatever is set here");
                     });
+                    let held = game_keys(form);
+                    if !held.is_empty() {
+                        ui.colored_label(
+                            crate::theme::palette::AWAY,
+                            format!(
+                                "{}  {} in a hotkey: while another PC has the keyboard, Mickey holds {} back until the next key, so games that use {} (crouch, walk, jump) may feel late there.",
+                                crate::theme::icon::SHIELD,
+                                held.join(", "),
+                                if held.len() == 1 { "it" } else { "them" },
+                                if held.len() == 1 { "it" } else { "them" },
+                            ),
+                        );
+                    }
                     ui.add_space(4.0);
                     // What the recording in progress gave, if it is done.
                     if let Some((row, answer)) = &self.recording
@@ -832,8 +845,45 @@ fn preview(ui: &mut egui::Ui, names: &[String], vertical: bool) {
         });
 }
 
+/// Keys games use all the time that appear in a hotkey (#188). A key that
+/// may start a hotkey is held back on the way to another PC until the
+/// next key shows whether the hotkey is meant, which games feel.
+fn game_keys(form: &Form) -> Vec<&'static str> {
+    const GAME_KEYS: [&str; 5] = ["LeftCtrl", "LeftShift", "LeftAlt", "Space", "Tab"];
+    let mut texts = vec![
+        &form.next,
+        &form.home,
+        &form.switcher,
+        &form.forward,
+        &form.back,
+        &form.double_tap,
+    ];
+    texts.extend(form.pcs.iter().map(|pc| &pc.hotkey));
+    GAME_KEYS
+        .into_iter()
+        .filter(|key| {
+            texts.iter().any(|text| {
+                text.split('+')
+                    .any(|part| part.trim().eq_ignore_ascii_case(key))
+            })
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn keys_games_use_are_found_in_hotkeys() {
+        let mut form = Form::from_config(&config::parse("").unwrap());
+        assert!(
+            game_keys(&form).is_empty(),
+            "the defaults hold back nothing games use"
+        );
+        form.double_tap = "LeftCtrl".into();
+        form.home = "LeftShift+AltGr+H".into();
+        assert_eq!(game_keys(&form), ["LeftCtrl", "LeftShift"]);
+    }
+
     use super::*;
 
     #[test]
