@@ -50,14 +50,17 @@ pub struct Emitter {
 impl Emitter {
     pub fn new() -> Result<Emitter, String> {
         use crate::platform::uinput::VirtualDevice;
-        let device = VirtualDevice::create("Mickey").map_err(|err| match err.kind() {
-            io::ErrorKind::PermissionDenied | io::ErrorKind::NotFound => format!(
-                "cannot create a virtual keyboard ({err}); allow the input group with the \
+        let device =
+            VirtualDevice::create(crate::platform::uinput::DEVICE_NAME).map_err(|err| match err
+                .kind()
+            {
+                io::ErrorKind::PermissionDenied | io::ErrorKind::NotFound => format!(
+                    "cannot create a virtual keyboard ({err}); allow the input group with the \
                  udev rule in the README, or for this boot: \
                  sudo chgrp input /dev/uinput && sudo chmod 660 /dev/uinput"
-            ),
-            _ => format!("cannot create a virtual keyboard: {err}"),
-        })?;
+                ),
+                _ => format!("cannot create a virtual keyboard: {err}"),
+            })?;
         Ok(Emitter {
             device,
             partial: [0; 2],
