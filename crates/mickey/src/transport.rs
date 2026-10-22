@@ -56,20 +56,14 @@ pub fn accept(stream: TcpStream, identity: &Identity) -> io::Result<Link> {
     Link::respond(stream, identity)
 }
 
-// ponytail: the clipboard sync uses it (#131).
-#[allow(dead_code)]
 /// The data link (PRD 0011) listens on the port after the input link's.
 pub fn data_address(input: SocketAddr) -> SocketAddr {
     SocketAddr::new(input.ip(), input.port().wrapping_add(1))
 }
 
-// ponytail: the clipboard sync uses it (#131).
-#[allow(dead_code)]
 /// A bulk payload of megabytes takes longer to write than a key press.
 const DATA_WRITE_TIMEOUT: Duration = Duration::from_secs(10);
 
-// ponytail: the clipboard sync uses it (#131).
-#[allow(dead_code)]
 /// Opens the data link to the target whose input link is at `input`.
 pub fn connect_data(input: SocketAddr, identity: &Identity) -> io::Result<Link> {
     let stream = TcpStream::connect_timeout(&data_address(input), CONNECT_TIMEOUT)?;
@@ -77,8 +71,6 @@ pub fn connect_data(input: SocketAddr, identity: &Identity) -> io::Result<Link> 
     Link::initiate(stream, identity)
 }
 
-// ponytail: the clipboard sync uses it (#131).
-#[allow(dead_code)]
 /// The target's side of a data link. Only a PC already paired may open
 /// one (`trusted` says): a data link never asks to pair.
 pub fn accept_data(
