@@ -5,11 +5,10 @@
 #![windows_subsystem = "windows"]
 
 mod choice;
-// ponytail: used by the Layout tab, in the next PR.
-#[allow(dead_code)]
-mod snap;
+mod layout;
 mod place;
 mod settings;
+mod snap;
 
 use choice::Choice;
 use eframe::egui;
