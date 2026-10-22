@@ -24,6 +24,7 @@ usage:
   mickey monitors                    list this machine's monitors
   mickey peers                       list the PCs, whether they are online, and their monitors
   mickey discover [--lines]          list the PCs running Mickey on this network
+  mickey autostart [on|off|status]   start Mickey when this PC starts
   mickey connect <ip:port> <name>    add a PC found on the network and pair with it
   mickey history [--lines]           list the recent copies on this PC (newest first);
                                      --lines prints them tab-separated, for the window
@@ -55,6 +56,8 @@ pub enum Command {
     },
     Settings,
     Id,
+    /// Start with the system: `Some(on)` sets it, `None` asks.
+    Autostart(Option<bool>),
     Status {
         waybar: bool,
     },
@@ -80,6 +83,13 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
         [command] if command == "run" => Ok(Command::Run),
         [command] if command == "monitors" => Ok(Command::Monitors),
         [command] if command == "peers" => Ok(Command::Peers),
+        [command] if command == "autostart" => Ok(Command::Autostart(None)),
+        [command, word] if command == "autostart" => match word.as_str() {
+            "on" => Ok(Command::Autostart(Some(true))),
+            "off" => Ok(Command::Autostart(Some(false))),
+            "status" => Ok(Command::Autostart(None)),
+            _ => Err(format!("`mickey autostart {word}`: say on, off or status")),
+        },
         [command] if command == "discover" => Ok(Command::Discover { lines: false }),
         [command, flag] if command == "discover" && flag == "--lines" => {
             Ok(Command::Discover { lines: true })
