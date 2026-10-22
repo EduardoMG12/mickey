@@ -175,7 +175,19 @@ fn empty() -> Config {
 fn fingerprint() -> String {
     std::env::current_exe()
         .map(|exe| exe.with_file_name(format!("mickey{}", std::env::consts::EXE_SUFFIX)))
-        .and_then(|mickey| Command::new(mickey).arg("id").output())
+        .and_then(|mickey| {
+            let mut command = Command::new(mickey);
+            command.arg("id");
+            // mickey.exe is a console program; without this, Windows would
+            // flash a console window over the settings.
+            #[cfg(windows)]
+            {
+                use std::os::windows::process::CommandExt;
+                const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+                command.creation_flags(CREATE_NO_WINDOW);
+            }
+            command.output()
+        })
         .ok()
         .filter(|output| output.status.success())
         .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
