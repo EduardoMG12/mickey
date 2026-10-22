@@ -61,6 +61,11 @@ impl Link {
         Link::handshake(stream, handshake, &[false, true, false])
     }
 
+    /// How long a `recv` may wait; `None` for ever.
+    pub fn set_read_timeout(&self, timeout: Option<Duration>) -> io::Result<()> {
+        self.stream.set_read_timeout(timeout)
+    }
+
     /// The other side's public key, proven by the handshake.
     pub fn peer_key(&self) -> &[u8; 32] {
         &self.peer
