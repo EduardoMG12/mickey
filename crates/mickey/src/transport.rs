@@ -3,6 +3,7 @@
 use crate::event::InputEvent;
 use crate::held::HeldSet;
 use crate::identity::Identity;
+use crate::monitors::Monitor;
 use crate::protocol::{Message, VERSION};
 use crate::secure::Link;
 use std::io;
@@ -57,7 +58,13 @@ pub fn accept(stream: TcpStream, identity: &Identity) -> io::Result<Link> {
 /// Serves one source until it disconnects, passing every input event to
 /// `emit`. Whatever is still held when the connection ends, cleanly or not,
 /// is released through `emit` before returning.
-pub fn serve(link: &mut Link, mut emit: impl FnMut(InputEvent)) -> io::Result<()> {
+/// `monitors` are this PC's, sent to the source after `Hello` so it can
+/// lay the PCs out and cross their edges (PRD 0005).
+pub fn serve(
+    link: &mut Link,
+    monitors: &[Monitor],
+    mut emit: impl FnMut(InputEvent),
+) -> io::Result<()> {
     let first = link.recv().map_err(|err| match err.kind() {
         io::ErrorKind::UnexpectedEof => {
             invalid("the source left before saying hello (it may have refused to pair)".into())
@@ -65,7 +72,10 @@ pub fn serve(link: &mut Link, mut emit: impl FnMut(InputEvent)) -> io::Result<()
         _ => err,
     })?;
     match first {
-        Message::Hello { version: VERSION } => link.send(&Message::Hello { version: VERSION })?,
+        Message::Hello { version: VERSION } => {
+            link.send(&Message::Hello { version: VERSION })?;
+            link.send(&Message::monitors(monitors))?;
+        }
         Message::Hello { version } => {
             return Err(invalid(format!(
                 "peer speaks protocol {version}, this Mickey speaks {VERSION}"
@@ -97,7 +107,7 @@ pub fn serve(link: &mut Link, mut emit: impl FnMut(InputEvent)) -> io::Result<()
                     break Err(err);
                 }
             }
-            Message::Pong { .. } => {}
+            Message::Pong { .. } | Message::Monitors { .. } => {}
             Message::Hello { .. } => break Err(invalid("second Hello".into())),
         }
     };
@@ -149,15 +159,21 @@ mod tests {
             let identity = Identity::generate().unwrap();
             let mut link = accept(stream, &identity).expect("handshake");
             let mut emitted = Vec::new();
-            let result = serve(&mut link, |event| emitted.push(event));
+            let result = serve(&mut link, &[], |event| emitted.push(event));
             (result, emitted)
         });
         (addr, handle)
     }
 
+    /// A source that has said hello and read the target's monitors, which
+    /// the target sends right after its own hello.
     fn source(addr: SocketAddr) -> Link {
         let mut link = connect(addr, &Identity::generate().unwrap()).unwrap();
         hello(&mut link).unwrap();
+        assert!(matches!(
+            link.recv().unwrap(),
+            Message::Monitors { count: 0, .. }
+        ));
         link
     }
 

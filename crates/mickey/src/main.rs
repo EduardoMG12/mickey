@@ -16,8 +16,6 @@ mod hotkey;
 mod identity;
 mod input;
 mod latency;
-// ponytail: only `mickey monitors` uses it until the exchange (#87).
-#[allow(dead_code)]
 mod monitors;
 // The Linux build never translates keys for Windows.
 #[cfg_attr(not(windows), allow(dead_code))]
@@ -285,7 +283,12 @@ fn target(listen: SocketAddr) -> Result<(), String> {
             }
         }
         let mut reported = false;
-        let result = transport::serve(&mut link, |event| {
+        // Asked per connection: monitors may have changed since the last one.
+        let monitors = monitors::this_pc().unwrap_or_else(|err| {
+            eprintln!("mickey: {err}; the source will not see this PC's monitors");
+            Vec::new()
+        });
+        let result = transport::serve(&mut link, &monitors, |event| {
             if let Err(err) = emitter.emit(event)
                 && !reported
             {
