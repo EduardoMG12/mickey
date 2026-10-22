@@ -9,6 +9,10 @@
 //!
 //! Inside an encrypted message is one protocol frame body (type and
 //! payload, without the old length byte).
+//!
+//! A data link (PRD 0011) carries bulk payloads instead: a message holding
+//! the payload's length (4 bytes), then the payload in messages of up to
+//! `BULK_CHUNK` bytes each.
 
 use crate::identity::{Identity, NOISE_PARAMS};
 use crate::protocol::{self, MAX_FRAME, Message};
@@ -23,6 +27,15 @@ const TAG_LEN: usize = 16;
 /// The largest Noise message we accept. Handshake messages are under 100
 /// bytes and transport messages under 30, so anything bigger is hostile.
 const MAX_NOISE_MESSAGE: usize = 256;
+// ponytail: the clipboard sync uses it (#131).
+#[allow(dead_code)]
+/// The largest bulk payload: a big screenshot fits, and a hostile peer
+/// cannot make us hold gigabytes.
+pub const MAX_BULK: usize = 64 << 20;
+// ponytail: the clipboard sync uses it (#131).
+#[allow(dead_code)]
+/// The most plaintext one Noise message carries (65 535 with its tag).
+const BULK_CHUNK: usize = u16::MAX as usize - TAG_LEN;
 /// A peer that stalls in the middle of the handshake is dropped.
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -107,6 +120,68 @@ impl Link {
         protocol::decode(&body[..body_len]).map_err(|err| invalid(err.to_string()))
     }
 
+    // ponytail: the clipboard sync uses it (#131).
+    #[allow(dead_code)]
+    /// Sends `bytes` whole, on a data link (PRD 0011): never on the input
+    /// link, where it would hold key presses behind it.
+    pub fn send_bulk(&mut self, bytes: &[u8]) -> io::Result<()> {
+        if bytes.len() > MAX_BULK {
+            return Err(invalid(format!(
+                "{} bytes is more than a bulk payload may hold",
+                bytes.len()
+            )));
+        }
+        let length = (bytes.len() as u32).to_be_bytes();
+        let mut sealed = vec![0u8; BULK_CHUNK + TAG_LEN];
+        let mut noise = self
+            .noise
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        for piece in std::iter::once(&length[..]).chain(bytes.chunks(BULK_CHUNK)) {
+            let len = noise
+                .write_message(piece, &mut sealed)
+                .map_err(noise_error)?;
+            write_noise(&mut self.stream, &sealed[..len])?;
+        }
+        Ok(())
+    }
+
+    // ponytail: the clipboard sync uses it (#131).
+    #[allow(dead_code)]
+    /// Reads one payload sent with `send_bulk`.
+    pub fn recv_bulk(&mut self) -> io::Result<Vec<u8>> {
+        let mut sealed = vec![0u8; BULK_CHUNK + TAG_LEN];
+        let mut plain = vec![0u8; BULK_CHUNK + TAG_LEN];
+        let mut open = |stream: &mut TcpStream, plain: &mut [u8]| -> io::Result<usize> {
+            let len = read_noise(stream, &mut sealed)?;
+            self.noise
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .read_message(&sealed[..len], plain)
+                .map_err(noise_error)
+        };
+        let mut stream = self.stream.try_clone()?;
+        let header = open(&mut stream, &mut plain)?;
+        let length: [u8; 4] = plain[..header]
+            .try_into()
+            .map_err(|_| invalid("a bulk payload must start with its length".into()))?;
+        let length = u32::from_be_bytes(length) as usize;
+        if length > MAX_BULK {
+            return Err(invalid(format!(
+                "the peer announced {length} bytes, too many"
+            )));
+        }
+        let mut payload = Vec::with_capacity(length);
+        while payload.len() < length {
+            let got = open(&mut stream, &mut plain)?;
+            if got == 0 || payload.len() + got > length {
+                return Err(invalid("a bulk payload does not match its length".into()));
+            }
+            payload.extend_from_slice(&plain[..got]);
+        }
+        Ok(payload)
+    }
+
     /// `writes[i]` says whether this side sends handshake message `i`.
     fn handshake(
         mut stream: TcpStream,
@@ -163,17 +238,19 @@ fn builder(identity: &Identity) -> io::Result<snow::Builder<'_>> {
 }
 
 fn write_noise(stream: &mut TcpStream, message: &[u8]) -> io::Result<()> {
-    // At most MAX_NOISE_MESSAGE (256), so it always fits in two bytes.
+    // At most 65 535 bytes (a bulk chunk with its tag): fits in two bytes.
     let len = (message.len() as u16).to_be_bytes();
     stream.write_all(&len)?;
     stream.write_all(message)
 }
 
-fn read_noise(stream: &mut TcpStream, buf: &mut [u8; MAX_NOISE_MESSAGE]) -> io::Result<usize> {
+/// Reads one Noise message into `buf`; longer than `buf` is an error, so
+/// the input link keeps refusing anything over `MAX_NOISE_MESSAGE`.
+fn read_noise(stream: &mut TcpStream, buf: &mut [u8]) -> io::Result<usize> {
     let mut len = [0u8; 2];
     stream.read_exact(&mut len)?;
     let len = usize::from(u16::from_be_bytes(len));
-    if len == 0 || len > MAX_NOISE_MESSAGE {
+    if len == 0 || len > buf.len() {
         return Err(invalid(format!(
             "noise message length {len} is out of range"
         )));
