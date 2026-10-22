@@ -488,6 +488,7 @@ pub fn run(
             }
         });
     }
+    let double_tap_window = hotkeys.double_tap_window();
     let mut switcher = Switcher::with_hotkeys(hotkeys);
     // Dropping a `Grab` gives its device back, on every way out of here,
     // including `?` and panics.
@@ -682,7 +683,11 @@ pub fn run(
                 }
             }
             Ok(Wake::Control(request)) if request.order == Order::Record => {
-                recording = Some((Recording::new(), request.reply, Instant::now()));
+                recording = Some((
+                    Recording::new(double_tap_window),
+                    request.reply,
+                    Instant::now(),
+                ));
             }
             Ok(Wake::Input(event)) => {
                 switcher.handle(event, &online, &mut act);

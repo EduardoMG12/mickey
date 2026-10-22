@@ -33,9 +33,6 @@ pub enum Trigger {
     Back,
 }
 
-/// Two taps closer than this count as a double tap.
-pub const DOUBLE_TAP: Duration = Duration::from_millis(400);
-
 /// One hotkey key pressed during the current attempt.
 #[derive(Clone, Copy)]
 struct Pressed {
@@ -50,6 +47,8 @@ pub struct Hotkey {
     chords: Vec<(Chord, Trigger)>,
     /// Tapping this key twice quickly, alone, means `Forward`.
     double_tap: Option<u16>,
+    /// Two taps closer than this are a double tap (config.toml).
+    window: Duration,
     /// When it was last tapped alone, while waiting for a second tap.
     last_tap: Option<Instant>,
     /// The hotkey keys pressed since the first one went down, in order.
@@ -69,6 +68,7 @@ impl Hotkey {
         Hotkey {
             chords,
             double_tap: None,
+            window: Duration::from_millis(mickey_config::DEFAULT_DOUBLE_TAP_MS),
             last_tap: None,
             attempt: Vec::new(),
             spoiled: false,
@@ -106,7 +106,13 @@ impl Hotkey {
         }
         let mut hotkey = Hotkey::with(chords);
         hotkey.double_tap = set.double_tap;
+        hotkey.window = set.double_tap_window;
         hotkey
+    }
+
+    /// Two taps closer than this are a double tap; recording uses it too.
+    pub fn double_tap_window(&self) -> Duration {
+        self.window
     }
 
     /// Feeds one captured event. `forward` receives, in order, every event
@@ -238,7 +244,7 @@ impl Hotkey {
         let mut keys: Vec<u16> = self.attempt.iter().map(|key| key.code).collect();
         keys.sort_unstable();
         let lone_tap = !self.spoiled && keys.len() == 1 && Some(keys[0]) == self.double_tap;
-        if lone_tap && self.last_tap.is_some_and(|last| now - last < DOUBLE_TAP) {
+        if lone_tap && self.last_tap.is_some_and(|last| now - last < self.window) {
             // The second tap: the target got the first one as a plain tap,
             // which is harmless for a modifier, and never sees this one.
             self.last_tap = None;
@@ -449,6 +455,24 @@ mod tests {
         // Too slow: two plain taps.
         assert_eq!(tap(&mut hotkey, 1000).1, None);
         assert_eq!(tap(&mut hotkey, 1600).1, None);
+    }
+
+    #[test]
+    fn the_double_tap_window_comes_from_the_config() {
+        let set =
+            mickey_config::parse("[hotkeys]\ndouble_tap = \"LeftCtrl\"\ndouble_tap_ms = 700\n")
+                .unwrap()
+                .hotkeys()
+                .unwrap();
+        let mut hotkey = Hotkey::from_config(&set);
+        let start = Instant::now();
+        let mut fired = None;
+        // Two taps on Left Ctrl, 600 ms apart: inside a 700 ms window.
+        for (at, pressed) in [(0, true), (50, false), (600, true), (650, false)] {
+            let now = start + Duration::from_millis(at);
+            fired = fired.or(hotkey.feed_at(key(29, pressed), now, |_| {}));
+        }
+        assert_eq!(fired, Some(Trigger::Forward));
     }
 
     #[test]

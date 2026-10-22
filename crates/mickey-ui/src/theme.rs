@@ -88,6 +88,8 @@ fn visuals() -> egui::Visuals {
     visuals.selection.bg_fill = BRUISE;
     visuals.selection.stroke = Stroke::new(1.0, BONE);
     visuals.hyperlink_color = BRUISE;
+    // A slider's rail would vanish on a card: the part travelled is filled.
+    visuals.slider_trailing_fill = true;
     let widgets = &mut visuals.widgets;
     widgets.noninteractive.bg_fill = GRAPHITE;
     widgets.noninteractive.bg_stroke = Stroke::new(1.0, ASH);
@@ -174,6 +176,49 @@ pub fn tab<T: PartialEq>(ui: &mut egui::Ui, current: &mut T, value: T, icon: &st
     if ui.add(button).clicked() {
         *current = value;
     }
+}
+
+/// A hotkey drawn as keys: `AltGr` + `RightShift`, or `RightShift` ×2 for a
+/// double tap. `faded`: the default, shown while the setting is empty.
+pub fn keycaps(ui: &mut egui::Ui, text: &str, double: bool, faded: bool) {
+    let (fill, colour) = if faded {
+        (palette::CHARCOAL, palette::FUR)
+    } else {
+        (palette::ASH, palette::BONE)
+    };
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 4.0;
+        let keys: Vec<&str> = text
+            .split('+')
+            .map(str::trim)
+            .filter(|key| !key.is_empty())
+            .collect();
+        if keys.is_empty() {
+            ui.label(egui::RichText::new("off").color(palette::FUR).italics());
+            return;
+        }
+        for (i, key) in keys.iter().enumerate() {
+            if i > 0 {
+                ui.label(egui::RichText::new("+").color(palette::FUR));
+            }
+            egui::Frame::new()
+                .fill(fill)
+                .stroke(Stroke::new(1.0, palette::INK))
+                .corner_radius(CornerRadius::same(5))
+                .inner_margin(egui::Margin::symmetric(7, 3))
+                .show(ui, |ui| {
+                    ui.label(egui::RichText::new(*key).monospace().color(colour));
+                });
+        }
+        if double {
+            ui.label(
+                egui::RichText::new("×2")
+                    .size(16.0)
+                    .strong()
+                    .color(palette::BONE),
+            );
+        }
+    });
 }
 
 /// The main button of a window: filled with the accent.
