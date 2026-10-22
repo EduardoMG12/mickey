@@ -44,6 +44,8 @@ enum Wake {
     Controlled(bool),
     /// A pick in the tray icon's menu.
     Tray(tray::Click),
+    /// The peer at this address placed itself on this PC's desktop.
+    Arranged(std::net::IpAddr, [i32; 2]),
 }
 
 impl From<InputEvent> for Wake {
@@ -78,9 +80,12 @@ fn obey(
         }
         Order::Switcher => "error: the focus is on another PC; press the hotkey".into(),
         // The main loop answers these, since it knows the answers.
-        Order::Peers | Order::Discover | Order::History | Order::HistoryCopy(_) | Order::Quit => {
-            "error: not an order".into()
-        }
+        Order::Peers
+        | Order::Discover
+        | Order::History
+        | Order::HistoryCopy(_)
+        | Order::Quit
+        | Order::Arranged => "error: not an order".into(),
         Order::Go(name) => {
             let Some(peer) = names.iter().position(|known| *known == name) else {
                 return format!("error: no PC named `{name}` in config.toml");
@@ -168,6 +173,47 @@ fn open_window(window: &str) {
     }
 }
 
+/// After the owner placed PCs in the settings window: reads the positions
+/// saved in config.toml, uses them, and tells every placed peer where this
+/// PC sits on its desktop (the mirror: if it is at `x, y` here, this PC is
+/// at `-x, -y` there), so both PCs agree. Always all of them: telling a peer
+/// what it already knows only writes the same line again.
+fn arrange(positions: &mut [Option<[i32; 2]>], peers: &mut [Peer]) -> String {
+    let config = match config::Config::load() {
+        Ok(Some(config)) => config,
+        Ok(None) => return "error: no config.toml".into(),
+        Err(err) => return format!("error: {err}"),
+    };
+    let mut told = 0;
+    for (index, peer) in peers.iter_mut().enumerate() {
+        let saved = config.peers.iter().find(|saved| saved.name == peer.name);
+        let Some([x, y]) = saved.and_then(|saved| saved.position) else {
+            continue;
+        };
+        positions[index] = Some([x, y]);
+        if let Some(link) = &mut peer.link
+            && link.send(&Message::Arrange { x: -x, y: -y }).is_ok()
+        {
+            told += 1;
+        }
+    }
+    format!("ok: told {told} PC(s) about the layout")
+}
+
+/// Writes where a peer placed itself into config.toml, so the settings
+/// window and the next start see it too.
+fn save_position(name: &str, position: [i32; 2]) {
+    let saved = config::path().and_then(|path| {
+        let text = std::fs::read_to_string(&path).map_err(|err| err.to_string())?;
+        let text = config::set_position(&text, name, position)?;
+        std::fs::write(&path, text).map_err(|err| err.to_string())
+    });
+    match saved {
+        Ok(()) => println!("mickey: {name} placed itself on this desktop at {position:?}"),
+        Err(err) => eprintln!("mickey: cannot save where {name} sits: {err}"),
+    }
+}
+
 /// The answer to `mickey discover`: one PC per line, its name, address
 /// and fingerprint, tab-separated.
 fn found_text(found: Option<&discovery::Table>) -> String {
@@ -224,11 +270,22 @@ struct Shared {
     trusted: TrustedPeers,
 }
 
+/// What the target passes on to the source.
+pub enum TargetNews {
+    /// A peer's keyboard and mouse came over to this PC, or left (PRD 0009).
+    Controlled(bool),
+    /// The peer at this address placed itself on this PC's desktop.
+    Arranged {
+        from: std::net::IpAddr,
+        position: [i32; 2],
+    },
+}
+
 /// What the rest of Mickey shares with the source. Each is optional:
 /// Mickey works without any of them.
 pub struct Services {
-    /// Whether a peer's keyboard came over, from the target (PRD 0009).
-    pub controlled: mpsc::Receiver<bool>,
+    /// What the target hears from the peers driving this PC.
+    pub controlled: mpsc::Receiver<TargetNews>,
     /// The PCs heard on the network (PRD 0010).
     pub found: Option<discovery::Table>,
     /// The clipboard, and its history (PRD 0011).
@@ -267,7 +324,8 @@ pub fn run(
     // Connect at start, asking to pair where needed (devices are not grabbed
     // yet, so the terminal still gets the keyboard).
     let mut peers = Vec::new();
-    let positions: Vec<Option<[i32; 2]>> = configured.iter().map(|peer| peer.position).collect();
+    let mut positions: Vec<Option<[i32; 2]>> =
+        configured.iter().map(|peer| peer.position).collect();
     for (index, peer) in configured.into_iter().enumerate() {
         let link = match connect_and_pair(&identity, &mut trusted, &peer) {
             Ok(link) => {
@@ -318,8 +376,12 @@ pub fn run(
     {
         let wake = wake.clone();
         thread::spawn(move || {
-            for here in controlled {
-                if wake.send(Wake::Controlled(here)).is_err() {
+            for news in controlled {
+                let woken = match news {
+                    TargetNews::Controlled(here) => Wake::Controlled(here),
+                    TargetNews::Arranged { from, position } => Wake::Arranged(from, position),
+                };
+                if wake.send(woken).is_err() {
                     return;
                 }
             }
@@ -500,6 +562,8 @@ pub fn run(
         let mut asked_for_peers = None;
         let mut pushed = None;
         let mut quit = false;
+        let mut placed = None;
+        let mut asked_to_arrange = None;
         match wakes.recv_timeout(wait) {
             Ok(Wake::Input(event)) => {
                 switcher.handle(event, &online, &mut act);
@@ -510,6 +574,11 @@ pub fn run(
                 }
             }
             Ok(Wake::Controlled(here)) => in_control.peer_says(here),
+            // Both handled below, once `act` no longer borrows the peers.
+            Ok(Wake::Arranged(from, position)) => placed = Some((from, position)),
+            Ok(Wake::Control(request)) if request.order == Order::Arranged => {
+                asked_to_arrange = Some(request.reply);
+            }
             Ok(Wake::Tray(tray::Click::Quit)) => quit = true,
             Ok(Wake::Control(request)) if request.order == Order::Quit => {
                 let _ = request.reply.send("ok: Mickey is quitting".into());
@@ -577,6 +646,15 @@ pub fn run(
             Err(RecvTimeoutError::Disconnected) => break,
         }
         drop(act);
+        if let Some((from, position)) = placed
+            && let Some(index) = peers.iter().position(|peer| peer.address.ip() == from)
+        {
+            positions[index] = Some(position);
+            save_position(&peers[index].name, position);
+        }
+        if let Some(reply) = asked_to_arrange {
+            let _ = reply.send(arrange(&mut positions, &mut peers));
+        }
         if quit {
             // Returning drops the grab: the devices go back to this PC.
             println!("mickey: quitting, as asked");
