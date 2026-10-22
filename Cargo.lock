@@ -1293,6 +1293,7 @@ name = "mickey-ui"
 version = "0.1.0"
 dependencies = [
  "eframe",
+ "mickey-config",
 ]
 
 [[package]]
