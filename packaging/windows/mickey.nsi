@@ -42,6 +42,8 @@ Section "Mickey"
   ; window. A scheduled task can start elevated without asking each time.
   DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "Mickey"
   nsExec::Exec 'schtasks /create /tn "Mickey" /tr "wscript.exe \"$INSTDIR\start-hidden.vbs\"" /sc onlogon /ru "$%USERDOMAIN%\$%USERNAME%" /it /rl highest /f'
+  ; A new task does not start on battery: on a laptop Mickey would not start.
+  nsExec::Exec 'powershell -NoProfile -Command "Set-ScheduledTask -TaskName Mickey -Settings (New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit 0)"'
 
   ; Peers connect to the target; private networks only, never public ones.
   nsExec::Exec 'netsh advfirewall firewall delete rule name="Mickey"'
