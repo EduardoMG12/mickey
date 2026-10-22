@@ -118,19 +118,51 @@ fn default_listen() -> SocketAddr {
 }
 
 /// `[interface]`: how Mickey shows itself.
-#[derive(Debug, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Interface {
     /// Where the switcher appears: a corner or `center`.
     #[serde(default = "default_switcher_position")]
     pub switcher_position: String,
+    /// The switcher's cards in a column instead of a row.
+    #[serde(default)]
+    pub switcher_vertical: bool,
+    /// PC names in the order the switcher shows them; PCs left out follow,
+    /// as the layout places them. Empty: all as the layout places them.
+    #[serde(default)]
+    pub switcher_order: Vec<String>,
 }
 
 impl Default for Interface {
     fn default() -> Interface {
         Interface {
             switcher_position: default_switcher_position(),
+            switcher_vertical: false,
+            switcher_order: Vec::new(),
         }
+    }
+}
+
+impl Interface {
+    /// The switcher's cards in the order to show them: each card's name and
+    /// its place in the layout (`None` if not placed). The custom order goes
+    /// first; then left to right as the layout places them (top to bottom
+    /// in a column); unplaced PCs last. Returns indexes into `cards`.
+    pub fn switcher_sort(&self, cards: &[(&str, Option<[i32; 2]>)]) -> Vec<usize> {
+        let mut order: Vec<usize> = (0..cards.len()).collect();
+        order.sort_by_key(|&index| {
+            let (name, place) = cards[index];
+            let custom = self.switcher_order.iter().position(|wanted| wanted == name);
+            let place = place.map(|[x, y]| {
+                if self.switcher_vertical {
+                    (y, x)
+                } else {
+                    (x, y)
+                }
+            });
+            (custom.unwrap_or(usize::MAX), place.is_none(), place, index)
+        });
+        order
     }
 }
 
@@ -558,6 +590,34 @@ mod tests {
         );
         let added = set_hotkeys("[touchpad]\nspeed = 3\n", &mine).unwrap();
         assert_eq!(parse(&added).unwrap().hotkeys, mine);
+    }
+
+    #[test]
+    fn the_switcher_follows_the_layout_unless_told_otherwise() {
+        let cards = [
+            ("Laptop", Some([0, 0])),
+            ("Windows", Some([-1920, 0])),
+            ("Spare", None),
+            ("Above", Some([200, -900])),
+        ];
+        let mut interface = Interface::default();
+        assert_eq!(
+            interface.switcher_sort(&cards),
+            [1, 0, 3, 2],
+            "left to right"
+        );
+        interface.switcher_vertical = true;
+        assert_eq!(
+            interface.switcher_sort(&cards),
+            [3, 1, 0, 2],
+            "top to bottom"
+        );
+        interface.switcher_order = vec!["Spare".into(), "Laptop".into()];
+        assert_eq!(
+            interface.switcher_sort(&cards),
+            [2, 0, 3, 1],
+            "custom first"
+        );
     }
 
     #[test]
