@@ -1,5 +1,6 @@
 //! Mickey: one keyboard and mouse shared across computers on the LAN.
 
+mod autostart;
 #[cfg(target_os = "linux")]
 mod capture;
 mod cli;
@@ -60,6 +61,16 @@ fn run(command: Command) -> Result<(), String> {
     match command {
         Command::Help => {
             print!("{}", cli::USAGE);
+            Ok(())
+        }
+        Command::Autostart(Some(on)) => {
+            autostart::set(on)?;
+            let answer = if on { "yes" } else { "no" };
+            println!("mickey: starts with this PC: {answer}");
+            Ok(())
+        }
+        Command::Autostart(None) => {
+            println!("{}", if autostart::is_on() { "on" } else { "off" });
             Ok(())
         }
         Command::Id => {

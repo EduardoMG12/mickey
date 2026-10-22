@@ -327,3 +327,10 @@ Order of work (each step is one PR, each ≤ ~300 lines):
 - **Not yet done:** the full 10-minute checklist (20 switches, accents,
   shortcuts). Two-finger scroll on the touchpad is not in M0, so scrolling
   can only be checked once a wheel mouse is plugged into the laptop.
+- **A logon task does not start on battery** (2026-10-22). `schtasks /create`
+  gives every task `DisallowStartIfOnBatteries` and `StopIfGoingOnBatteries`,
+  so on a laptop running on battery Mickey stayed "queued" and never started.
+  The installer and `mickey autostart on` now clear both (and the 72-hour
+  time limit) with `Set-ScheduledTask`. Also, `/ru "%USERDOMAIN%\%USERNAME%"`
+  fails where `USERDOMAIN` is unset (an SSH session); `mickey autostart`
+  leaves `/ru` out, which means the account creating the task.
