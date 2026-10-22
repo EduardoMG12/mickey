@@ -6,6 +6,7 @@
 
 mod choice;
 mod layout;
+mod pair;
 mod place;
 mod settings;
 mod snap;
@@ -147,6 +148,11 @@ fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.first().map(String::as_str) == Some("settings") {
         return settings_window();
+    }
+    if let [command, who, code] = args.as_slice()
+        && command == "pair"
+    {
+        return pair::window(who, code);
     }
     let choice = match Choice::from_args(&args) {
         Ok(choice) => choice,
