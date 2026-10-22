@@ -180,6 +180,11 @@ pub struct Settings {
     typing: Option<usize>,
     /// The PCs heard on the network, from `mickey discover`.
     nearby: Vec<Nearby>,
+    /// Whether Mickey starts with this PC, as `mickey autostart` says.
+    autostart: bool,
+    /// The answer of a change to it, still on its way (Windows may ask for
+    /// an administrator first).
+    autostart_change: Option<std::sync::mpsc::Receiver<Result<String, String>>>,
     /// The mascot in the header, loaded on the first frame.
     mascot: Option<egui::TextureHandle>,
     /// When config.toml last changed as far as this window knows, and when
@@ -274,6 +279,9 @@ impl Settings {
             recording: None,
             typing: None,
             nearby: load_nearby(),
+            autostart: ask_mickey(&["autostart", "status"])
+                .is_ok_and(|answer| answer.trim() == "on"),
+            autostart_change: None,
             message,
             config_changed: config_time(),
             looked: Instant::now(),
@@ -463,6 +471,28 @@ impl eframe::App for Settings {
                         "Control other PCs with this keyboard and mouse",
                     );
                     ui.checkbox(&mut form.controlled, "Let paired PCs control this one");
+                    let mut wanted = self.autostart;
+                    let busy = self.autostart_change.is_some();
+                    let changed = ui
+                        .add_enabled(!busy, egui::Checkbox::new(&mut wanted, "Start Mickey when this PC starts"))
+                        .changed();
+                    if changed {
+                        // Applied at once, not on Save; on a thread, since
+                        // Windows may show its administrator prompt.
+                        let (send, answers) = std::sync::mpsc::channel();
+                        std::thread::spawn(move || {
+                            let word = if wanted { "on" } else { "off" };
+                            let _ = send.send(ask_mickey(&["autostart", word]));
+                        });
+                        self.autostart_change = Some(answers);
+                    }
+                    if let Some(answer) = self.autostart_change.as_ref().and_then(|answers| answers.try_recv().ok()) {
+                        self.autostart_change = None;
+                        self.autostart = ask_mickey(&["autostart", "status"]).is_ok_and(|answer| answer.trim() == "on");
+                        if let Err(err) = answer {
+                            self.message = format!("Could not change starting with this PC: {err}");
+                        }
+                    }
                     ui.add_space(10.0);
                     ui.horizontal(|ui| {
                         ui.spacing_mut().slider_width = 220.0;
