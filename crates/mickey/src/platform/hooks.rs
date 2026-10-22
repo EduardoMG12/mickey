@@ -119,14 +119,15 @@ struct MouseInfo {
 
 /// `MSG`, only so `GetMessageW` has somewhere to write.
 #[repr(C)]
-struct Msg {
-    hwnd: isize,
-    message: u32,
-    wparam: usize,
-    lparam: isize,
-    time: u32,
-    pt: Point,
-    private: u32,
+#[derive(Default)]
+pub(super) struct Msg {
+    pub(super) hwnd: isize,
+    pub(super) message: u32,
+    pub(super) wparam: usize,
+    pub(super) lparam: isize,
+    pub(super) time: u32,
+    pub(super) pt: Point,
+    pub(super) private: u32,
 }
 
 type HookProc = unsafe extern "system" fn(i32, usize, isize) -> isize;
