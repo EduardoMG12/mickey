@@ -136,6 +136,22 @@ impl Mover {
         ));
     }
 
+    /// Asks `peer` to show a copy of the switcher, to look at only.
+    pub fn mirror_switcher(&self, peer: usize, cards: &str) {
+        let _ = self.0.send(Job::SendTo(
+            peer,
+            crate::group::tagged(crate::group::MIRROR, cards),
+        ));
+    }
+
+    /// Tells every peer to close the switcher or copy shown for this PC.
+    pub fn close_switchers(&self) {
+        let _ = self.0.send(Job::Broadcast(crate::group::tagged(
+            crate::group::CLOSE,
+            "",
+        )));
+    }
+
     /// Sends this PC's `[hotkeys]` lines to every peer.
     pub fn share_hotkeys(&self, lines: &str) {
         let _ = self.0.send(Job::Broadcast(crate::group::tagged(

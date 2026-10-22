@@ -412,10 +412,11 @@ fn serve_clipboard(
     };
     let (identity, trusted, controlled) = (identity.clone(), trusted.clone(), controlled.clone());
     let sources = sources.clone();
+    let shown = Shown::default();
     std::thread::spawn(move || {
         for stream in listener.incoming().flatten() {
             let (identity, trusted, keeper) = (identity.clone(), trusted.clone(), keeper.clone());
-            let (controlled, sources) = (controlled.clone(), sources.clone());
+            let (controlled, sources, shown) = (controlled.clone(), sources.clone(), shown.clone());
             let Ok(from) = stream.peer_addr().map(|address| address.ip()) else {
                 continue;
             };
@@ -436,11 +437,17 @@ fn serve_clipboard(
                                 }
                                 Err(err) => eprintln!("mickey: {err}"),
                             },
-                            group::SWITCHER => {
-                                let (text, sources) = (text.to_string(), sources.clone());
+                            group::SWITCHER | group::MIRROR => {
+                                let (text, sources, shown) =
+                                    (text.to_string(), sources.clone(), shown.clone());
+                                let mirror = kind == group::MIRROR;
                                 std::thread::spawn(move || {
-                                    show_switcher_here(&text, from, &sources)
+                                    show_switcher_here(&text, from, &sources, &shown, mirror)
                                 });
+                            }
+                            group::CLOSE => {
+                                let shown = shown.clone();
+                                std::thread::spawn(move || close_switcher_here(&shown));
                             }
                             group::HOTKEYS => {
                                 let _ =
@@ -474,9 +481,21 @@ struct Around {
     sources: Sources,
 }
 
-/// Shows the switcher a source asked for (PRD 0007), here where the owner
-/// is looking, in this PC's own corner, and sends the card picked back.
-fn show_switcher_here(text: &str, from: std::net::IpAddr, sources: &Sources) {
+/// The switcher window open on this PC for a source, if any, so a later
+/// "close" from the source can close it.
+type Shown = std::sync::Arc<std::sync::Mutex<Option<std::process::Child>>>;
+
+/// Runs `mickey-ui switcher` with the cards a source sent (PRD 0007), in
+/// this PC's own corner: the first line is the focused card, then one card
+/// per line. A `mirror` only shows; otherwise this is the PC in use, and
+/// the card picked goes back to the source.
+fn show_switcher_here(
+    text: &str,
+    from: std::net::IpAddr,
+    sources: &Sources,
+    shown: &Shown,
+    mirror: bool,
+) {
     let mut lines = text.lines();
     let Some(focused) = lines.next() else {
         return;
@@ -485,30 +504,61 @@ fn show_switcher_here(text: &str, from: std::net::IpAddr, sources: &Sources) {
         || "bottom-right".to_string(),
         |config| config.interface.switcher_position,
     );
-    let mut args = vec![
-        "switcher".to_string(),
-        "--at".to_string(),
-        corner,
-        focused.to_string(),
-    ];
+    let mut args = vec!["switcher".to_string()];
+    if mirror {
+        args.push("--mirror".to_string());
+    }
+    args.extend(["--at".to_string(), corner, focused.to_string()]);
     args.extend(lines.map(str::to_string));
-    let ui = std::env::current_exe()
-        .map(|exe| exe.with_file_name(format!("mickey-ui{}", std::env::consts::EXE_SUFFIX)));
+    let child = std::env::current_exe()
+        .map(|exe| exe.with_file_name(format!("mickey-ui{}", std::env::consts::EXE_SUFFIX)))
+        .and_then(|ui| {
+            std::process::Command::new(ui)
+                .args(&args)
+                .stdout(std::process::Stdio::piped())
+                .spawn()
+        });
+    let Ok(child) = child else {
+        return;
+    };
+    close_switcher_here(shown);
+    *shown.lock().unwrap_or_else(|p| p.into_inner()) = Some(child);
+    if mirror {
+        return;
+    }
+    // Waits without holding the slot, so "close" can still kill the window.
+    let status = loop {
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        let mut slot = shown.lock().unwrap_or_else(|p| p.into_inner());
+        let Some(child) = slot.as_mut() else {
+            break None;
+        };
+        match child.try_wait() {
+            Ok(None) => continue,
+            Ok(Some(status)) => break slot.take().map(|child| (status, child)),
+            Err(_) => break None,
+        }
+    };
     // 255: closed without a pick.
-    let card = ui
-        .and_then(|ui| std::process::Command::new(ui).args(&args).output())
-        .ok()
-        .filter(|output| output.status.success())
-        .and_then(|output| {
-            String::from_utf8_lossy(&output.stdout)
-                .trim()
-                .parse::<u8>()
-                .ok()
+    let card = status
+        .filter(|(status, _)| status.success())
+        .and_then(|(_, child)| {
+            let mut out = String::new();
+            std::io::Read::read_to_string(&mut child.stdout?, &mut out).ok()?;
+            out.trim().parse::<u8>().ok()
         })
         .unwrap_or(u8::MAX);
     let mut sources = sources.lock().unwrap_or_else(|p| p.into_inner());
     if let Some(link) = sources.get_mut(&from) {
         let _ = link.send(&protocol::Message::Picked { card });
+    }
+}
+
+/// Closes the switcher window open here for a source, if any.
+fn close_switcher_here(shown: &Shown) {
+    if let Some(mut child) = shown.lock().unwrap_or_else(|p| p.into_inner()).take() {
+        let _ = child.kill();
+        let _ = child.wait();
     }
 }
 

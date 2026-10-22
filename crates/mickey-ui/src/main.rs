@@ -23,6 +23,8 @@ use std::rc::Rc;
 const APP_ID: &str = "mickey-ui";
 const CARD_SIZE: egui::Vec2 = egui::vec2(96.0, 22.0);
 const CARD_MARGIN: f32 = 7.0;
+/// A copy closes by itself after this, should Mickey's "close" never come.
+const MIRROR_LIFETIME: std::time::Duration = std::time::Duration::from_secs(30);
 
 struct Switcher {
     choice: Choice,
@@ -31,6 +33,9 @@ struct Switcher {
     needs_placing: bool,
     /// Shared with `main`, which prints it after the window closes.
     answer: Rc<Cell<Option<usize>>>,
+    /// A copy shown on the other PCs: it takes no keys or clicks, and Mickey
+    /// closes it once the owner picks on the PC in use.
+    mirror: Option<std::time::Instant>,
 }
 
 impl eframe::App for Switcher {
@@ -65,6 +70,13 @@ impl eframe::App for Switcher {
             egui::Key::Num8,
             egui::Key::Num9,
         ];
+        if let Some(opened) = self.mirror {
+            if opened.elapsed() > MIRROR_LIFETIME {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+            // Wakes up to check, with no input of its own.
+            ctx.request_repaint_after(std::time::Duration::from_secs(1));
+        }
         let (next, previous, enter, escape, digit) = ctx.input(|input| {
             (
                 input.key_pressed(egui::Key::ArrowRight) || input.key_pressed(egui::Key::Tab),
@@ -75,6 +87,12 @@ impl eframe::App for Switcher {
                 DIGITS.iter().position(|&key| input.key_pressed(key)),
             )
         });
+        // A copy only shows; the keys belong to the PC in use.
+        let (next, previous, enter, escape, digit) = if self.mirror.is_some() {
+            (false, false, false, false, None)
+        } else {
+            (next, previous, enter, escape, digit)
+        };
         if next {
             self.choice.move_by(1);
         }
@@ -82,21 +100,34 @@ impl eframe::App for Switcher {
             self.choice.move_by(-1);
         }
         let mut clicked = None;
+        let mut row = egui::Rect::NOTHING;
         egui::CentralPanel::default().show(ui, |ui| {
-            ui.horizontal(|ui| {
-                for (index, pc) in self.choice.pcs.iter().enumerate() {
-                    if card(
-                        ui,
-                        index,
-                        pc,
-                        index == self.choice.selected,
-                        index == self.choice.focused,
-                    ) {
-                        clicked = Some(index);
+            row = ui
+                .horizontal(|ui| {
+                    for (index, pc) in self.choice.pcs.iter().enumerate() {
+                        if card(
+                            ui,
+                            index,
+                            pc,
+                            index == self.choice.selected,
+                            index == self.choice.focused,
+                        ) {
+                            clicked = Some(index);
+                        }
                     }
-                }
-            });
+                })
+                .response
+                .rect;
         });
+        // Grow until every card fits: names, fonts and scales differ per PC.
+        let window = ctx.content_rect().size();
+        let needed = egui::vec2(row.right() + 10.0, row.bottom() + 10.0);
+        if needed.x > window.x + 0.5 || needed.y > window.y + 0.5 {
+            ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(window.max(needed)));
+        }
+        if self.mirror.is_some() {
+            clicked = None;
+        }
 
         let answer = match (clicked.or(digit), enter) {
             (Some(index), _) => self.choice.pick(index),
@@ -170,6 +201,9 @@ fn main() -> ExitCode {
     {
         return pair::window(who, code);
     }
+    // `switcher --mirror …`: the copy for the PCs not in use.
+    let mirror = args.iter().any(|arg| arg == "--mirror");
+    let args: Vec<String> = args.into_iter().filter(|arg| arg != "--mirror").collect();
     let choice = match Choice::from_args(&args) {
         Ok(choice) => choice,
         Err(err) => {
@@ -185,7 +219,9 @@ fn main() -> ExitCode {
             .with_app_id(APP_ID)
             .with_inner_size([width.max(160.0), 52.0])
             .with_resizable(false)
-            .with_always_on_top(),
+            .with_always_on_top()
+            .with_active(!mirror)
+            .with_mouse_passthrough(mirror),
         ..Default::default()
     };
     let placed_by_compositor = place::ask_compositor(choice.corner, APP_ID);
@@ -200,6 +236,7 @@ fn main() -> ExitCode {
                 choice,
                 needs_placing: !placed_by_compositor,
                 answer: window_answer,
+                mirror: mirror.then(std::time::Instant::now),
             }))
         }),
     );
