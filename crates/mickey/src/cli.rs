@@ -19,6 +19,8 @@ usage:
   mickey monitors                    list this machine's monitors
   mickey peers                       list the PCs, whether they are online, and their monitors
   mickey discover                    list the PCs running Mickey on this network
+  mickey clipboard [test]            say what kind of thing is copied (never what);
+                                     test copies a short test text
   mickey forget <fingerprint>        stop trusting a paired machine
 ";
 
@@ -31,6 +33,10 @@ pub enum Command {
     Peers,
     /// Ask the running Mickey for the PCs it hears on the network.
     Discover,
+    /// Say what kind of thing is copied; `write_test` copies a test text.
+    Clipboard {
+        write_test: bool,
+    },
     Settings,
     Id,
     Status {
@@ -59,6 +65,10 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
         [command] if command == "monitors" => Ok(Command::Monitors),
         [command] if command == "peers" => Ok(Command::Peers),
         [command] if command == "discover" => Ok(Command::Discover),
+        [command] if command == "clipboard" => Ok(Command::Clipboard { write_test: false }),
+        [command, test] if command == "clipboard" && test == "test" => {
+            Ok(Command::Clipboard { write_test: true })
+        }
         [command] if command == "settings" => Ok(Command::Settings),
         [command] if command == "home" || command == "switcher" => {
             Ok(Command::Order(command.clone()))

@@ -1566,6 +1566,7 @@ dependencies = [
 name = "mickey"
 version = "0.1.0"
 dependencies = [
+ "arboard",
  "ksni",
  "mickey-config",
  "snow",
