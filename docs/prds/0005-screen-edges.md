@@ -36,9 +36,9 @@ The position is read only while the mouse moves.
 2. **Exchange.** After `Hello`, each side sends a `Monitors` message; the
    source keeps every peer's, and `mickey status` and the settings window
    show them.
-3. **Layout.** `config.toml` says where each peer sits (`side = "right"`
-   of this PC); the settings window draws the PCs and their monitors and
-   lets the owner drag them.
+3. **Layout.** `config.toml` says where each peer's desktop sits next to
+   this one (`position = [x, y]`, see *Discoveries*); the settings window
+   draws the PCs and their monitors and lets the owner drag them.
 4. **Edges.** The source polls the cursor while it moves; reaching the edge
    that has a peer switches focus to it, and the target places its cursor
    at the matching point (absolute positioning: `SetCursorPos` on Windows,
@@ -48,14 +48,14 @@ The position is read only while the mouse moves.
 
 ## Requirements
 
-- [ ] `mickey monitors` lists this PC's monitors on Windows and Hyprland.
-- [ ] `Monitors` message (up to 8 monitors), protocol version 3.
-- [ ] `[[peer]] side = "left" | "right" | "above" | "below"`.
+- [x] `mickey monitors` lists this PC's monitors on Windows and Hyprland.
+- [x] `Monitors` message (up to 8 monitors), protocol version 3.
+- [x] `[[peer]] position = [x, y]`.
 - [ ] Edge crossing both ways, same relative height; no crossing while a
       mouse button is held (dragging a window must not throw it to another
       PC).
-- [ ] Settings window: PCs online and their monitors, drawn; drag to set
-      the side.
+- [x] Settings window: PCs online and their monitors, drawn; drag to
+      place, snapping against the nearest monitor.
 
 ## Non-Goals
 
@@ -64,4 +64,19 @@ The position is read only while the mouse moves.
 
 ## Discoveries
 
-*(Filled in during execution.)*
+- **A free position, not a side.** The first version put each peer on
+  one of four sides of the whole desktop, centred (#96, closed). Trying
+  it, the owner wanted the laptop next to one particular monitor, in its
+  corner, as Windows' display settings allow. So a peer has a position:
+  where its point 0,0 sits on this desktop. Dropped in the settings
+  window, it snaps against the nearest monitor, touching without
+  overlapping, and the cursor will cross wherever the two touch.
+- **The settings window asks the running Mickey.** It is a separate
+  process, so it runs `mickey peers` over the control channel (a Unix
+  socket on Linux; on Windows TCP on localhost with a token in the user's
+  own folder). It asks again every 2 s while Mickey is still starting.
+- **Games and raw input (Windows).** Found while testing with
+  Counter-Strike open: games read input with raw input, which hooks cannot
+  block, and pin the cursor while aiming. While the focus is remote, an
+  invisible Mickey window takes the foreground (games only get raw input
+  in the foreground) and motion is read from raw input.
