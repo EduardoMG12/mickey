@@ -10,7 +10,6 @@ mod cli;
 mod config;
 #[cfg(target_os = "linux")]
 mod control;
-#[cfg(windows)]
 mod emit;
 mod event;
 #[cfg(target_os = "linux")]
@@ -180,7 +179,6 @@ fn follow_for_waybar() -> ! {
 }
 
 /// Serves one source at a time, forever, injecting what it sends.
-#[cfg(windows)]
 fn target(listen: SocketAddr) -> Result<(), String> {
     use std::io::ErrorKind;
     use std::net::TcpListener;
@@ -188,6 +186,7 @@ fn target(listen: SocketAddr) -> Result<(), String> {
     let data_dir = identity::data_dir()?;
     let identity = identity::Identity::load_or_create(&data_dir)?;
     let mut trusted = trust::TrustedPeers::load(&data_dir)?;
+    let mut emitter = emit::Emitter::new()?;
     let listener = TcpListener::bind(listen).map_err(|err| match err.kind() {
         ErrorKind::AddrInUse => format!("{listen} is already in use; is another Mickey running?"),
         ErrorKind::AddrNotAvailable => format!("{listen} is not an address of this machine"),
@@ -223,7 +222,7 @@ fn target(listen: SocketAddr) -> Result<(), String> {
         }
         let mut reported = false;
         let result = transport::serve(&mut link, |event| {
-            if let Err(err) = emit::emit(event)
+            if let Err(err) = emitter.emit(event)
                 && !reported
             {
                 eprintln!("mickey: input injection failed: {err} (not reported again)");
@@ -235,9 +234,4 @@ fn target(listen: SocketAddr) -> Result<(), String> {
             Err(err) => eprintln!("mickey: source {peer} dropped: {err}"),
         }
     }
-}
-
-#[cfg(not(windows))]
-fn target(_listen: SocketAddr) -> Result<(), String> {
-    Err("in M0 the target runs only on Windows (Linux targets come in M1a)".into())
 }
