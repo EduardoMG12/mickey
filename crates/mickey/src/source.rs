@@ -480,6 +480,10 @@ pub fn run(
     let (wake, wakes) = mpsc::channel();
     input.start(wake.clone(), touchpad_speed)?;
     let mut switcher_open = false;
+    // The copy of a switcher shown on another PC, open on this one.
+    let mut mirror: Option<std::process::Child> = None;
+    // Whether switchers or copies are open anywhere for this PC.
+    let mut copies_out = false;
     // The status for bars and commands; without a runtime directory Mickey
     // still works, just without them.
     let control = match Control::start(wake.clone()) {
@@ -564,11 +568,14 @@ pub fn run(
         let mut refused = false;
         // A card picked in the switcher shown on the focused peer.
         let mut remote_pick = None;
+        // Any switcher answered, here or there: the copies can close.
+        let mut picked = false;
         let peer_count = peers.len();
         for (index, news) in pongs.try_iter() {
             peers[index].heard = Instant::now();
             match news {
                 News::Picked(card) => {
+                    picked = true;
                     if switcher.focus() == Focus::Remote(index) {
                         remote_pick = Some(card);
                     }
@@ -793,6 +800,7 @@ pub fn run(
             }
             Ok(Wake::Pick(pick)) => {
                 switcher_open = false;
+                picked = true;
                 match pick {
                     Ok(peer) => switcher.go_to(peer, &online),
                     Err(err) => {
@@ -964,23 +972,43 @@ pub fn run(
         if switcher.focus() == Focus::Local && left != Focus::Local {
             println!("mickey: focus is back here");
         }
-        if let Some(peer) = open_on
-            && let Some(mover) = &mover
-        {
-            let mut cards = vec![(peer + 1).to_string(), format!("online:{my_name}")];
-            for other in &peers {
-                let state = if other.link.is_some() {
-                    "online"
-                } else {
-                    "offline"
-                };
-                cards.push(format!("{state}:{}", other.name));
+        // The switcher shows on the PC in use, and a copy on every other
+        // online PC, so it is seen wherever the owner looks (PRD 0007).
+        let in_use = match open_on {
+            Some(peer) => Some(Some(peer)),
+            None if open && !switcher_open => Some(None),
+            None => None,
+        };
+        if let Some(in_use) = in_use {
+            let cards = switcher_cards(in_use.map_or(0, |peer| peer + 1), &my_name, &peers);
+            if let Some(mover) = &mover {
+                for (peer, other) in peers.iter().enumerate() {
+                    if Some(peer) == in_use {
+                        mover.show_switcher(peer, &cards);
+                    } else if other.link.is_some() {
+                        mover.mirror_switcher(peer, &cards);
+                    }
+                }
             }
-            mover.show_switcher(peer, &cards.join("\n"));
+            match in_use {
+                Some(_) => mirror = open_mirror(&cards, &switcher_position).or(mirror),
+                None => {
+                    switcher_open = true;
+                    open_switcher(&peers, &switcher_position, &wake);
+                }
+            }
+            copies_out = true;
         }
-        if open && !switcher_open {
-            switcher_open = true;
-            open_switcher(&peers, &switcher_position, &wake);
+        // Closed once a pick is made, or when the focus moved some other way.
+        if copies_out && (picked || (in_use.is_none() && switcher.focus() != left)) {
+            copies_out = false;
+            if let Some(mover) = &mover {
+                mover.close_switchers();
+            }
+            if let Some(mut window) = mirror.take() {
+                let _ = window.kill();
+                let _ = window.wait();
+            }
         }
 
         lost.sort_unstable();
@@ -1088,6 +1116,37 @@ fn reconnect(index: usize, to: SocketAddr, shared: &Arc<Shared>, back: &Sender<(
 /// thread, and sends the owner's pick when the window closes: `Some(peer)`,
 /// `None` for this PC or Esc, or an error if the window could not run.
 /// The GUI is a separate program so this one stays small (PRD 0003).
+/// The switcher's cards as sent to a peer: the focused card first, then
+/// this PC and every peer, one per line, as `online:name` or `offline:name`.
+fn switcher_cards(focused: usize, my_name: &str, peers: &[Peer]) -> String {
+    let mut cards = vec![focused.to_string(), format!("online:{my_name}")];
+    for peer in peers {
+        let state = if peer.link.is_some() {
+            "online"
+        } else {
+            "offline"
+        };
+        cards.push(format!("{state}:{}", peer.name));
+    }
+    cards.join("\n")
+}
+
+/// Opens a view-only copy of the switcher on this PC (`cards` as made by
+/// `switcher_cards`); the caller kills it once a pick is made.
+fn open_mirror(cards: &str, position: &str) -> Option<std::process::Child> {
+    let mut args = vec!["switcher", "--mirror", "--at", position];
+    args.extend(cards.lines());
+    std::env::current_exe()
+        .map(|exe| exe.with_file_name(format!("mickey-ui{}", std::env::consts::EXE_SUFFIX)))
+        .and_then(|ui| {
+            Command::new(ui)
+                .args(&args)
+                .stdout(std::process::Stdio::null())
+                .spawn()
+        })
+        .ok()
+}
+
 fn open_switcher(peers: &[Peer], position: &str, wake: &Sender<Wake>) {
     let mut args = vec![
         "switcher".to_string(),

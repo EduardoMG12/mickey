@@ -23,6 +23,10 @@ pub const HOTKEYS: u8 = 17;
 /// The first byte of "show the switcher here": the focused card, then one
 /// card per line (`online:` or `offline:` and a name), the source first.
 pub const SWITCHER: u8 = 18;
+/// The same cards, to show only: a copy on the PCs not in use.
+pub const MIRROR: u8 = 19;
+/// Close the switcher (or its copy) shown for the source: a pick was made.
+pub const CLOSE: u8 = 20;
 
 /// A map ready for the data link.
 pub fn message(text: &str) -> Vec<u8> {
