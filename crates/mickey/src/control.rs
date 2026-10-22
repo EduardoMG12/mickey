@@ -41,6 +41,10 @@ pub enum Order {
     Peers,
     /// Not a move: the PCs found on the network, one per line.
     Discover,
+    /// Not a move: the clipboard history, one entry per line.
+    History,
+    /// Put this history entry back in the clipboard.
+    HistoryCopy(u64),
 }
 
 /// An order for the source's main loop, and where to send its one-line
@@ -399,6 +403,11 @@ fn accept<T: From<Request>>(
                     _ if other == "switcher" => Some(Order::Switcher),
                     _ if other == "peers" => Some(Order::Peers),
                     _ if other == "discover" => Some(Order::Discover),
+                    _ if other == "history" => Some(Order::History),
+                    Some(("history", id)) => id
+                        .strip_prefix("copy ")
+                        .and_then(|id| id.parse().ok())
+                        .map(Order::HistoryCopy),
                     Some(("go", name)) => Some(Order::Go(name.to_string())),
                     _ => None,
                 };

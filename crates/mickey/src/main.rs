@@ -4,8 +4,6 @@
 mod capture;
 mod cli;
 mod clip_sync;
-// ponytail: the history uses it, next.
-#[allow(dead_code)]
 mod clip_watch;
 mod clip_wire;
 mod clipboard;
@@ -16,6 +14,7 @@ mod emit;
 mod event;
 mod focus;
 mod held;
+mod history;
 mod hotkey;
 mod identity;
 mod input;
@@ -90,6 +89,18 @@ fn run(command: Command) -> Result<(), String> {
             match board.read() {
                 Some(content) => println!("mickey: the clipboard holds {content:?}"),
                 None => println!("mickey: the clipboard holds nothing Mickey carries"),
+            }
+            Ok(())
+        }
+        Command::History => {
+            for line in control::request("history")? {
+                let line = line.map_err(|err| err.to_string())?;
+                if let Some(err) = line.strip_prefix("error: ") {
+                    return Err(err.to_string());
+                }
+                if let [id, kind, ago, preview] = line.splitn(4, '\t').collect::<Vec<_>>()[..] {
+                    println!("{id:>4}  {ago:>5} s ago  {kind:<5}  {preview}");
+                }
             }
             Ok(())
         }
@@ -184,9 +195,12 @@ fn run(command: Command) -> Result<(), String> {
                 hotkey::Hotkey::from_config(&set),
                 touchpad_speed,
                 switcher_position,
-                controlled,
-                None,
-                clipboard::Keeper::start().ok(),
+                source::Services {
+                    controlled,
+                    found: None,
+                    keeper: clipboard::Keeper::start().ok(),
+                    history: None,
+                },
             )
         }
         Command::Target { listen } => target(
@@ -260,9 +274,12 @@ fn run_from_config() -> Result<(), String> {
             hotkeys,
             config.touchpad.speed,
             config.interface.switcher_position,
-            controlled,
-            found,
-            keeper,
+            source::Services {
+                controlled,
+                found,
+                history: keeper.clone().map(history::record),
+                keeper,
+            },
         )
     } else {
         println!("mickey: this PC only waits to be controlled");
