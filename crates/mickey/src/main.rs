@@ -429,12 +429,19 @@ fn serve_clipboard(
                 };
                 match transport::accept_data(stream, &identity, is_trusted) {
                     Ok(link) => {
-                        // A group map from a paired PC goes up to the source.
-                        let group = |text: &str| match group::decode(text, from) {
-                            Ok(members) => {
-                                let _ = controlled.send(source::TargetNews::Group { members });
+                        // The group map and shared hotkeys from a paired PC go to the source.
+                        let group = |kind: u8, text: &str| match kind {
+                            group::KIND => match group::decode(text, from) {
+                                Ok(members) => {
+                                    let _ = controlled.send(source::TargetNews::Group { members });
+                                }
+                                Err(err) => eprintln!("mickey: {err}"),
+                            },
+                            group::HOTKEYS => {
+                                let _ =
+                                    controlled.send(source::TargetNews::Hotkeys(text.to_string()));
                             }
-                            Err(err) => eprintln!("mickey: {err}"),
+                            _ => {}
                         };
                         let _ = clip_sync::answer(
                             link,
