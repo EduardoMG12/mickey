@@ -12,13 +12,20 @@ use std::time::Instant;
 /// The target's side of a data link, until it closes: `Ask` is answered
 /// with what `read` finds copied here, and content sent here is handed to
 /// `write`, which puts it in this PC's clipboard.
+/// A group map (PRD 0010) goes to `group` instead.
 pub fn answer(
     mut link: Link,
     read: impl Fn() -> Option<Content>,
     write: impl Fn(Content),
+    group: impl Fn(&str),
 ) -> io::Result<()> {
     loop {
-        let message = clip_wire::decode(&link.recv_bulk()?).map_err(io::Error::other)?;
+        let bytes = link.recv_bulk()?;
+        if let Some((&crate::group::KIND, text)) = bytes.split_first() {
+            group(&String::from_utf8_lossy(text));
+            continue;
+        }
+        let message = clip_wire::decode(&bytes).map_err(io::Error::other)?;
         match message {
             Wire::Ask => {
                 let reply = read().map_or(Wire::Nothing, Wire::Content);
@@ -61,6 +68,8 @@ pub struct Mover(Sender<Job>);
 enum Job {
     /// A data link to this peer is open.
     Link(usize, Link),
+    /// The group map changed: send it to every peer (PRD 0010).
+    Map(Vec<u8>),
     /// The keyboard went from `from` to `to` (`None`: this PC).
     Moved {
         from: Option<usize>,
@@ -73,10 +82,18 @@ impl Mover {
         let (jobs, todo) = mpsc::channel();
         thread::spawn(move || {
             let mut links: HashMap<usize, Link> = HashMap::new();
+            // The latest map, for links that open after it was shared.
+            let mut map: Option<Vec<u8>> = None;
             for job in todo {
                 match job {
-                    Job::Link(peer, link) => {
-                        links.insert(peer, link);
+                    Job::Link(peer, mut link) => {
+                        if map.as_ref().is_none_or(|map| link.send_bulk(map).is_ok()) {
+                            links.insert(peer, link);
+                        }
+                    }
+                    Job::Map(bytes) => {
+                        links.retain(|_, link| link.send_bulk(&bytes).is_ok());
+                        map = Some(bytes);
                     }
                     Job::Moved { from, to } => carry(&keeper, &mut links, from, to),
                 }
@@ -87,6 +104,11 @@ impl Mover {
 
     pub fn link(&self, peer: usize, link: Link) {
         let _ = self.0.send(Job::Link(peer, link));
+    }
+
+    /// Shares the group map with every peer, now and as links open.
+    pub fn share_map(&self, text: &str) {
+        let _ = self.0.send(Job::Map(crate::group::message(text)));
     }
 
     pub fn moved(&self, from: Option<usize>, to: Option<usize>) {
@@ -171,6 +193,7 @@ mod tests {
                 link,
                 || Some(Content::Text("from the target".into())),
                 |content| target_written.lock().unwrap().push(content),
+                |_| {},
             );
         });
         let stream = TcpStream::connect(addr).unwrap();
