@@ -56,11 +56,47 @@ pub fn accept(stream: TcpStream, identity: &Identity) -> io::Result<Link> {
     Link::respond(stream, identity)
 }
 
-/// Serves one source until it disconnects, passing every input event to
-/// `emit`. Whatever is still held when the connection ends, cleanly or not,
-/// is released through `emit` before returning.
-/// `monitors` are this PC's, sent to the source after `Hello` so it can
-/// lay the PCs out and cross their edges (PRD 0005).
+// ponytail: the clipboard sync uses it (#131).
+#[allow(dead_code)]
+/// The data link (PRD 0011) listens on the port after the input link's.
+pub fn data_address(input: SocketAddr) -> SocketAddr {
+    SocketAddr::new(input.ip(), input.port().wrapping_add(1))
+}
+
+// ponytail: the clipboard sync uses it (#131).
+#[allow(dead_code)]
+/// A bulk payload of megabytes takes longer to write than a key press.
+const DATA_WRITE_TIMEOUT: Duration = Duration::from_secs(10);
+
+// ponytail: the clipboard sync uses it (#131).
+#[allow(dead_code)]
+/// Opens the data link to the target whose input link is at `input`.
+pub fn connect_data(input: SocketAddr, identity: &Identity) -> io::Result<Link> {
+    let stream = TcpStream::connect_timeout(&data_address(input), CONNECT_TIMEOUT)?;
+    stream.set_write_timeout(Some(DATA_WRITE_TIMEOUT))?;
+    Link::initiate(stream, identity)
+}
+
+// ponytail: the clipboard sync uses it (#131).
+#[allow(dead_code)]
+/// The target's side of a data link. Only a PC already paired may open
+/// one (`trusted` says): a data link never asks to pair.
+pub fn accept_data(
+    stream: TcpStream,
+    identity: &Identity,
+    trusted: impl Fn(&[u8; 32]) -> bool,
+) -> io::Result<Link> {
+    stream.set_write_timeout(Some(DATA_WRITE_TIMEOUT))?;
+    let link = Link::respond(stream, identity)?;
+    if !trusted(link.peer_key()) {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "a PC that is not paired asked for a data link",
+        ));
+    }
+    Ok(link)
+}
+
 /// What the target does for the source.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Effect {
@@ -75,8 +111,12 @@ pub enum Effect {
     Controlled(bool),
 }
 
-/// `cursor` says where this PC's cursor is, to notice it pushing off the
-/// desktop (PRD 0005); `None` when the system cannot say.
+/// Serves one source until it disconnects, passing every input event to
+/// `act`. Whatever is still held when the connection ends, cleanly or not,
+/// is released through `act` before returning. `monitors` are this PC's,
+/// sent to the source after `Hello` so it can lay the PCs out and cross
+/// their edges (PRD 0005). `cursor` says where this PC's cursor is, to
+/// notice it pushing off the desktop; `None` when the system cannot say.
 pub fn serve(
     link: &mut Link,
     monitors: &[Monitor],
@@ -298,6 +338,55 @@ mod tests {
         let (result, placed) = target.join().unwrap();
         assert!(result.is_ok());
         assert_eq!(placed, [(1535, 284)]);
+    }
+
+    /// A data link from a source with `source` to a target that trusts the
+    /// keys `trusted` says; returns both ends, or the target's error.
+    fn data_link(source: Identity, trust: bool) -> (io::Result<Link>, io::Result<Link>) {
+        let (listener, addr) = listener();
+        let target = thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            accept_data(stream, &Identity::generate().unwrap(), |_| trust)
+        });
+        // `connect_data` dials the port after `addr`; test the pair directly.
+        let stream = TcpStream::connect(addr).unwrap();
+        let ours = Link::initiate(stream, &source);
+        (ours, target.join().unwrap())
+    }
+
+    #[test]
+    fn a_big_payload_crosses_the_data_link_both_ways() {
+        let (ours, theirs) = data_link(Identity::generate().unwrap(), true);
+        let (mut ours, mut theirs) = (ours.unwrap(), theirs.unwrap());
+        // Three megabytes that are not all alike, so a lost chunk shows.
+        let big: Vec<u8> = (0..3_000_000u32).map(|i| (i % 251) as u8).collect();
+        let sender = thread::spawn(move || {
+            ours.send_bulk(&big).unwrap();
+            (ours, big)
+        });
+        let got = theirs.recv_bulk().unwrap();
+        let (mut ours, big) = sender.join().unwrap();
+        assert_eq!(got, big);
+        theirs.send_bulk(b"").unwrap();
+        assert_eq!(ours.recv_bulk().unwrap(), b"");
+        assert!(
+            ours.send_bulk(&vec![0; crate::secure::MAX_BULK + 1])
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn a_pc_not_paired_gets_no_data_link() {
+        let (_, theirs) = data_link(Identity::generate().unwrap(), false);
+        assert!(matches!(theirs, Err(err) if err.kind() == io::ErrorKind::PermissionDenied));
+    }
+
+    #[test]
+    fn the_data_link_is_on_the_next_port() {
+        assert_eq!(
+            data_address("192.0.2.7:4242".parse().unwrap()),
+            "192.0.2.7:4243".parse().unwrap()
+        );
     }
 
     #[test]
