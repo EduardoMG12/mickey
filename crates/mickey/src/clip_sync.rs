@@ -12,17 +12,20 @@ use std::time::Instant;
 /// The target's side of a data link, until it closes: `Ask` is answered
 /// with what `read` finds copied here, and content sent here is handed to
 /// `write`, which puts it in this PC's clipboard.
-/// A group map (PRD 0010) goes to `group` instead.
+/// Messages of kind 16 and up (the group map, the shared hotkeys) are not
+/// the clipboard's: they go to `other`, with their kind.
 pub fn answer(
     mut link: Link,
     read: impl Fn() -> Option<Content>,
     write: impl Fn(Content),
-    group: impl Fn(&str),
+    other: impl Fn(u8, &str),
 ) -> io::Result<()> {
     loop {
         let bytes = link.recv_bulk()?;
-        if let Some((&crate::group::KIND, text)) = bytes.split_first() {
-            group(&String::from_utf8_lossy(text));
+        if let Some((&kind, text)) = bytes.split_first()
+            && kind >= crate::group::KIND
+        {
+            other(kind, &String::from_utf8_lossy(text));
             continue;
         }
         let message = clip_wire::decode(&bytes).map_err(io::Error::other)?;
@@ -70,6 +73,8 @@ enum Job {
     Link(usize, Link),
     /// The group map changed: send it to every peer (PRD 0010).
     Map(Vec<u8>),
+    /// Send this to every peer once (the shared hotkeys).
+    Broadcast(Vec<u8>),
     /// The keyboard went from `from` to `to` (`None`: this PC).
     Moved {
         from: Option<usize>,
@@ -91,6 +96,9 @@ impl Mover {
                             links.insert(peer, link);
                         }
                     }
+                    Job::Broadcast(bytes) => {
+                        links.retain(|_, link| link.send_bulk(&bytes).is_ok());
+                    }
                     Job::Map(bytes) => {
                         links.retain(|_, link| link.send_bulk(&bytes).is_ok());
                         map = Some(bytes);
@@ -109,6 +117,14 @@ impl Mover {
     /// Shares the group map with every peer, now and as links open.
     pub fn share_map(&self, text: &str) {
         let _ = self.0.send(Job::Map(crate::group::message(text)));
+    }
+
+    /// Sends this PC's `[hotkeys]` lines to every peer.
+    pub fn share_hotkeys(&self, lines: &str) {
+        let _ = self.0.send(Job::Broadcast(crate::group::tagged(
+            crate::group::HOTKEYS,
+            lines,
+        )));
     }
 
     pub fn moved(&self, from: Option<usize>, to: Option<usize>) {
@@ -193,7 +209,7 @@ mod tests {
                 link,
                 || Some(Content::Text("from the target".into())),
                 |content| target_written.lock().unwrap().push(content),
-                |_| {},
+                |_, _| {},
             );
         });
         let stream = TcpStream::connect(addr).unwrap();

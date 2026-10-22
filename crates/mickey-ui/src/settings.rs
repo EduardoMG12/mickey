@@ -318,7 +318,7 @@ impl Settings {
                 // other settings still wait for a restart.
                 match ask_mickey(&["arranged"]) {
                     Ok(_) => {
-                        "Saved. The other PCs follow the new layout; restart Mickey for the rest."
+                        "Saved. Layout and hotkeys apply on every PC now; the rest after a restart."
                             .into()
                     }
                     Err(_) => "Saved. Restart Mickey for it to take effect.".into(),
