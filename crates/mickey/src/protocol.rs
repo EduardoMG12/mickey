@@ -9,21 +9,37 @@
 //! decoding returns an error for anything unexpected and never panics.
 
 use crate::event::InputEvent;
+use crate::monitors::Monitor;
 use std::fmt;
 
 /// 2: messages travel inside the secure link (PRD 0002).
-pub const VERSION: u8 = 2;
+/// 3: `Monitors` (PRD 0005).
+pub const VERSION: u8 = 3;
 
 /// Longest frame: length byte, type byte and an 8-byte payload.
-pub const MAX_FRAME: usize = 10;
+pub const MAX_FRAME: usize = 3 + 16 * MAX_MONITORS;
+/// The most monitors one `Monitors` message carries.
+pub const MAX_MONITORS: usize = 8;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Message {
-    Hello { version: u8 },
+    Hello {
+        version: u8,
+    },
     Input(InputEvent),
     ReleaseAll,
-    Ping { id: u32 },
-    Pong { id: u32 },
+    Ping {
+        id: u32,
+    },
+    Pong {
+        id: u32,
+    },
+    /// The sender's monitors (PRD 0005); a fixed array keeps `Message`
+    /// `Copy` and the per-event path free of allocations.
+    Monitors {
+        count: u8,
+        list: [Monitor; MAX_MONITORS],
+    },
 }
 
 const HELLO: u8 = 1;
@@ -34,6 +50,7 @@ const SCROLL: u8 = 5;
 const RELEASE_ALL: u8 = 6;
 const PING: u8 = 7;
 const PONG: u8 = 8;
+const MONITORS: u8 = 9;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum DecodeError {
@@ -99,10 +116,31 @@ pub fn encode(message: &Message, frame: &mut [u8; MAX_FRAME]) -> usize {
             put(&[PONG]);
             put(&id.to_be_bytes());
         }
+        Message::Monitors { count, list } => {
+            put(&[MONITORS, count]);
+            for monitor in &list[..usize::from(count).min(MAX_MONITORS)] {
+                for value in [monitor.x, monitor.y, monitor.width, monitor.height] {
+                    put(&value.to_be_bytes());
+                }
+            }
+        }
     }
-    // At most MAX_FRAME (10), so it always fits in the length byte.
+    // At most MAX_FRAME (131), so it always fits in the length byte.
     frame[0] = (len - 1) as u8;
     len
+}
+
+impl Message {
+    /// The `Monitors` message for up to `MAX_MONITORS` of `found`.
+    pub fn monitors(found: &[Monitor]) -> Message {
+        let mut list = [Monitor::default(); MAX_MONITORS];
+        let count = found.len().min(MAX_MONITORS);
+        list[..count].copy_from_slice(&found[..count]);
+        Message::Monitors {
+            count: count as u8,
+            list,
+        }
+    }
 }
 
 /// Decodes a frame body: everything after the length byte.
@@ -142,6 +180,31 @@ pub fn decode(body: &[u8]) -> Result<Message, DecodeError> {
         PONG => Message::Pong {
             id: u32::from_be_bytes(exact(kind, payload)?),
         },
+        MONITORS => {
+            let (&count, rects) = payload
+                .split_first()
+                .ok_or(DecodeError::WrongLength { kind, len: 0 })?;
+            if usize::from(count) > MAX_MONITORS || rects.len() != 16 * usize::from(count) {
+                return Err(DecodeError::WrongLength {
+                    kind,
+                    len: payload.len(),
+                });
+            }
+            let mut list = [Monitor::default(); MAX_MONITORS];
+            let (rects, _) = rects.as_chunks::<16>();
+            for (slot, bytes) in list.iter_mut().zip(rects) {
+                let at = |i: usize| {
+                    i32::from_be_bytes([bytes[i], bytes[i + 1], bytes[i + 2], bytes[i + 3]])
+                };
+                *slot = Monitor {
+                    x: at(0),
+                    y: at(4),
+                    width: at(8),
+                    height: at(12),
+                };
+            }
+            Message::Monitors { count, list }
+        }
         other => return Err(DecodeError::UnknownType(other)),
     };
     Ok(message)
@@ -206,6 +269,28 @@ mod tests {
         round_trip(Message::ReleaseAll);
         round_trip(Message::Ping { id: 7 });
         round_trip(Message::Pong { id: u32::MAX });
+        round_trip(monitors(&[
+            Monitor {
+                x: 0,
+                y: 0,
+                width: 2560,
+                height: 1080,
+            },
+            Monitor {
+                x: 2560,
+                y: -845,
+                width: 1080,
+                height: 1920,
+            },
+        ]));
+        round_trip(monitors(&[]));
+    }
+
+    #[test]
+    fn a_monitors_count_that_disagrees_with_the_length_is_refused() {
+        assert!(decode(&[MONITORS, 1]).is_err());
+        assert!(decode(&[MONITORS, 9]).is_err());
+        assert!(decode(&[MONITORS]).is_err());
     }
 
     #[test]
@@ -235,5 +320,9 @@ mod tests {
             })
         );
         assert_eq!(decode(&[BUTTON, 1, 16, 2]), Err(DecodeError::BadBool(2)));
+    }
+
+    fn monitors(found: &[Monitor]) -> Message {
+        Message::monitors(found)
     }
 }

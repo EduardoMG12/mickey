@@ -8,6 +8,7 @@ use crate::hotkey::Hotkey;
 use crate::identity::{self, Identity};
 use crate::input::Input;
 use crate::latency::{self, Latency};
+use crate::monitors::Monitor;
 use crate::protocol::Message;
 use crate::secure::Link;
 use crate::transport;
@@ -86,6 +87,8 @@ struct Peer {
     address: SocketAddr,
     link: Option<Link>,
     latency: Latency,
+    /// What the peer reported (PRD 0005); empty until it does.
+    monitors: Vec<Monitor>,
 }
 
 /// Everything the background reconnect threads need, shared read-only.
@@ -124,7 +127,7 @@ pub fn run(
         let link = match connect_and_pair(&identity, &mut trusted, &peer) {
             Ok(link) => {
                 println!("mickey: {} ({}) is connected", peer.name, peer.address);
-                read_pongs(index, &link, &pong_sender, start);
+                read_peer(index, &link, &pong_sender, start);
                 Some(link)
             }
             Err(err) => {
@@ -137,6 +140,7 @@ pub fn run(
             address: peer.address,
             link,
             latency: Latency::new(),
+            monitors: Vec::new(),
         });
     }
     let shared = Arc::new(Shared { identity, trusted });
@@ -172,12 +176,27 @@ pub fn run(
     let mut online: Vec<bool> = Vec::with_capacity(peers.len());
     loop {
         for (index, link) in back.try_iter() {
-            read_pongs(index, &link, &pong_sender, start);
+            read_peer(index, &link, &pong_sender, start);
             peers[index].link = Some(link);
             println!("mickey: {} is back online", peers[index].name);
         }
-        for (index, round_trip) in pongs.try_iter() {
-            peers[index].latency.add_round_trip(round_trip);
+        for (index, news) in pongs.try_iter() {
+            match news {
+                News::RoundTrip(micros) => peers[index].latency.add_round_trip(micros),
+                News::Monitors(monitors) => {
+                    let sizes: Vec<String> = monitors
+                        .iter()
+                        .map(|m| format!("{}x{} at {},{}", m.width, m.height, m.x, m.y))
+                        .collect();
+                    println!(
+                        "mickey: {} has {} monitor(s): {}",
+                        peers[index].name,
+                        monitors.len(),
+                        sizes.join("; ")
+                    );
+                    peers[index].monitors = monitors;
+                }
+            }
         }
         if let Focus::WaitingForKeysUp(index) = switcher.focus()
             && !input.any_key_down()
@@ -388,15 +407,28 @@ fn open_switcher(peers: &[Peer], position: &str, wake: &Sender<Wake>) {
 }
 
 /// Pongs come back on their own thread, as round-trip times per peer.
-fn read_pongs(index: usize, link: &Link, pongs: &Sender<(usize, u32)>, start: Instant) {
-    let (Ok(mut reader), pongs) = (link.try_clone(), pongs.clone()) else {
+/// What a peer sends back on its link.
+enum News {
+    /// A pong: the round-trip time in microseconds.
+    RoundTrip(u32),
+    Monitors(Vec<Monitor>),
+}
+
+/// Reads what a peer sends on its own thread: pongs and its monitors.
+fn read_peer(index: usize, link: &Link, news: &Sender<(usize, News)>, start: Instant) {
+    let (Ok(mut reader), news) = (link.try_clone(), news.clone()) else {
         return;
     };
     thread::spawn(move || {
         while let Ok(message) = reader.recv() {
-            if let Message::Pong { id } = message
-                && pongs.send((index, latency::round_trip(start, id))).is_err()
-            {
+            let item = match message {
+                Message::Pong { id } => News::RoundTrip(latency::round_trip(start, id)),
+                Message::Monitors { count, list } => {
+                    News::Monitors(list[..usize::from(count)].to_vec())
+                }
+                _ => continue,
+            };
+            if news.send((index, item)).is_err() {
                 return;
             }
         }
