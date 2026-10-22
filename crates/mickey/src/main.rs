@@ -3,6 +3,9 @@
 #[cfg(target_os = "linux")]
 mod capture;
 mod cli;
+// ponytail: the clipboard sync uses it (#131).
+#[allow(dead_code)]
+mod clip_wire;
 mod clipboard;
 mod control;
 mod discovery;
