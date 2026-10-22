@@ -1,5 +1,5 @@
-//! The source side (Linux): capture local input, run the focus state
-//! machine, and send input to the focused peer.
+//! The source side (Linux and Windows): capture local input, run the
+//! focus state machine, and send input to the focused peer.
 
 use crate::clip_sync::Mover;
 use crate::clipboard::Keeper;
@@ -1041,8 +1041,6 @@ pub fn run(
     Err("every input device is gone".into())
 }
 
-/// Connects, asks to pair if the key is unknown, and waits for the peer to
-/// accept us.
 /// A peer's first connection, on its own thread: pairs if needed, then
 /// hands the link to the main loop; if it fails, retries like any peer.
 fn connect_first(
@@ -1066,6 +1064,8 @@ fn connect_first(
     );
 }
 
+/// Connects, asks to pair if the key is unknown, and waits for the peer to
+/// accept us.
 fn connect_and_pair(
     identity: &Identity,
     trusted: &trust::Shared,
@@ -1127,10 +1127,6 @@ fn reconnect(index: usize, to: SocketAddr, shared: &Arc<Shared>, back: &Sender<(
     });
 }
 
-/// Shows `mickey-ui switcher` (installed next to this program) on its own
-/// thread, and sends the owner's pick when the window closes: `Some(peer)`,
-/// `None` for this PC or Esc, or an error if the window could not run.
-/// The GUI is a separate program so this one stays small (PRD 0003).
 /// The switcher's cards: the focused card's id first, then one card per
 /// PC, as `id=online:name` or `id=offline:name`, in the order to show them
 /// (`Interface::switcher_sort`). Id 0 is this PC, `i + 1` is peer `i`.
@@ -1184,6 +1180,10 @@ fn open_mirror(cards: &[String], interface: &config::Interface) -> Option<std::p
         .ok()
 }
 
+/// Shows `mickey-ui switcher` (installed next to this program) on its own
+/// thread, and sends the owner's pick when the window closes: `Some(peer)`,
+/// `None` for this PC or Esc, or an error if the window could not run.
+/// The GUI is a separate program so this one stays small (PRD 0003).
 fn open_switcher(
     cards: &[String],
     interface: &config::Interface,
@@ -1206,7 +1206,6 @@ fn open_switcher(
     });
 }
 
-/// Pongs come back on their own thread, as round-trip times per peer.
 /// What a peer sends back on its link.
 enum News {
     /// A pong: the round-trip time in microseconds.
@@ -1220,7 +1219,8 @@ enum News {
     Picked(u8),
 }
 
-/// Reads what a peer sends on its own thread: pongs and its monitors.
+/// Reads what a peer sends, on its own thread, and passes it on as
+/// `News`: pongs as round-trip times, its monitors, and the rest.
 fn read_peer(index: usize, link: &Link, news: &Sender<(usize, News)>, start: Instant) {
     let (Ok(mut reader), news) = (link.try_clone(), news.clone()) else {
         return;
