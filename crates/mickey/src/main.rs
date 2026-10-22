@@ -3,10 +3,6 @@
 #[cfg(target_os = "linux")]
 mod capture;
 mod cli;
-#[cfg(unix)]
-mod control;
-#[cfg(not(unix))]
-#[path = "control_off.rs"]
 mod control;
 mod emit;
 mod event;
@@ -59,46 +55,29 @@ fn run(command: Command) -> Result<(), String> {
             Ok(())
         }
         Command::Order(order) => {
-            #[cfg(target_os = "linux")]
-            {
-                let answer = control::request(&order)?
-                    .next()
-                    .ok_or("mickey source closed the connection")?
-                    .map_err(|err| err.to_string())?;
-                match answer.strip_prefix("ok: ") {
-                    Some(done) => {
-                        println!("mickey: {done}");
-                        Ok(())
-                    }
-                    None => Err(answer.trim_start_matches("error: ").to_string()),
+            let answer = control::request(&order)?
+                .next()
+                .ok_or("mickey source closed the connection")?
+                .map_err(|err| err.to_string())?;
+            match answer.strip_prefix("ok: ") {
+                Some(done) => {
+                    println!("mickey: {done}");
+                    Ok(())
                 }
+                None => Err(answer.trim_start_matches("error: ").to_string()),
             }
-            #[cfg(not(target_os = "linux"))]
-            Err(format!(
-                "mickey {order} needs the source, which runs only on Linux in M0"
-            ))
         }
-        Command::Status { waybar: true } => {
-            #[cfg(target_os = "linux")]
-            follow_for_waybar();
-            #[cfg(not(target_os = "linux"))]
-            Err("mickey status needs the source, which runs only on Linux in M0".into())
-        }
+        Command::Status { waybar: true } => follow_for_waybar(),
         Command::Status { waybar: false } => {
-            #[cfg(target_os = "linux")]
-            {
-                let mut answer = control::request("status")?;
-                let line = answer
-                    .next()
-                    .ok_or("mickey source has no status yet")?
-                    .map_err(|err| err.to_string())?;
-                let status = control::Status::from_line(&line)
-                    .ok_or_else(|| format!("mickey source answered `{line}`"))?;
-                print!("{}", status.describe());
-                Ok(())
-            }
-            #[cfg(not(target_os = "linux"))]
-            Err("mickey status needs the source, which runs only on Linux in M0".into())
+            let mut answer = control::request("status")?;
+            let line = answer
+                .next()
+                .ok_or("mickey source has no status yet")?
+                .map_err(|err| err.to_string())?;
+            let status = control::Status::from_line(&line)
+                .ok_or_else(|| format!("mickey source answered `{line}`"))?;
+            print!("{}", status.describe());
+            Ok(())
         }
         Command::Forget { fingerprint } => {
             let mut trusted = trust::TrustedPeers::load(&identity::data_dir()?)?;
@@ -215,7 +194,6 @@ fn run_from_config() -> Result<(), String> {
 /// Prints a Waybar line now and after every change, for as long as Waybar
 /// keeps it running. While no source runs it shows "off" and retries, so
 /// the bar never shows an error.
-#[cfg(target_os = "linux")]
 fn follow_for_waybar() -> ! {
     use std::io::Write;
     let mut last = None;
