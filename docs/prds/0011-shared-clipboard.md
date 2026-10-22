@@ -52,11 +52,11 @@ recent copies.
 
 ## Requirements
 
-- [ ] Data link with large frames, separate from the input link.
-- [ ] Clipboard read/write on Wayland (data-control), X11 and Windows.
-- [ ] Text and images synced when the keyboard crosses; big ones on paste.
-- [ ] History window with both PCs' copies.
-- [ ] Files.
+- [x] Data link with large frames, separate from the input link.
+- [x] Clipboard read/write on Wayland (data-control), X11 and Windows.
+- [x] Text and images synced when the keyboard crosses (big ones on paste: not yet, see *Discoveries*).
+- [x] History window (this PC's copies, including what arrived from others).
+- [x] Files (up to 60 MB per crossing, no folders yet).
 - [ ] Option to leave the history to an existing manager.
 
 ## Non-Goals
@@ -66,4 +66,27 @@ recent copies.
 
 ## Discoveries
 
-*(Filled in during execution.)*
+- **`arboard` was already in the tree** (the settings window's eframe uses
+  it): Wayland through data-control, X11, Windows, text, images and file
+  lists, with no new crate.
+- **Everything crosses at once, for now.** Delayed rendering (bytes only
+  when an app pastes) needs owning the clipboard protocol per system,
+  which `arboard` does not offer. With the data link on its own
+  connection and its own thread, an eager transfer never delays input:
+  a worst-case 1920x1080 noise image took 369 ms to read, compress (2.2
+  MB) and send; 293 KB of files took 27 ms.
+- **Images cross as PNG** (fast compression); a flat screenshot shrinks
+  more than 50 times.
+- **Files** land in a fresh folder under Mickey's cache
+  (`~/.cache/mickey/received`, `%LOCALAPPDATA%\mickey\received`), the
+  last five transfers kept; names from the network that could leave the
+  folder are refused. At most 60 MB per crossing; more is skipped and
+  logged.
+- **Noticing copies** without polling: Wayland's selection events,
+  Windows' clipboard counter; X11 and GNOME compare the text once a
+  second (their image copies reach the history only when they cross).
+- **GNOME on Wayland** offers no clipboard protocol to other programs:
+  there Mickey sees only what X11 apps copy.
+- **The history is this PC's**: it includes what arrived from other PCs,
+  but not copies made on another PC that never crossed. Showing the other
+  PCs' histories is left for later.
