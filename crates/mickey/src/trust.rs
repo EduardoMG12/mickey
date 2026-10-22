@@ -7,7 +7,7 @@
 //! <public key, 64 hex digits> <where it was paired from>
 //! ```
 
-use crate::identity::{Identity, fingerprint};
+use crate::identity::fingerprint;
 use std::fs;
 use std::io::Write;
 use std::net::SocketAddr;
@@ -97,21 +97,20 @@ impl TrustedPeers {
 
 /// Whether to talk to the peer whose key is `peer_key`. A trusted key is
 /// accepted at once; an unknown one only after the person at this machine
-/// compares fingerprints and types `y`. Anything else (including no
-/// terminal to ask on) refuses.
+/// sees the same pairing `code` on both PCs and types `y`. Anything else
+/// (including no terminal to ask on) refuses.
 pub fn trust_or_ask(
-    identity: &Identity,
     trusted: &mut TrustedPeers,
     peer_key: &[u8; 32],
     address: SocketAddr,
+    code: &str,
 ) -> Result<bool, String> {
     if trusted.is_trusted(peer_key) {
         return Ok(true);
     }
-    println!("mickey: new peer at {address}");
-    println!("mickey:   this PC:   {}", identity.fingerprint());
-    println!("mickey:   other PC:  {}", fingerprint(peer_key));
-    println!("mickey: pair with it? Check that \"other PC\" here matches \"this PC\" there.");
+    println!("mickey: new PC at {address} ({})", fingerprint(peer_key));
+    println!("mickey: pairing code: {code}");
+    println!("mickey: pair only if the other PC shows the same code.");
     print!("mickey: type y to pair, anything else to refuse: ");
     std::io::Write::flush(&mut std::io::stdout()).map_err(|err| err.to_string())?;
     let mut answer = String::new();

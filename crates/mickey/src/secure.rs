@@ -34,6 +34,8 @@ pub struct Link {
     stream: TcpStream,
     noise: Arc<Mutex<TransportState>>,
     peer: [u8; 32],
+    /// Six digits both sides compute alike (PRD 0010).
+    code: u32,
 }
 
 impl Link {
@@ -55,6 +57,12 @@ impl Link {
         &self.peer
     }
 
+    /// The pairing code, e.g. "042 917": the same on both PCs only if no
+    /// machine sits in between (PRD 0010).
+    pub fn pairing_code(&self) -> String {
+        format!("{:03} {:03}", self.code / 1000, self.code % 1000)
+    }
+
     // Only the source clones a link (for its pong reader), so the Windows
     // build never calls this in M0.
     #[cfg_attr(windows, allow(dead_code))]
@@ -63,6 +71,7 @@ impl Link {
             stream: self.stream.try_clone()?,
             noise: Arc::clone(&self.noise),
             peer: self.peer,
+            code: self.code,
         })
     }
 
@@ -125,13 +134,25 @@ impl Link {
             .get_remote_static()
             .and_then(|key| <[u8; 32]>::try_from(key).ok())
             .ok_or_else(|| invalid("peer sent no identity".into()))?;
+        let code = code_from(handshake.get_handshake_hash());
         let noise = handshake.into_transport_mode().map_err(noise_error)?;
         Ok(Link {
             stream,
             noise: Arc::new(Mutex::new(noise)),
             peer,
+            code,
         })
     }
+}
+
+/// Six digits from the handshake hash. Both sides end the handshake with
+/// the same hash, which covers both public keys and both ephemeral keys:
+/// a machine in the middle runs two handshakes with different keys, so the
+/// two PCs would show different codes. The leftover bias of `% 1_000_000`
+/// on 32 bits is under 0.03 %, too little to help an attacker guess.
+fn code_from(hash: &[u8]) -> u32 {
+    let first = hash.first_chunk::<4>().copied().unwrap_or_default();
+    u32::from_be_bytes(first) % 1_000_000
 }
 
 fn builder(identity: &Identity) -> io::Result<snow::Builder<'_>> {
@@ -246,6 +267,28 @@ mod tests {
         let (got, err) = handle.join().unwrap();
         assert_eq!(got, [KEY, Message::Ping { id: 9 }]);
         assert_eq!(err.kind(), io::ErrorKind::UnexpectedEof);
+    }
+
+    #[test]
+    fn both_sides_show_the_same_code_and_each_connection_a_new_one() {
+        let (listener, addr) = listener();
+        let target = thread::spawn(move || {
+            let identity = Identity::generate().unwrap();
+            (0..2)
+                .map(|_| {
+                    let (stream, _) = listener.accept().unwrap();
+                    Link::respond(stream, &identity).unwrap().pairing_code()
+                })
+                .collect::<Vec<_>>()
+        });
+        let source = Identity::generate().unwrap();
+        let first = Link::initiate(TcpStream::connect(addr).unwrap(), &source).unwrap();
+        let second = Link::initiate(TcpStream::connect(addr).unwrap(), &source).unwrap();
+        let theirs = target.join().unwrap();
+        assert_eq!(first.pairing_code(), theirs[0]);
+        assert_eq!(second.pairing_code(), theirs[1]);
+        assert_ne!(theirs[0], theirs[1], "fresh ephemeral keys, fresh code");
+        assert!(first.pairing_code().len() == 7 && first.pairing_code().as_bytes()[3] == b' ');
     }
 
     #[test]
