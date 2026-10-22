@@ -10,7 +10,9 @@
 //! speed = 16
 //! ```
 
-use crate::chord::{self, Chord};
+pub mod chord;
+
+use chord::Chord;
 use serde::Deserialize;
 use std::net::SocketAddr;
 use std::path::PathBuf;
