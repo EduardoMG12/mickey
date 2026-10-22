@@ -77,7 +77,7 @@ pub fn show(ui: &mut egui::Ui, size: Vec2, peers: &Peers, pcs: &mut [PcRow], dra
     // Draws monitors already in screen points; `beside`: the name goes to
     // the right, the drawing being too small to hold it.
     let draw = |rects: &[Rect], name: &str, fill: Color32, beside: bool| {
-        for rect in rects {
+        for (number, rect) in rects.iter().enumerate() {
             painter.rect_filled(rect.shrink(1.0), 3.0, fill);
             painter.rect_stroke(
                 rect.shrink(1.0),
@@ -85,19 +85,36 @@ pub fn show(ui: &mut egui::Ui, size: Vec2, peers: &Peers, pcs: &mut [PcRow], dra
                 Stroke::new(1.0, text),
                 StrokeKind::Inside,
             );
+            // Each monitor says whose it is and its number, like Windows'
+            // display settings: "Windows 2".
+            if !beside {
+                let label = format!("{name} {}", number + 1);
+                // As large as fits the monitor, never under 9 points.
+                let size = (rect.width() / (label.chars().count() as f32 * 0.62))
+                    .min(rect.height() * 0.4)
+                    .clamp(9.0, 16.0);
+                painter.text(
+                    rect.center(),
+                    Align2::CENTER_CENTER,
+                    label,
+                    FontId::proportional(size),
+                    Color32::WHITE,
+                );
+            }
         }
-        let all = rects
-            .iter()
-            .fold(Rect::NOTHING, |all, rect| all.union(*rect));
-        let (label, align, color) = match beside {
-            true => (
+        // In the strip the drawing is too small: the name goes beside it.
+        if beside {
+            let all = rects
+                .iter()
+                .fold(Rect::NOTHING, |all, rect| all.union(*rect));
+            painter.text(
                 all.right_center() + Vec2::new(6.0, 0.0),
                 Align2::LEFT_CENTER,
+                name,
+                FontId::proportional(14.0),
                 text,
-            ),
-            false => (all.center(), Align2::CENTER_CENTER, Color32::WHITE),
-        };
-        painter.text(label, align, name, FontId::proportional(14.0), color);
+            );
+        }
     };
 
     let home_rects: Vec<Rect> = home
