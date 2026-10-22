@@ -202,6 +202,7 @@ fn run(command: Command) -> Result<(), String> {
                 touchpad_speed,
                 switcher_position,
                 source::Services {
+                    trusted: trust::shared(&identity::data_dir()?)?,
                     controlled,
                     found: None,
                     keeper: clipboard::Keeper::start().ok(),
@@ -211,6 +212,7 @@ fn run(command: Command) -> Result<(), String> {
         }
         Command::Target { listen } => target(
             listen,
+            trust::shared(&identity::data_dir()?)?,
             std::sync::mpsc::channel().0,
             None,
             clipboard::Keeper::start().ok(),
@@ -265,13 +267,16 @@ fn run_from_config() -> Result<(), String> {
     // The target tells the source when a peer's keyboard comes over, for
     // the status and the tray (PRD 0009).
     let (controlled_sender, controlled) = std::sync::mpsc::channel();
+    // One list of trusted PCs for the source and the target.
+    let trusted = trust::shared(&identity::data_dir()?)?;
     // One clipboard for the whole process (PRD 0011).
     let keeper = clipboard::Keeper::start()
         .inspect_err(|err| eprintln!("mickey: {err}; the clipboard will not be shared"))
         .ok();
     let target = this_pc.controlled.then(|| {
         let (listen, found, keeper) = (this_pc.listen, found.clone(), keeper.clone());
-        std::thread::spawn(move || target(listen, controlled_sender, found, keeper))
+        let trusted = trusted.clone();
+        std::thread::spawn(move || target(listen, trusted, controlled_sender, found, keeper))
     });
     if source_wanted {
         let hotkeys = hotkey::Hotkey::from_config(&config.hotkeys()?);
@@ -281,6 +286,7 @@ fn run_from_config() -> Result<(), String> {
             config.touchpad.speed,
             config.interface.switcher_position,
             source::Services {
+                trusted,
                 controlled,
                 found,
                 history: keeper.clone().map(history::record),
@@ -329,6 +335,7 @@ fn follow_for_waybar() -> ! {
 /// the clipboard is reachable, lets paired PCs read and write it.
 fn target(
     listen: SocketAddr,
+    trusted: trust::Shared,
     controlled: std::sync::mpsc::Sender<source::TargetNews>,
     found: Option<discovery::Table>,
     keeper: Option<clipboard::Keeper>,
@@ -339,7 +346,6 @@ fn target(
 
     let data_dir = identity::data_dir()?;
     let identity = Arc::new(identity::Identity::load_or_create(&data_dir)?);
-    let trusted = Arc::new(Mutex::new(trust::TrustedPeers::load(&data_dir)?));
     // One virtual keyboard and mouse for every source that connects.
     let emitter = Arc::new(Mutex::new(emit::Emitter::new()?));
     let listener = TcpListener::bind(listen).map_err(|err| match err.kind() {
