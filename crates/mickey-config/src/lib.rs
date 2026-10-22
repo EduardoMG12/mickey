@@ -164,6 +164,33 @@ pub struct Peer {
     /// Goes straight to this peer, e.g. `"AltGr+RightShift+1"`.
     #[serde(default)]
     pub hotkey: Option<String>,
+    /// Where the peer sits next to this PC; the mouse crosses that edge
+    /// (PRD 0005). None: no edge, only hotkeys.
+    #[serde(default)]
+    pub side: Option<Side>,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum Side {
+    Left,
+    Right,
+    Above,
+    Below,
+}
+
+impl Side {
+    pub const ALL: [Side; 4] = [Side::Left, Side::Right, Side::Above, Side::Below];
+
+    /// As written in config.toml.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Side::Left => "left",
+            Side::Right => "right",
+            Side::Above => "above",
+            Side::Below => "below",
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, PartialEq)]
@@ -278,6 +305,18 @@ pub fn parse(text: &str) -> Result<Config, String> {
             peer.name
         ));
     }
+    // One peer per side, so an edge always leads to a single PC.
+    for side in Side::ALL {
+        let mut there = config.peers.iter().filter(|peer| peer.side == Some(side));
+        if let (Some(first), Some(second)) = (there.next(), there.next()) {
+            return Err(format!(
+                "{} and {} are both on the {} side; each side holds one PC",
+                first.name,
+                second.name,
+                side.as_str()
+            ));
+        }
+    }
     if !SWITCHER_POSITIONS.contains(&config.interface.switcher_position.as_str()) {
         return Err(format!(
             "switcher_position {:?} is not one of {}",
@@ -301,6 +340,21 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_side_is_read_and_two_peers_may_not_share_one() {
+        let peer = |name: &str, side: &str| {
+            format!(
+                "[[peer]]\nname = \"{name}\"\naddress = \"192.0.2.10:4242\"\nside = \"{side}\"\n"
+            )
+        };
+        let config = parse(&peer("A", "right")).unwrap();
+        assert_eq!(config.peers[0].side, Some(Side::Right));
+        assert!(parse(&peer("A", "sideways")).is_err());
+        let both = parse(&(peer("A", "left") + &peer("B", "left"))).unwrap_err();
+        assert!(both.contains("A and B are both on the left side"), "{both}");
+        assert!(parse(&(peer("A", "left") + &peer("B", "above"))).is_ok());
+    }
+
+    #[test]
     fn the_example_parses() {
         let config = parse(EXAMPLE).unwrap();
         assert_eq!(
@@ -309,6 +363,7 @@ mod tests {
                 name: "Desktop".into(),
                 address: "192.0.2.10:4242".parse().unwrap(),
                 hotkey: None,
+                side: None,
             }]
         );
         assert_eq!(config.touchpad.speed, 16);

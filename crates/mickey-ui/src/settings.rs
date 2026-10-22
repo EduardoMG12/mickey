@@ -3,7 +3,7 @@
 //! `mickey` applies, before anything is written.
 
 use eframe::egui;
-use mickey_config::{self as config, Config, SWITCHER_POSITIONS};
+use mickey_config::{self as config, Config, SWITCHER_POSITIONS, Side};
 use std::process::Command;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -11,6 +11,8 @@ pub struct PcRow {
     pub name: String,
     pub address: String,
     pub hotkey: String,
+    /// Kept as read; the Layout tab will set it.
+    pub side: Option<Side>,
 }
 
 /// Everything editable, as the text the fields show.
@@ -45,6 +47,7 @@ impl Form {
                     name: peer.name.clone(),
                     address: peer.address.to_string(),
                     hotkey: text(&peer.hotkey),
+                    side: peer.side,
                 })
                 .collect(),
             next: text(&config.hotkeys.next),
@@ -88,6 +91,12 @@ impl Form {
                 out += &format!(
                     "hotkey = {}    # straight to this PC\n",
                     quote(pc.hotkey.trim())
+                );
+            }
+            if let Some(side) = pc.side {
+                out += &format!(
+                    "side = {}    # next to this PC; the mouse crosses that edge\n",
+                    quote(side.as_str())
                 );
             }
         }
@@ -270,6 +279,7 @@ impl eframe::App for Settings {
                             name: "New PC".into(),
                             address: format!("192.168.0.2:{}", config::DEFAULT_PORT),
                             hotkey: String::new(),
+                            side: None,
                         });
                     }
                 }
@@ -332,7 +342,7 @@ mod tests {
     #[test]
     fn what_the_form_writes_parses_back_to_the_same_form() {
         let original = config::parse(
-            "[[peer]]\nname = \"Windows \\\"main\\\"\"\naddress = \"192.0.2.10:4242\"\nhotkey = \"AltGr+RightShift+1\"\n\n[hotkeys]\nhome = \"AltGr+RightShift+H\"\n\n[interface]\nswitcher_position = \"top-left\"\n\n[this_pc]\ncontrolled = false\n",
+            "[[peer]]\nname = \"Windows \\\"main\\\"\"\naddress = \"192.0.2.10:4242\"\nhotkey = \"AltGr+RightShift+1\"\nside = \"left\"\n\n[hotkeys]\nhome = \"AltGr+RightShift+H\"\n\n[interface]\nswitcher_position = \"top-left\"\n\n[this_pc]\ncontrolled = false\n",
         )
         .unwrap();
         let form = Form::from_config(&original);
@@ -347,6 +357,7 @@ mod tests {
             name: "A".into(),
             address: "nowhere".into(),
             hotkey: String::new(),
+            side: None,
         });
         assert!(config::parse(&form.to_toml()).is_err());
     }
