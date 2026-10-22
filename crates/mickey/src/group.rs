@@ -28,6 +28,22 @@ pub const MIRROR: u8 = 19;
 /// Close the switcher (or its copy) shown for the source: a pick was made.
 pub const CLOSE: u8 = 20;
 
+/// Whether `ip` is on a local network: private IPv4 ranges, link-local,
+/// the 100.64.0.0/10 range VPNs such as Tailscale use, IPv6 unique-local
+/// and link-local. Never loopback or a public address.
+pub fn is_local(ip: std::net::IpAddr) -> bool {
+    match ip {
+        std::net::IpAddr::V4(ip) => {
+            let [a, b, ..] = ip.octets();
+            ip.is_private() || ip.is_link_local() || (a == 100 && (64..128).contains(&b))
+        }
+        std::net::IpAddr::V6(ip) => {
+            let first = ip.segments()[0];
+            (first & 0xfe00) == 0xfc00 || (first & 0xffc0) == 0xfe80
+        }
+    }
+}
+
 /// A map ready for the data link.
 pub fn message(text: &str) -> Vec<u8> {
     tagged(KIND, text)
@@ -142,6 +158,31 @@ pub fn as_seen_by(members: &[Member], me: &[u8; 32]) -> Vec<Member> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn only_local_addresses_may_join() {
+        for local in [
+            "192.168.0.4",
+            "10.1.2.3",
+            "172.16.0.9",
+            "169.254.1.1",
+            "100.100.1.1",
+            "fd00::1",
+            "fe80::1",
+        ] {
+            assert!(is_local(local.parse().unwrap()), "{local}");
+        }
+        for outside in [
+            "8.8.8.8",
+            "127.0.0.1",
+            "100.128.0.1",
+            "::1",
+            "2001:db8::1",
+            "0.0.0.0",
+        ] {
+            assert!(!is_local(outside.parse().unwrap()), "{outside}");
+        }
+    }
+
     use super::*;
 
     fn member(byte: u8, name: &str, address: &str, position: Option<[i32; 2]>) -> Member {
