@@ -97,6 +97,7 @@ impl eframe::App for History {
                 for entry in shown {
                     let label = match entry.kind.as_str() {
                         "image" => format!("🖼  Image {}", entry.preview),
+                        "files" => format!("📄  {}", entry.preview),
                         // Only spaces or line breaks: still something copied.
                         _ if entry.preview.is_empty() => "(blank)".to_string(),
                         _ => entry.preview.clone(),

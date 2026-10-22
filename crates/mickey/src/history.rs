@@ -23,6 +23,7 @@ fn size(content: &Content) -> usize {
     match content {
         Content::Text(text) => text.len(),
         Content::Image { rgba, .. } => rgba.len(),
+        Content::Files(paths) => paths.iter().map(|path| path.as_os_str().len()).sum(),
     }
 }
 
@@ -107,6 +108,14 @@ pub fn lines(history: &History, now: SystemTime) -> String {
                 ("text", one_line.chars().take(120).collect())
             }
             Content::Image { width, height, .. } => ("image", format!("{width}x{height}")),
+            Content::Files(paths) => {
+                let names: Vec<String> = paths
+                    .iter()
+                    .filter_map(|path| path.file_name())
+                    .map(|name| name.to_string_lossy().into_owned())
+                    .collect();
+                ("files", names.join(", ").chars().take(120).collect())
+            }
         };
         out.push(format!("{}\t{kind}\t{ago}\t{preview}", entry.id));
     }
