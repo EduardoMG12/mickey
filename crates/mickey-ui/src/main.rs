@@ -139,6 +139,8 @@ impl eframe::App for Switcher {
 /// around, like the mascot's patches. Returns whether it was clicked.
 fn card(ui: &mut egui::Ui, number: usize, pc: &choice::Pc, selected: bool, focused: bool) -> bool {
     use theme::palette;
+    // Text that can be selected takes the click for itself, before the card.
+    ui.style_mut().interaction.selectable_labels = false;
     let fill = if selected {
         palette::BRUISE
     } else {
