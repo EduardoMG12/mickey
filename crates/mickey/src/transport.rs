@@ -107,7 +107,11 @@ pub fn serve(
                     break Err(err);
                 }
             }
-            Message::Pong { .. } | Message::Monitors { .. } => {}
+            // The edges come in the next PR (#89).
+            Message::Pong { .. }
+            | Message::Monitors { .. }
+            | Message::Enter { .. }
+            | Message::Leave { .. } => {}
             Message::Hello { .. } => break Err(invalid("second Hello".into())),
         }
     };
