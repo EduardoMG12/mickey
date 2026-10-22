@@ -19,15 +19,12 @@
 
 use std::fs;
 use std::io::{self, BufRead, BufReader, Write};
-use std::os::unix::fs::DirBuilderExt;
-use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
-const SOCKET: &str = "control.sock";
 /// A follower that stops reading is dropped instead of slowing the source.
 const WRITE_TIMEOUT: Duration = Duration::from_millis(200);
 /// A client that connects and says nothing is dropped too.
@@ -138,19 +135,177 @@ fn json_escape(text: &str) -> String {
     out
 }
 
-/// `$XDG_RUNTIME_DIR/mickey/control.sock`, the per-user runtime directory
-/// that only exists while the user is logged in.
-pub fn socket_path() -> Result<PathBuf, String> {
-    let runtime = std::env::var_os("XDG_RUNTIME_DIR")
-        .map(PathBuf::from)
-        .filter(|dir| dir.is_absolute())
-        .ok_or("XDG_RUNTIME_DIR is not set, so there is no control socket")?;
-    Ok(runtime.join("mickey").join(SOCKET))
+/// Where the control channel lives and how to reach it. Unix: a socket in
+/// the user's runtime directory (0700). Windows, which has no Unix sockets
+/// in std: TCP on 127.0.0.1 with a random port and a random token, both in
+/// a file in the user's own %LOCALAPPDATA% that a client must read first.
+#[cfg(unix)]
+mod endpoint {
+    use super::*;
+    use std::os::unix::fs::DirBuilderExt;
+    use std::os::unix::net::{UnixListener, UnixStream};
+
+    pub type Stream = UnixStream;
+
+    pub struct Endpoint {
+        path: PathBuf,
+    }
+
+    pub struct Listener(UnixListener);
+
+    impl Endpoint {
+        /// `$XDG_RUNTIME_DIR/mickey/control.sock`.
+        pub fn default() -> Result<Endpoint, String> {
+            let runtime = std::env::var_os("XDG_RUNTIME_DIR")
+                .map(PathBuf::from)
+                .filter(|dir| dir.is_absolute())
+                .ok_or("XDG_RUNTIME_DIR is not set, so there is no control socket")?;
+            Ok(Endpoint::at(runtime.join("mickey").join("control.sock")))
+        }
+
+        pub fn at(path: PathBuf) -> Endpoint {
+            Endpoint { path }
+        }
+
+        pub fn connect(&self) -> io::Result<Stream> {
+            UnixStream::connect(&self.path)
+        }
+
+        pub fn listen(&self) -> Result<Listener, String> {
+            let dir = self.path.parent().expect("the socket path has a directory");
+            fs::DirBuilder::new()
+                .recursive(true)
+                .mode(0o700)
+                .create(dir)
+                .map_err(|err| format!("cannot create {}: {err}", dir.display()))?;
+            if self.connect().is_ok() {
+                return Err("another mickey source is already running".into());
+            }
+            // A socket file left by a crash answers nobody; replace it.
+            let _ = fs::remove_file(&self.path);
+            UnixListener::bind(&self.path)
+                .map(Listener)
+                .map_err(|err| format!("cannot listen on {}: {err}", self.path.display()))
+        }
+    }
+
+    impl Listener {
+        pub fn incoming(&self) -> impl Iterator<Item = Stream> + '_ {
+            self.0.incoming().flatten()
+        }
+
+        /// The directory's permissions already keep other users out.
+        pub fn admit(&self, _reader: &mut impl BufRead) -> bool {
+            true
+        }
+    }
 }
 
-/// Whether another `mickey source` answers on the control socket.
+#[cfg(windows)]
+mod endpoint {
+    use super::*;
+    use std::net::{Ipv4Addr, TcpListener, TcpStream};
+
+    pub type Stream = TcpStream;
+
+    pub struct Endpoint {
+        /// Holds "<port> <token>".
+        file: PathBuf,
+    }
+
+    pub struct Listener {
+        inner: TcpListener,
+        token: String,
+    }
+
+    impl Endpoint {
+        /// `%LOCALAPPDATA%\mickey\control.txt`.
+        pub fn default() -> Result<Endpoint, String> {
+            let local = std::env::var_os("LOCALAPPDATA").ok_or("LOCALAPPDATA is not set")?;
+            Ok(Endpoint::at(
+                PathBuf::from(local).join("mickey").join("control.txt"),
+            ))
+        }
+
+        pub fn at(file: PathBuf) -> Endpoint {
+            Endpoint { file }
+        }
+
+        fn read(&self) -> io::Result<(u16, String)> {
+            let text = fs::read_to_string(&self.file)?;
+            let (port, token) = text
+                .trim()
+                .split_once(' ')
+                .ok_or_else(|| io::Error::other("damaged control file"))?;
+            let port = port.parse().map_err(io::Error::other)?;
+            Ok((port, token.to_string()))
+        }
+
+        pub fn connect(&self) -> io::Result<Stream> {
+            let (port, _) = self.read()?;
+            let mut stream = TcpStream::connect((Ipv4Addr::LOCALHOST, port))?;
+            introduce(&mut stream, self)?;
+            Ok(stream)
+        }
+
+        pub fn listen(&self) -> Result<Listener, String> {
+            if self.connect().is_ok() {
+                return Err("another mickey source is already running".into());
+            }
+            let inner = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+                .map_err(|err| format!("cannot listen on localhost: {err}"))?;
+            let port = inner.local_addr().map_err(|err| err.to_string())?.port();
+            let token = random_token()?;
+            if let Some(dir) = self.file.parent() {
+                fs::create_dir_all(dir).map_err(|err| err.to_string())?;
+            }
+            fs::write(&self.file, format!("{port} {token}"))
+                .map_err(|err| format!("cannot write {}: {err}", self.file.display()))?;
+            Ok(Listener { inner, token })
+        }
+    }
+
+    impl Listener {
+        pub fn incoming(&self) -> impl Iterator<Item = Stream> + '_ {
+            self.inner.incoming().flatten()
+        }
+
+        /// Only a client that read the token from the user's own file may
+        /// talk: other users, and web pages reaching localhost, cannot.
+        pub fn admit(&self, reader: &mut impl BufRead) -> bool {
+            let mut line = String::new();
+            reader.read_line(&mut line).is_ok() && line.trim() == self.token
+        }
+    }
+
+    /// Sends the token before the request.
+    fn introduce(stream: &mut Stream, endpoint: &Endpoint) -> io::Result<()> {
+        let (_, token) = endpoint.read()?;
+        writeln!(stream, "{token}")
+    }
+
+    /// 32 random bytes as hex, from the same generator the identity keys
+    /// use (snow, through the OS), so no new dependency.
+    fn random_token() -> Result<String, String> {
+        let params = crate::identity::NOISE_PARAMS
+            .parse()
+            .map_err(|err| format!("{err}"))?;
+        let keypair = snow::Builder::new(params)
+            .generate_keypair()
+            .map_err(|err| format!("{err}"))?;
+        Ok(keypair
+            .private
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect())
+    }
+}
+
+use endpoint::{Endpoint, Stream};
+
+/// Whether another `mickey source` answers on the control channel.
 pub fn source_running() -> bool {
-    socket_path().is_ok_and(|path| UnixStream::connect(path).is_ok())
+    Endpoint::default().is_ok_and(|endpoint| endpoint.connect().is_ok())
 }
 
 /// The source's end: publish a status whenever it changes.
@@ -159,34 +314,21 @@ pub struct Control {
 }
 
 impl Control {
-    /// Listens on the control socket. Fails if another `mickey source`
+    /// Listens on the control channel. Fails if another `mickey source`
     /// already owns it.
     /// Orders arrive on `requests`, as any type that can be made from a
     /// `Request`, so the source can share one channel with its input.
     pub fn start<T: From<Request> + Send + 'static>(
         requests: Sender<T>,
     ) -> Result<Control, String> {
-        Control::start_at(socket_path()?, requests)
+        Control::start_at(Endpoint::default()?, requests)
     }
 
     fn start_at<T: From<Request> + Send + 'static>(
-        path: PathBuf,
+        endpoint: Endpoint,
         requests: Sender<T>,
     ) -> Result<Control, String> {
-        let dir = path.parent().expect("the socket path has a directory");
-        fs::DirBuilder::new()
-            .recursive(true)
-            .mode(0o700)
-            .create(dir)
-            .map_err(|err| format!("cannot create {}: {err}", dir.display()))?;
-        if UnixStream::connect(&path).is_ok() {
-            return Err("another mickey source is already running".into());
-        }
-        // A socket file left by a crash answers nobody; replace it.
-        let _ = fs::remove_file(&path);
-        let listener = UnixListener::bind(&path)
-            .map_err(|err| format!("cannot listen on {}: {err}", path.display()))?;
-
+        let listener = endpoint.listen()?;
         let latest = Arc::new(Mutex::new(None::<Status>));
         let (followers_in, followers) = mpsc::channel();
         let (updates, updates_out) = mpsc::channel();
@@ -203,18 +345,21 @@ impl Control {
 }
 
 fn accept<T: From<Request>>(
-    listener: UnixListener,
+    listener: endpoint::Listener,
     latest: &Mutex<Option<Status>>,
-    followers: &Sender<UnixStream>,
+    followers: &Sender<Stream>,
     requests: &Sender<T>,
 ) {
-    for stream in listener.incoming().flatten() {
+    for stream in listener.incoming() {
         let _ = stream.set_write_timeout(Some(WRITE_TIMEOUT));
         let _ = stream.set_read_timeout(Some(READ_TIMEOUT));
+        // One reader for both lines, so nothing read ahead is lost.
+        let mut reader = BufReader::new(&stream);
         let mut request = String::new();
-        if BufReader::new(&stream).read_line(&mut request).is_err() {
+        if !listener.admit(&mut reader) || reader.read_line(&mut request).is_err() {
             continue;
         }
+        drop(reader);
         let mut stream = stream;
         let status = latest
             .lock()
@@ -257,10 +402,10 @@ fn accept<T: From<Request>>(
 
 fn publish(
     updates: Receiver<Status>,
-    new_followers: Receiver<UnixStream>,
+    new_followers: Receiver<Stream>,
     latest: &Mutex<Option<Status>>,
 ) {
-    let mut followers: Vec<UnixStream> = Vec::new();
+    let mut followers: Vec<Stream> = Vec::new();
     for status in updates {
         *latest
             .lock()
@@ -273,15 +418,16 @@ fn publish(
 
 /// The command's end: one request, the answer lines as they come.
 pub fn request(request: &str) -> Result<impl Iterator<Item = io::Result<String>>, String> {
-    request_at(&socket_path()?, request)
+    request_at(&Endpoint::default()?, request)
 }
 
 fn request_at(
-    path: &std::path::Path,
+    endpoint: &Endpoint,
     request: &str,
 ) -> Result<impl Iterator<Item = io::Result<String>> + use<>, String> {
-    let mut stream = UnixStream::connect(path)
-        .map_err(|_| "mickey source is not running (no control socket)".to_string())?;
+    let mut stream = endpoint
+        .connect()
+        .map_err(|_| "mickey source is not running (no control channel)".to_string())?;
     // Followers wait for changes for as long as they like.
     stream
         .set_read_timeout(None)
@@ -358,22 +504,22 @@ mod tests {
     fn status_and_follow_over_a_real_socket() {
         let dir = std::env::temp_dir().join(format!("mickey-control-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
-        let path = dir.join("mickey").join(SOCKET);
+        let path = dir.join("mickey").join("control");
 
         let (requests, orders) = mpsc::channel::<Request>();
-        let control = Control::start_at(path.clone(), requests.clone()).unwrap();
+        let control = Control::start_at(Endpoint::at(path.clone()), requests.clone()).unwrap();
         assert!(
-            Control::start_at(path.clone(), requests).is_err(),
+            Control::start_at(Endpoint::at(path.clone()), requests).is_err(),
             "a second source is refused"
         );
         control.publish(status());
         thread::sleep(Duration::from_millis(50));
 
-        let mut answer = request_at(&path, "status").unwrap();
+        let mut answer = request_at(&Endpoint::at(path.clone()), "status").unwrap();
         assert_eq!(answer.next().unwrap().unwrap(), status().to_line());
         assert!(answer.next().is_none(), "status closes after one line");
 
-        let mut follow = request_at(&path, "follow").unwrap();
+        let mut follow = request_at(&Endpoint::at(path.clone()), "follow").unwrap();
         assert_eq!(follow.next().unwrap().unwrap(), status().to_line());
         let home = Status {
             focus: None,
@@ -382,11 +528,15 @@ mod tests {
         control.publish(home.clone());
         assert_eq!(follow.next().unwrap().unwrap(), home.to_line());
 
-        let mut bad = request_at(&path, "dance").unwrap();
+        let mut bad = request_at(&Endpoint::at(path.clone()), "dance").unwrap();
         assert!(bad.next().unwrap().unwrap().starts_with("error"));
 
         // An order reaches the main loop, and its answer reaches the client.
-        let client = thread::spawn(move || request_at(&path, "go Windows A").unwrap().next());
+        let client = thread::spawn(move || {
+            request_at(&Endpoint::at(path), "go Windows A")
+                .unwrap()
+                .next()
+        });
         let order = orders.recv_timeout(Duration::from_secs(2)).unwrap();
         assert_eq!(order.order, Order::Go("Windows A".into()));
         order.reply.send("ok: going".into()).unwrap();
