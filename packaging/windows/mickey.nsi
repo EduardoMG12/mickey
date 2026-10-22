@@ -45,6 +45,7 @@ Section "Mickey"
   nsExec::Exec 'netsh advfirewall firewall add rule name="Mickey" dir=in action=allow program="$INSTDIR\mickey.exe" profile=private'
 
   CreateDirectory "$SMPROGRAMS\Mickey"
+  CreateShortcut "$SMPROGRAMS\Mickey\Mickey settings.lnk" "$INSTDIR\mickey-ui.exe" "settings"
   ; Pairing asks questions in a terminal, so this shortcut shows one.
   CreateShortcut "$SMPROGRAMS\Mickey\Mickey (terminal, for pairing).lnk" "$SYSDIR\cmd.exe" \
     '/k taskkill /im mickey.exe /f >nul 2>&1 & "$INSTDIR\mickey.exe" run'

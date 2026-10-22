@@ -107,7 +107,7 @@ impl Default for Interface {
     }
 }
 
-const SWITCHER_POSITIONS: [&str; 5] = [
+pub const SWITCHER_POSITIONS: [&str; 5] = [
     "center",
     "top-left",
     "top-right",
