@@ -613,8 +613,9 @@ impl eframe::App for Settings {
                     ui.weak("Record, then press the keys together, or tap one key twice for the double tap. You can also type the names.");
                     ui.horizontal(|ui| {
                         ui.label(egui::RichText::new(format!("{}  Always home:", crate::theme::icon::SHIELD)).strong());
-                        crate::theme::keycaps(ui, "AltGr+RightShift+Esc", false, false);
-                        ui.weak("works whatever is set here");
+                        ui.weak("hold");
+                        crate::theme::keycaps(ui, "AltGr+RightShift", false, false);
+                        ui.weak("for 2 seconds and let go: works whatever is set here");
                     });
                     ui.add_space(4.0);
                     // What the recording in progress gave, if it is done.
