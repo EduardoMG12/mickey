@@ -515,12 +515,14 @@ fn serve_source(
     let result = transport::serve(
         &mut link,
         &monitors,
-        |effect| {
-            if let Err(err) = output(effect)
-                && !reported
-            {
-                eprintln!("mickey: input injection failed: {err} (not reported again)");
-                reported = true;
+        |effect| match output(effect) {
+            Ok(()) => true,
+            Err(err) => {
+                if !reported {
+                    eprintln!("mickey: input injection failed: {err} (not reported again)");
+                    reported = true;
+                }
+                false
             }
         },
         emit::cursor,
