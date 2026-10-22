@@ -54,10 +54,17 @@ pub fn place(x: i32, y: i32) -> io::Result<()> {
 #[cfg(target_os = "linux")]
 pub fn place(x: i32, y: i32) -> io::Result<()> {
     use crate::monitors::hyprland;
-    match hyprland::ask(&format!("dispatch movecursor {x} {y}")) {
-        Ok(answer) if answer.trim() == "ok" => Ok(()),
-        Ok(answer) => Err(io::Error::other(format!("Hyprland answered `{answer}`"))),
-        Err(err) => Err(io::Error::other(err)),
+    // A Lua config (Hyprland 0.55+) takes Lua; the older config language
+    // takes the plain dispatcher. Try the first, then the second.
+    let lua = format!("dispatch hl.dsp.cursor.move({{x={x},y={y}}})");
+    let mut answer = hyprland::ask(&lua).map_err(io::Error::other)?;
+    if answer.trim() != "ok" {
+        answer =
+            hyprland::ask(&format!("dispatch movecursor {x} {y}")).map_err(io::Error::other)?;
+    }
+    match answer.trim() {
+        "ok" => Ok(()),
+        _ => Err(io::Error::other(format!("Hyprland answered `{answer}`"))),
     }
 }
 
