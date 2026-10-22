@@ -20,7 +20,7 @@ use crate::record::{Heard, Recording};
 use crate::secure::Link;
 use crate::transport;
 use crate::tray::{self, Tray};
-use crate::trust::{self, TrustedPeers};
+use crate::trust;
 use mickey_config as config;
 use mickey_config::peers::{PeerInfo, Peers};
 use std::net::SocketAddr;
@@ -267,9 +267,9 @@ struct Peer {
 /// Everything the background reconnect threads need, shared read-only.
 struct Shared {
     identity: Identity,
-    /// Who was trusted at start. Reconnects never ask, so a peer that is
-    /// not in here is not retried.
-    trusted: TrustedPeers,
+    /// The trusted PCs. Reconnects never ask, so a peer that is not in
+    /// here is not retried.
+    trusted: trust::Shared,
 }
 
 /// What the target passes on to the source.
@@ -290,6 +290,8 @@ pub struct Services {
     pub controlled: mpsc::Receiver<TargetNews>,
     /// The PCs heard on the network (PRD 0010).
     pub found: Option<discovery::Table>,
+    /// The PCs this one trusts, shared with the target.
+    pub trusted: trust::Shared,
     /// The clipboard, and its history (PRD 0011).
     pub keeper: Option<Keeper>,
     pub history: Option<history::Shared>,
@@ -306,6 +308,7 @@ pub fn run(
     services: Services,
 ) -> Result<(), String> {
     let Services {
+        trusted,
         controlled,
         found,
         keeper,
@@ -318,7 +321,6 @@ pub fn run(
     let input = Input::open()?;
     let data_dir = identity::data_dir()?;
     let identity = Identity::load_or_create(&data_dir)?;
-    let mut trusted = TrustedPeers::load(&data_dir)?;
     let start = Instant::now();
     let (pong_sender, pongs) = mpsc::channel();
     let (back_sender, back) = mpsc::channel();
@@ -329,7 +331,7 @@ pub fn run(
     let mut positions: Vec<Option<[i32; 2]>> =
         configured.iter().map(|peer| peer.position).collect();
     for (index, peer) in configured.into_iter().enumerate() {
-        let link = match connect_and_pair(&identity, &mut trusted, &peer) {
+        let link = match connect_and_pair(&identity, &trusted, &peer) {
             Ok(link) => {
                 println!("mickey: {} ({}) is connected", peer.name, peer.address);
                 read_peer(index, &link, &pong_sender, start);
@@ -735,7 +737,7 @@ pub fn run(
 /// accept us.
 fn connect_and_pair(
     identity: &Identity,
-    trusted: &mut TrustedPeers,
+    trusted: &trust::Shared,
     peer: &config::Peer,
 ) -> Result<Link, String> {
     let to = peer.address;
@@ -777,7 +779,12 @@ fn reconnect(index: usize, to: SocketAddr, shared: &Arc<Shared>, back: &Sender<(
             let Ok(mut link) = transport::connect(to, &shared.identity) else {
                 continue;
             };
-            if !shared.trusted.is_trusted(link.peer_key()) {
+            let trusted = shared
+                .trusted
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .is_trusted(link.peer_key());
+            if !trusted {
                 println!("mickey: {to} has a key this PC never paired with; restart to pair");
                 return;
             }

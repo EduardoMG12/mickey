@@ -15,6 +15,18 @@ use std::path::{Path, PathBuf};
 
 const FILE_NAME: &str = "trusted_peers";
 
+/// The one list a running Mickey keeps: its source and its target both
+/// read it, and what one learns (a pairing, a PC the group introduced) the
+/// other sees at once.
+pub type Shared = std::sync::Arc<std::sync::Mutex<TrustedPeers>>;
+
+/// Loads the list once, to share.
+pub fn shared(dir: &Path) -> Result<Shared, String> {
+    Ok(std::sync::Arc::new(std::sync::Mutex::new(
+        TrustedPeers::load(dir)?,
+    )))
+}
+
 pub struct TrustedPeers {
     path: PathBuf,
     peers: Vec<([u8; 32], String)>,
@@ -100,19 +112,21 @@ impl TrustedPeers {
 /// sees the same pairing `code` on both PCs and pairs, in a window or else
 /// on the terminal. Anything else refuses. `who` names the other PC.
 pub fn trust_or_ask(
-    trusted: &mut TrustedPeers,
+    trusted: &Shared,
     peer_key: &[u8; 32],
     address: SocketAddr,
     code: &str,
     who: &str,
 ) -> Result<bool, String> {
-    if trusted.is_trusted(peer_key) {
+    let lock = || trusted.lock().unwrap_or_else(|p| p.into_inner());
+    if lock().is_trusted(peer_key) {
         return Ok(true);
     }
+    // The list is not held while the person decides.
     if !ask(peer_key, address, code, who)? {
         return Ok(false);
     }
-    trusted.add(*peer_key, &address.to_string())?;
+    lock().add(*peer_key, &address.to_string())?;
     println!("mickey: paired; it will connect without asking from now on");
     Ok(true)
 }

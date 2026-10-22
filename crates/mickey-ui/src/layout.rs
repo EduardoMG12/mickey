@@ -88,7 +88,11 @@ pub fn show(ui: &mut egui::Ui, size: Vec2, peers: &Peers, pcs: &mut [PcRow], dra
             // Each monitor says whose it is and its number, like Windows'
             // display settings: "Windows 2".
             if !beside {
-                let label = format!("{name} {}", number + 1);
+                // The number only tells monitors of the same PC apart.
+                let label = match rects.len() {
+                    1 => name.to_string(),
+                    _ => format!("{name} {}", number + 1),
+                };
                 // As large as fits the monitor, never under 9 points.
                 let size = (rect.width() / (label.chars().count() as f32 * 0.62))
                     .min(rect.height() * 0.4)
