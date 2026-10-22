@@ -2,12 +2,7 @@
 
 #[cfg(target_os = "linux")]
 mod capture;
-// ponytail: parsed and checked, but used only by tests until the hotkey
-// matcher learns several chords (#61, next PR).
-#[allow(dead_code)]
-mod chord;
 mod cli;
-mod config;
 #[cfg(unix)]
 mod control;
 #[cfg(not(unix))]
@@ -32,6 +27,7 @@ mod transport;
 mod trust;
 
 use cli::Command;
+use mickey_config as config;
 use std::net::SocketAddr;
 
 fn main() {

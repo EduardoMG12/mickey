@@ -1,7 +1,6 @@
 //! The source side (Linux): capture local input, run the focus state
 //! machine, and send input to the focused peer.
 
-use crate::config;
 use crate::control::{self, Control, Order, Request, Status};
 use crate::event::InputEvent;
 use crate::focus::{Action, Focus, Switcher};
@@ -12,6 +11,7 @@ use crate::protocol::Message;
 use crate::secure::Link;
 use crate::transport;
 use crate::trust::{self, TrustedPeers};
+use mickey_config as config;
 use std::net::SocketAddr;
 use std::process::Command;
 use std::sync::Arc;

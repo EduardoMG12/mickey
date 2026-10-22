@@ -6,7 +6,7 @@ license = "GPL-3.0-or-later"
 publish = false
 
 [dependencies]
-serde = { version = "1", features = ["derive"] }
+mickey-config = { path = "../mickey-config" }
 # Noise protocol for the secure link (PRD 0002). Only the primitives of
 # Noise_XX_25519_ChaChaPoly_BLAKE2s are enabled.
 snow = { version = "0.10", default-features = false, features = [
@@ -15,4 +15,3 @@ snow = { version = "0.10", default-features = false, features = [
     "use-blake2",
     "use-getrandom",
 ] }
-toml = { version = "1.1.8", default-features = false, features = ["parse", "serde"] }
