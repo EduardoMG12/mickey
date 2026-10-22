@@ -11,6 +11,7 @@ mod pair;
 mod place;
 mod settings;
 mod snap;
+mod theme;
 
 use choice::Choice;
 use eframe::egui;
@@ -20,7 +21,7 @@ use std::rc::Rc;
 
 /// The window's app id; Hyprland window rules match it (see the README).
 const APP_ID: &str = "mickey-ui";
-const CARD_SIZE: egui::Vec2 = egui::vec2(104.0, 40.0);
+const CARD_SIZE: egui::Vec2 = egui::vec2(118.0, 42.0);
 const CARD_MARGIN: f32 = 6.0;
 
 struct Switcher {
@@ -95,8 +96,7 @@ impl eframe::App for Switcher {
                     }
                 }
             });
-            // Plain ASCII: the built-in fonts have no arrow or bullet glyphs.
-            ui.small("number or arrows, Enter: go, Esc: cancel");
+            ui.small("number or arrows · Enter: go · Esc: cancel");
         });
 
         let answer = match (clicked.or(digit), enter) {
@@ -111,37 +111,53 @@ impl eframe::App for Switcher {
     }
 }
 
-/// One PC as a card. Returns whether it was clicked.
+/// One PC as a card: the chosen one filled with the accent and stitched
+/// around, like the mascot's patches. Returns whether it was clicked.
 fn card(ui: &mut egui::Ui, number: usize, pc: &choice::Pc, selected: bool, focused: bool) -> bool {
-    let visuals = ui.visuals();
+    use theme::{icon, palette};
     let fill = if selected {
-        visuals.selection.bg_fill
+        palette::BRUISE
     } else {
-        visuals.faint_bg_color
+        palette::GRAPHITE
     };
     let response = egui::Frame::NONE
         .fill(fill)
-        .corner_radius(6.0)
+        .stroke(egui::Stroke::new(1.0, palette::INK))
+        .corner_radius(8.0)
         .inner_margin(CARD_MARGIN)
         .show(ui, |ui| {
             ui.set_min_size(CARD_SIZE);
             ui.vertical(|ui| {
-                let title = format!("{number}  {}", pc.name);
-                let state = match (pc.online, focused) {
-                    (_, true) => "in use",
-                    (true, false) => "online",
-                    (false, false) => "offline",
+                // Card 0 is always this PC.
+                let kind = if number == 0 {
+                    icon::LAPTOP
+                } else {
+                    icon::DESKTOP
+                };
+                let title = egui::RichText::new(format!("{kind}  {}", pc.name));
+                let (dot, state) = match (pc.online, focused) {
+                    (_, true) => (palette::HERE, "in use"),
+                    (true, false) => (palette::FUR, "online"),
+                    (false, false) => (palette::AWAY, "offline"),
                 };
                 if pc.online {
-                    ui.strong(title);
+                    ui.label(title.strong());
                 } else {
-                    ui.weak(title);
+                    ui.label(title.color(palette::FUR));
                 }
-                ui.small(state);
+                ui.horizontal(|ui| {
+                    let (spot, _) =
+                        ui.allocate_exact_size(egui::vec2(8.0, 8.0), egui::Sense::hover());
+                    ui.painter().circle_filled(spot.center(), 3.5, dot);
+                    ui.small(format!("{number} · {state}"));
+                });
             });
         })
         .response
         .interact(egui::Sense::click());
+    if selected {
+        theme::stitch(ui, response.rect.shrink(3.0), palette::BONE);
+    }
     pc.online && response.clicked()
 }
 
@@ -171,7 +187,7 @@ fn main() -> ExitCode {
         viewport: egui::ViewportBuilder::default()
             .with_title("Mickey")
             .with_app_id(APP_ID)
-            .with_inner_size([width.max(220.0), 84.0])
+            .with_inner_size([width.max(220.0), 100.0])
             .with_resizable(false)
             .with_always_on_top(),
         ..Default::default()
@@ -182,7 +198,8 @@ fn main() -> ExitCode {
     let result = eframe::run_native(
         APP_ID,
         options,
-        Box::new(|_| {
+        Box::new(|creation| {
+            crate::theme::apply(&creation.egui_ctx);
             Ok(Box::new(Switcher {
                 choice,
                 needs_placing: !placed_by_compositor,
@@ -209,13 +226,16 @@ fn settings_window() -> ExitCode {
         viewport: egui::ViewportBuilder::default()
             .with_title("Mickey settings")
             .with_app_id("mickey-settings")
-            .with_inner_size([640.0, 420.0]),
+            .with_inner_size([720.0, 500.0]),
         ..Default::default()
     };
     let result = eframe::run_native(
         "mickey-settings",
         options,
-        Box::new(|_| Ok(Box::new(settings::Settings::load()))),
+        Box::new(|creation| {
+            theme::apply(&creation.egui_ctx);
+            Ok(Box::new(settings::Settings::load()))
+        }),
     );
     match result {
         Ok(()) => ExitCode::SUCCESS,

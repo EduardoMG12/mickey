@@ -45,9 +45,9 @@ fn around(monitors: &[Monitor]) -> Rect {
         .fold(Rect::NOTHING, |all, m| all.union(to_rect(m)))
 }
 
-pub fn show(ui: &mut egui::Ui, peers: &Peers, pcs: &mut [PcRow], drag: &mut Drag) {
-    // Leaves room below for the Save row.
-    let size = ui.available_size() - Vec2::new(0.0, 36.0);
+/// Draws the layout in a `size` area (the settings window gives it what
+/// is left of its card).
+pub fn show(ui: &mut egui::Ui, size: Vec2, peers: &Peers, pcs: &mut [PcRow], drag: &mut Drag) {
     let (response, painter) = ui.allocate_painter(size.max(Vec2::splat(100.0)), Sense::hover());
     let canvas = response.rect;
     let strip = Rect::from_min_size(canvas.min, Vec2::new(canvas.width(), STRIP));
@@ -104,12 +104,7 @@ pub fn show(ui: &mut egui::Ui, peers: &Peers, pcs: &mut [PcRow], drag: &mut Drag
         .iter()
         .map(|m| Rect::from_min_max(to_screen(to_rect(m).min), to_screen(to_rect(m).max)))
         .collect();
-    draw(
-        &home_rects,
-        "This PC",
-        Color32::from_rgb(70, 110, 170),
-        false,
-    );
+    draw(&home_rects, "This PC", crate::theme::palette::BRUISE, false);
     painter.text(
         strip.left_center() + Vec2::new(6.0, 0.0),
         Align2::LEFT_CENTER,
@@ -183,9 +178,9 @@ pub fn show(ui: &mut egui::Ui, peers: &Peers, pcs: &mut [PcRow], drag: &mut Drag
             });
         }
         let fill = if online {
-            Color32::from_rgb(70, 150, 90)
+            crate::theme::palette::ASH
         } else {
-            Color32::from_gray(90)
+            crate::theme::palette::GRAPHITE
         };
         let name = if online {
             pc.name.clone()
