@@ -15,6 +15,9 @@ snow = { version = "0.10", default-features = false, features = [
     "use-blake2",
     "use-getrandom",
 ] }
+# The system clipboard (PRD 0011): Wayland's data-control protocol (with
+# X11 as the fallback) and Windows, text and images, behind one interface.
+arboard = { version = "3", default-features = false, features = ["image-data", "wayland-data-control"] }
 
 # The tray icon on Linux (PRD 0009): the StatusNotifierItem protocol over
 # D-Bus, too large to write by hand. Without tokio: its blocking API runs on
