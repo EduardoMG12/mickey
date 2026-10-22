@@ -3,7 +3,8 @@
 
 use crate::capture;
 use crate::config;
-use crate::control::{self, Control, Status};
+use crate::control::{self, Control, Order, Request, Status};
+use crate::event::InputEvent;
 use crate::focus::{Action, Focus, Switcher};
 use crate::identity::{self, Identity};
 use crate::latency::{self, Latency};
@@ -43,6 +44,62 @@ fn open_devices() -> Result<Vec<capture::Found>, String> {
 const PING_EVERY: Duration = Duration::from_secs(1);
 const KEYS_UP_POLL: Duration = Duration::from_millis(10);
 const RETRY_EVERY: Duration = Duration::from_secs(5);
+
+/// What wakes the main loop.
+enum Wake {
+    Input(InputEvent),
+    /// The switcher window closed: the picked peer, `None` for this PC or
+    /// Esc, or why the window could not run.
+    Pick(Result<Option<usize>, String>),
+    Control(Request),
+}
+
+impl From<InputEvent> for Wake {
+    fn from(event: InputEvent) -> Wake {
+        Wake::Input(event)
+    }
+}
+
+impl From<Request> for Wake {
+    fn from(request: Request) -> Wake {
+        Wake::Control(request)
+    }
+}
+
+/// Carries out an order from the control socket and returns the answer
+/// line. Orders only move the focus.
+fn obey(
+    order: Order,
+    names: &[String],
+    online: &[bool],
+    switcher: &mut Switcher,
+    act: &mut impl FnMut(Action),
+) -> String {
+    match order {
+        Order::Home => {
+            switcher.go_home(act);
+            "ok: the focus is on this PC".into()
+        }
+        Order::Switcher if switcher.focus() == Focus::Local => {
+            act(Action::OpenSwitcher);
+            "ok: showing the switcher".into()
+        }
+        Order::Switcher => "error: the focus is on another PC; press the hotkey".into(),
+        Order::Go(name) => {
+            let Some(peer) = names.iter().position(|known| *known == name) else {
+                return format!("error: no PC named `{name}` in config.toml");
+            };
+            if !online[peer] {
+                return format!("error: {name} is offline");
+            }
+            if switcher.focus() != Focus::Local {
+                return "error: the focus is on another PC; use the hotkey or `mickey home`".into();
+            }
+            switcher.go_to(Some(peer), online);
+            format!("ok: going to {name} once every key is released")
+        }
+    }
+}
 
 /// One configured peer and its link, if it is connected.
 struct Peer {
@@ -106,13 +163,14 @@ pub fn run(configured: Vec<config::Peer>, touchpad_speed: i32) -> Result<(), Str
     }
     println!("mickey: AltGr + Right Shift switches focus");
 
-    let (sender, events) = mpsc::channel();
-    capture::spawn_readers(&devices, sender, touchpad_speed);
-    let (pick_sender, picks) = mpsc::channel();
+    // One channel wakes the loop for input, a switcher pick or an order
+    // from the control socket, so each is handled the moment it happens.
+    let (wake, wakes) = mpsc::channel();
+    capture::spawn_readers(&devices, wake.clone(), touchpad_speed);
     let mut switcher_open = false;
     // The status for bars and commands; without a runtime directory Mickey
     // still works, just without them.
-    let control = match Control::start() {
+    let control = match Control::start(wake.clone()) {
         Ok(control) => Some(control),
         Err(err) => {
             eprintln!("mickey: no control socket: {err}");
@@ -125,6 +183,9 @@ pub fn run(configured: Vec<config::Peer>, touchpad_speed: i32) -> Result<(), Str
     // including `?` and panics.
     let mut grabs = Vec::new();
     let mut next_ping = start;
+    // Names never change; which peers are online is refreshed every turn.
+    let names: Vec<String> = peers.iter().map(|peer| peer.name.clone()).collect();
+    let mut online: Vec<bool> = Vec::with_capacity(peers.len());
     loop {
         for (index, link) in back.try_iter() {
             read_pongs(index, &link, &pong_sender, start);
@@ -134,19 +195,6 @@ pub fn run(configured: Vec<config::Peer>, touchpad_speed: i32) -> Result<(), Str
         for (index, round_trip) in pongs.try_iter() {
             peers[index].latency.add_round_trip(round_trip);
         }
-        for pick in picks.try_iter() {
-            switcher_open = false;
-            let online: Vec<bool> = peers.iter().map(|peer| peer.link.is_some()).collect();
-            match pick {
-                Ok(peer) => switcher.go_to(peer, &online),
-                Err(err) => {
-                    // Without the window, behave like the M0 hotkey.
-                    eprintln!("mickey: cannot show the switcher: {err}");
-                    switcher.go_to(online.iter().position(|&up| up), &online);
-                }
-            }
-        }
-
         if let Focus::WaitingForKeysUp(index) = switcher.focus()
             && !devices
                 .iter()
@@ -161,17 +209,28 @@ pub fn run(configured: Vec<config::Peer>, touchpad_speed: i32) -> Result<(), Str
             println!("mickey: focus is on {}", peers[index].name);
         }
 
-        let status = Status {
-            focus: match switcher.focus() {
-                Focus::Remote(peer) => Some(peer),
-                Focus::Local | Focus::WaitingForKeysUp(_) => None,
-            },
-            peers: peers
-                .iter()
-                .map(|peer| (peer.name.clone(), peer.link.is_some()))
-                .collect(),
+        // Publish only when the focus or a peer's state changed; comparing
+        // first keeps the per-event path free of allocations.
+        let focus = match switcher.focus() {
+            Focus::Remote(peer) => Some(peer),
+            Focus::Local | Focus::WaitingForKeysUp(_) => None,
         };
-        if published.as_ref() != Some(&status) {
+        let changed = published.as_ref().is_none_or(|last: &Status| {
+            last.focus != focus
+                || last
+                    .peers
+                    .iter()
+                    .zip(&peers)
+                    .any(|((_, up), peer)| *up != peer.link.is_some())
+        });
+        if changed {
+            let status = Status {
+                focus,
+                peers: peers
+                    .iter()
+                    .map(|peer| (peer.name.clone(), peer.link.is_some()))
+                    .collect(),
+            };
             if let Some(control) = &control {
                 control.publish(status.clone());
             }
@@ -194,43 +253,61 @@ pub fn run(configured: Vec<config::Peer>, touchpad_speed: i32) -> Result<(), Str
             next_ping = now + PING_EVERY;
         }
 
-        // Sleep until there is input or the next ping is due; poll often only
-        // while waiting for keys to go up, so an idle source wakes once a second.
+        // Sleep until something wakes us or the next ping is due; poll often
+        // only while waiting for keys to go up, so an idle source wakes once
+        // a second.
         let mut wait = next_ping.saturating_duration_since(now);
-        if switcher_open || matches!(switcher.focus(), Focus::WaitingForKeysUp(_)) {
+        if matches!(switcher.focus(), Focus::WaitingForKeysUp(_)) {
             wait = wait.min(KEYS_UP_POLL);
         }
-        match events.recv_timeout(wait) {
-            Ok(event) => {
-                let online: Vec<bool> = peers.iter().map(|peer| peer.link.is_some()).collect();
-                let left = switcher.focus();
-                let mut open = false;
-                switcher.handle(event, &online, |action| match action {
-                    Action::OpenSwitcher => open = true,
-                    Action::Send(index, event) => {
-                        if let Some(link) = &mut peers[index].link
-                            && link.send(&Message::Input(event)).is_err()
-                        {
-                            lost.push(index);
-                        }
-                    }
-                    Action::Ungrab => {
-                        grabs.clear();
-                        if let Focus::Remote(index) = left {
-                            report_latency(&mut peers[index]);
-                        }
-                    }
-                });
-                if switcher.focus() == Focus::Local && left != Focus::Local {
-                    println!("mickey: focus is back here");
+        // Reuses one buffer: no allocation per input event.
+        online.clear();
+        online.extend(peers.iter().map(|peer| peer.link.is_some()));
+        let mut open = false;
+        let left = switcher.focus();
+        let mut act = |action| match action {
+            Action::OpenSwitcher => open = true,
+            Action::Send(index, event) => {
+                if let Some(link) = &mut peers[index].link
+                    && link.send(&Message::Input(event)).is_err()
+                {
+                    lost.push(index);
                 }
-                if open && !switcher_open {
-                    switcher_open = true;
-                    open_switcher(&peers, &pick_sender);
+            }
+            Action::Ungrab => {
+                grabs.clear();
+                if let Focus::Remote(index) = left {
+                    report_latency(&mut peers[index]);
                 }
+            }
+        };
+        match wakes.recv_timeout(wait) {
+            Ok(Wake::Input(event)) => switcher.handle(event, &online, &mut act),
+            Ok(Wake::Pick(pick)) => {
+                switcher_open = false;
+                match pick {
+                    Ok(peer) => switcher.go_to(peer, &online),
+                    Err(err) => {
+                        // Without the window, behave like the M0 hotkey.
+                        eprintln!("mickey: cannot show the switcher: {err}");
+                        switcher.go_to(online.iter().position(|&up| up), &online);
+                    }
+                }
+            }
+            Ok(Wake::Control(request)) => {
+                let answer = obey(request.order, &names, &online, &mut switcher, &mut act);
+                let _ = request.reply.send(answer);
             }
             Err(RecvTimeoutError::Timeout) => {}
             Err(RecvTimeoutError::Disconnected) => break,
+        }
+        drop(act);
+        if switcher.focus() == Focus::Local && left != Focus::Local {
+            println!("mickey: focus is back here");
+        }
+        if open && !switcher_open {
+            switcher_open = true;
+            open_switcher(&peers, &wake);
         }
 
         lost.sort_unstable();
@@ -296,7 +373,7 @@ fn reconnect(index: usize, to: SocketAddr, shared: &Arc<Shared>, back: &Sender<(
 /// thread, and sends the owner's pick when the window closes: `Some(peer)`,
 /// `None` for this PC or Esc, or an error if the window could not run.
 /// The GUI is a separate program so this one stays small (PRD 0003).
-fn open_switcher(peers: &[Peer], picks: &Sender<Result<Option<usize>, String>>) {
+fn open_switcher(peers: &[Peer], wake: &Sender<Wake>) {
     let mut args = vec![
         "switcher".to_string(),
         "0".to_string(),
@@ -310,7 +387,7 @@ fn open_switcher(peers: &[Peer], picks: &Sender<Result<Option<usize>, String>>) 
         };
         args.push(format!("{state}:{}", peer.name));
     }
-    let picks = picks.clone();
+    let wake = wake.clone();
     thread::spawn(move || {
         let pick = std::env::current_exe()
             .map(|exe| exe.with_file_name("mickey-ui"))
@@ -326,7 +403,7 @@ fn open_switcher(peers: &[Peer], picks: &Sender<Result<Option<usize>, String>>) 
                 Some(1) => Ok(None),
                 _ => Err(String::from_utf8_lossy(&output.stderr).trim().to_string()),
             });
-        let _ = picks.send(pick);
+        let _ = wake.send(Wake::Pick(pick));
     });
 }
 
@@ -353,5 +430,47 @@ fn report_latency(peer: &mut Peer) {
             peer.name,
             peer.latency.len()
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn run(order: Order, switcher: &mut Switcher, online: &[bool]) -> (String, Vec<Action>) {
+        let names = ["Desktop".to_string(), "Windows".to_string()];
+        let mut actions = Vec::new();
+        let answer = obey(order, &names, online, switcher, &mut |action| {
+            actions.push(action)
+        });
+        (answer, actions)
+    }
+
+    #[test]
+    fn go_moves_the_focus_to_an_online_peer_only() {
+        let mut switcher = Switcher::new();
+        let (answer, _) = run(Order::Go("Desktop".into()), &mut switcher, &[false, true]);
+        assert_eq!(answer, "error: Desktop is offline");
+        let (answer, _) = run(Order::Go("Nope".into()), &mut switcher, &[false, true]);
+        assert!(answer.starts_with("error: no PC named"));
+        let (answer, _) = run(Order::Go("Windows".into()), &mut switcher, &[false, true]);
+        assert!(answer.starts_with("ok"));
+        assert_eq!(switcher.focus(), Focus::WaitingForKeysUp(1));
+    }
+
+    #[test]
+    fn home_and_switcher_from_a_remote_peer() {
+        let mut switcher = Switcher::new();
+        switcher.go_to(Some(1), &[true, true]);
+        switcher.grabbed();
+        let (answer, _) = run(Order::Switcher, &mut switcher, &[true, true]);
+        assert!(
+            answer.starts_with("error"),
+            "the window would open on the wrong screen"
+        );
+        let (answer, actions) = run(Order::Home, &mut switcher, &[true, true]);
+        assert!(answer.starts_with("ok"));
+        assert_eq!(actions, [Action::Ungrab]);
+        assert_eq!(switcher.focus(), Focus::Local);
     }
 }

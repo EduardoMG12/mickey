@@ -66,6 +66,26 @@ fn run(command: Command) -> Result<(), String> {
             println!("{}", identity.fingerprint());
             Ok(())
         }
+        Command::Order(order) => {
+            #[cfg(target_os = "linux")]
+            {
+                let answer = control::request(&order)?
+                    .next()
+                    .ok_or("mickey source closed the connection")?
+                    .map_err(|err| err.to_string())?;
+                match answer.strip_prefix("ok: ") {
+                    Some(done) => {
+                        println!("mickey: {done}");
+                        Ok(())
+                    }
+                    None => Err(answer.trim_start_matches("error: ").to_string()),
+                }
+            }
+            #[cfg(not(target_os = "linux"))]
+            Err(format!(
+                "mickey {order} needs the source, which runs only on Linux in M0"
+            ))
+        }
         Command::Status { waybar: true } => {
             #[cfg(target_os = "linux")]
             follow_for_waybar();
