@@ -9,6 +9,7 @@ use crate::edges;
 use crate::emit;
 use crate::event::InputEvent;
 use crate::focus::{Action, Focus, Switcher};
+use crate::history;
 use crate::hotkey::Hotkey;
 use crate::identity::{self, Identity};
 use crate::input::Input;
@@ -77,7 +78,9 @@ fn obey(
         }
         Order::Switcher => "error: the focus is on another PC; press the hotkey".into(),
         // The main loop answers these, since it knows the answers.
-        Order::Peers | Order::Discover => "error: not an order".into(),
+        Order::Peers | Order::Discover | Order::History | Order::HistoryCopy(_) => {
+            "error: not an order".into()
+        }
         Order::Go(name) => {
             let Some(peer) = names.iter().position(|known| *known == name) else {
                 return format!("error: no PC named `{name}` in config.toml");
@@ -221,6 +224,18 @@ struct Shared {
     trusted: TrustedPeers,
 }
 
+/// What the rest of Mickey shares with the source. Each is optional:
+/// Mickey works without any of them.
+pub struct Services {
+    /// Whether a peer's keyboard came over, from the target (PRD 0009).
+    pub controlled: mpsc::Receiver<bool>,
+    /// The PCs heard on the network (PRD 0010).
+    pub found: Option<discovery::Table>,
+    /// The clipboard, and its history (PRD 0011).
+    pub keeper: Option<Keeper>,
+    pub history: Option<history::Shared>,
+}
+
 /// Captures local input and sends it to the focused peer. Every peer gets
 /// its own secure link; one that is offline is retried in the background
 /// and never blocks the others.
@@ -229,10 +244,14 @@ pub fn run(
     hotkeys: Hotkey,
     touchpad_speed: i32,
     switcher_position: String,
-    controlled: mpsc::Receiver<bool>,
-    found: Option<discovery::Table>,
-    keeper: Option<Keeper>,
+    services: Services,
 ) -> Result<(), String> {
+    let Services {
+        controlled,
+        found,
+        keeper,
+        history,
+    } = services;
     // Two sources would both capture the keyboard and fight over the grab.
     if control::source_running() {
         return Err("another mickey source is already running".into());
@@ -271,7 +290,7 @@ pub fn run(
     }
     let shared = Arc::new(Shared { identity, trusted });
     // The clipboard follows the keyboard (PRD 0011), over data links.
-    let mover = keeper.map(Mover::start);
+    let mover = keeper.clone().map(Mover::start);
     for (index, peer) in peers.iter().enumerate() {
         if peer.link.is_none() {
             reconnect(index, peer.address, &shared, &back_sender);
@@ -512,6 +531,33 @@ pub fn run(
                 }
             }
             // Answered below, once `act` no longer borrows the peers.
+            Ok(Wake::Control(request)) if request.order == Order::History => {
+                let answer = history.as_ref().map_or_else(
+                    || "error: the clipboard is not shared on this PC".to_string(),
+                    |history| {
+                        let history = history.lock().unwrap_or_else(|p| p.into_inner());
+                        history::lines(&history, std::time::SystemTime::now())
+                    },
+                );
+                let _ = request.reply.send(answer);
+            }
+            Ok(Wake::Control(Request {
+                order: Order::HistoryCopy(id),
+                reply,
+            })) => {
+                let entry = history.as_ref().and_then(|history| {
+                    let history = history.lock().unwrap_or_else(|p| p.into_inner());
+                    history.get(id).map(|entry| entry.content.clone())
+                });
+                let answer = match (entry, &keeper) {
+                    (Some(content), Some(keeper)) => {
+                        keeper.write(content);
+                        "ok: copied".to_string()
+                    }
+                    _ => format!("error: no history entry {id}"),
+                };
+                let _ = reply.send(answer);
+            }
             Ok(Wake::Control(request)) if request.order == Order::Discover => {
                 let _ = request.reply.send(found_text(found.as_ref()));
             }
