@@ -151,6 +151,8 @@ pub struct Settings {
     drag: layout::Drag,
     tab: Tab,
     message: String,
+    /// The mascot in the header, loaded on the first frame.
+    mascot: Option<egui::TextureHandle>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -181,6 +183,7 @@ impl Settings {
             asked: Instant::now(),
             drag: layout::Drag::default(),
             tab: Tab::ThisPc,
+            mascot: None,
             message,
         }
     }
@@ -244,35 +247,64 @@ fn load_peers() -> Result<Peers, String> {
 
 impl eframe::App for Settings {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        use crate::theme::{self, icon};
+        if self.mascot.is_none() {
+            self.mascot = theme::mascot(ui.ctx());
+        }
         egui::CentralPanel::default().show(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.selectable_value(&mut self.tab, Tab::ThisPc, "This PC");
-                ui.selectable_value(&mut self.tab, Tab::Pcs, "PCs");
-                ui.selectable_value(&mut self.tab, Tab::Layout, "Layout");
-                ui.selectable_value(&mut self.tab, Tab::Hotkeys, "Hotkeys");
-                ui.selectable_value(&mut self.tab, Tab::Look, "Appearance");
+                if let Some(mascot) = &self.mascot {
+                    ui.add(egui::Image::new(mascot).fit_to_exact_size(egui::vec2(52.0, 52.0)));
+                }
+                ui.vertical(|ui| {
+                    ui.add_space(4.0);
+                    ui.label(egui::RichText::new("Mickey").size(24.0).strong());
+                    ui.weak("One keyboard and mouse for all your PCs");
+                });
             });
-            ui.separator();
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                theme::tab(ui, &mut self.tab, Tab::ThisPc, icon::LAPTOP, "This PC");
+                theme::tab(ui, &mut self.tab, Tab::Pcs, icon::DESKTOP, "PCs");
+                theme::tab(ui, &mut self.tab, Tab::Layout, icon::MONITOR, "Layout");
+                theme::tab(ui, &mut self.tab, Tab::Hotkeys, icon::KEYBOARD, "Hotkeys");
+                theme::tab(ui, &mut self.tab, Tab::Look, icon::PALETTE, "Appearance");
+            });
+            ui.add_space(4.0);
             let form = &mut self.form;
+            // Room below the card for the Save row.
+            let height = (ui.available_height() - 52.0).max(120.0);
+            theme::card(ui, |ui| {
+            ui.set_min_size(egui::vec2(ui.available_width(), height - 24.0));
+            ui.set_max_height(height - 24.0);
+            let canvas = egui::vec2(ui.available_width(), height - 70.0);
+            egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             match self.tab {
                 Tab::ThisPc => {
-                    ui.label(format!("Fingerprint: {}", self.fingerprint));
-                    ui.horizontal(|ui| {
-                        ui.label("Name");
-                        ui.add(
-                            egui::TextEdit::singleline(&mut form.name)
-                                .hint_text("the computer's name"),
-                        );
-                    });
+                    egui::Grid::new("this-pc")
+                        .num_columns(2)
+                        .spacing([16.0, 12.0])
+                        .show(ui, |ui| {
+                            ui.label(format!("{}  Name", icon::LAPTOP));
+                            ui.add(
+                                egui::TextEdit::singleline(&mut form.name)
+                                    .hint_text("the computer's name")
+                                    .desired_width(260.0),
+                            );
+                            ui.end_row();
+                            ui.label(format!("{}  Fingerprint", icon::SHIELD));
+                            ui.label(egui::RichText::new(&self.fingerprint).monospace().weak());
+                            ui.end_row();
+                            ui.label(format!("{}  Listen on", icon::LINK));
+                            ui.add(egui::TextEdit::singleline(&mut form.listen).desired_width(260.0));
+                            ui.end_row();
+                        });
+                    ui.add_space(10.0);
                     ui.checkbox(
                         &mut form.controls_others,
                         "Control other PCs with this keyboard and mouse",
                     );
                     ui.checkbox(&mut form.controlled, "Let paired PCs control this one");
-                    ui.horizontal(|ui| {
-                        ui.label("Listen on");
-                        ui.text_edit_singleline(&mut form.listen);
-                    });
                 }
                 Tab::Pcs => {
                     let mut remove = None;
@@ -296,7 +328,7 @@ impl eframe::App for Settings {
                                 ui.add(
                                     egui::TextEdit::singleline(&mut pc.hotkey).desired_width(170.0),
                                 );
-                                if ui.button("Remove").clicked() {
+                                if ui.button(format!("{}  Remove", icon::TRASH)).clicked() {
                                     remove = Some(i);
                                 }
                                 ui.end_row();
@@ -305,7 +337,7 @@ impl eframe::App for Settings {
                     if let Some(i) = remove {
                         form.pcs.remove(i);
                     }
-                    if ui.button("Add a PC").clicked() {
+                    if ui.button(format!("{}  Add a PC", icon::PLUS)).clicked() {
                         form.pcs.push(PcRow {
                             name: "New PC".into(),
                             address: format!("192.168.0.2:{}", config::DEFAULT_PORT),
@@ -332,7 +364,7 @@ impl eframe::App for Settings {
                     };
                     let empty = Peers::default();
                     let peers = self.peers.as_ref().unwrap_or(&empty);
-                    layout::show(ui, peers, &mut form.pcs, &mut self.drag);
+                    layout::show(ui, canvas, peers, &mut form.pcs, &mut self.drag);
                 }
                 Tab::Hotkeys => {
                     ui.weak("e.g. AltGr+RightShift or AltGr+RightShift+H");
@@ -371,13 +403,18 @@ impl eframe::App for Settings {
                     ui.add(egui::Slider::new(&mut form.speed, 1..=200).text("Touchpad speed"));
                 }
             }
-            ui.separator();
+            });
+            });
+            ui.add_space(6.0);
             ui.horizontal(|ui| {
                 let changed = self.form != self.saved;
-                if ui.add_enabled(changed, egui::Button::new("Save")).clicked() {
+                if ui.add_enabled(changed, theme::primary(icon::SAVE, "Save")).clicked() {
                     self.save();
                 }
-                if ui.add_enabled(changed, egui::Button::new("Undo")).clicked() {
+                if ui
+                    .add_enabled(changed, egui::Button::new(format!("{}  Undo", icon::UNDO)))
+                    .clicked()
+                {
                     self.form = self.saved.clone();
                 }
                 ui.label(&self.message);

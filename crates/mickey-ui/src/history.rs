@@ -69,9 +69,16 @@ impl eframe::App for History {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
         egui::CentralPanel::default().show(ui, |ui| {
+            use crate::theme::{icon, palette};
+            ui.label(
+                egui::RichText::new(format!("{}  Clipboard history", icon::CLIPBOARD))
+                    .size(17.0)
+                    .strong(),
+            );
+            ui.add_space(4.0);
             let search = ui.add(
                 egui::TextEdit::singleline(&mut self.search)
-                    .hint_text("Search")
+                    .hint_text(format!("{}  Search", icon::SEARCH))
                     .desired_width(f32::INFINITY),
             );
             search.request_focus();
@@ -89,28 +96,43 @@ impl eframe::App for History {
                 .collect();
             let enter = ui.input(|input| input.key_pressed(egui::Key::Enter));
             let mut picked = enter.then(|| shown.first().map(|entry| entry.id)).flatten();
-            ui.separator();
+            ui.add_space(4.0);
             if shown.is_empty() {
                 ui.weak("Nothing copied yet");
             }
             egui::ScrollArea::vertical().show(ui, |ui| {
                 for entry in shown {
-                    let label = match entry.kind.as_str() {
-                        "image" => format!("🖼  Image {}", entry.preview),
-                        "files" => format!("📄  {}", entry.preview),
+                    let (kind, text) = match entry.kind.as_str() {
+                        "image" => (icon::IMAGE, format!("Image {}", entry.preview)),
+                        "files" => (icon::FILE, entry.preview.clone()),
                         // Only spaces or line breaks: still something copied.
-                        _ if entry.preview.is_empty() => "(blank)".to_string(),
-                        _ => entry.preview.clone(),
+                        _ if entry.preview.is_empty() => (icon::CLIPBOARD, "(blank)".to_string()),
+                        _ => (icon::CLIPBOARD, entry.preview.clone()),
                     };
-                    let row = ui.horizontal(|ui| {
-                        ui.weak(format!("{:>6}", ago(entry.ago)));
-                        ui.add(
-                            egui::Label::new(label)
-                                .truncate()
-                                .sense(egui::Sense::click()),
-                        )
-                    });
-                    if row.inner.clicked() {
+                    // A row is a small card that lights up under the mouse.
+                    let row = egui::Frame::new()
+                        .fill(palette::GRAPHITE)
+                        .corner_radius(8)
+                        .inner_margin(egui::Margin::symmetric(10, 7))
+                        .show(ui, |ui| {
+                            ui.set_width(ui.available_width());
+                            ui.horizontal(|ui| {
+                                ui.label(egui::RichText::new(kind).color(palette::FUR));
+                                ui.add(egui::Label::new(text).truncate());
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        ui.weak(ago(entry.ago));
+                                    },
+                                );
+                            });
+                        })
+                        .response
+                        .interact(egui::Sense::click());
+                    if row.hovered() {
+                        crate::theme::stitch(ui, row.rect.shrink(3.0), palette::BRUISE);
+                    }
+                    if row.clicked() {
                         picked = Some(entry.id);
                     }
                 }
@@ -138,7 +160,8 @@ pub fn window() -> std::process::ExitCode {
     let result = eframe::run_native(
         "mickey-history",
         options,
-        Box::new(|_| {
+        Box::new(|creation| {
+            crate::theme::apply(&creation.egui_ctx);
             Ok(Box::new(History {
                 entries,
                 search: String::new(),
