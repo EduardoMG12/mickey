@@ -17,6 +17,7 @@ usage:
   mickey settings                    open the settings window
   mickey id                          show this machine's fingerprint
   mickey monitors                    list this machine's monitors
+  mickey peers                       list the PCs, whether they are online, and their monitors
   mickey forget <fingerprint>        stop trusting a paired machine
 ";
 
@@ -25,6 +26,8 @@ pub enum Command {
     Help,
     Run,
     Monitors,
+    /// Ask the running source for the PCs and their monitors.
+    Peers,
     Settings,
     Id,
     Status {
@@ -51,6 +54,7 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
         [command] if command == "id" => Ok(Command::Id),
         [command] if command == "run" => Ok(Command::Run),
         [command] if command == "monitors" => Ok(Command::Monitors),
+        [command] if command == "peers" => Ok(Command::Peers),
         [command] if command == "settings" => Ok(Command::Settings),
         [command] if command == "home" || command == "switcher" => {
             Ok(Command::Order(command.clone()))

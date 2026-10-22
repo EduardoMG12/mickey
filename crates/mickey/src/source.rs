@@ -8,12 +8,13 @@ use crate::hotkey::Hotkey;
 use crate::identity::{self, Identity};
 use crate::input::Input;
 use crate::latency::{self, Latency};
-use crate::monitors::Monitor;
+use crate::monitors::{self, Monitor};
 use crate::protocol::Message;
 use crate::secure::Link;
 use crate::transport;
 use crate::trust::{self, TrustedPeers};
 use mickey_config as config;
+use mickey_config::peers::{PeerInfo, Peers};
 use std::net::SocketAddr;
 use std::process::Command;
 use std::sync::Arc;
@@ -65,6 +66,8 @@ fn obey(
             "ok: showing the switcher".into()
         }
         Order::Switcher => "error: the focus is on another PC; press the hotkey".into(),
+        // The main loop answers it, since it knows the monitors.
+        Order::Peers => "error: peers is not an order".into(),
         Order::Go(name) => {
             let Some(peer) = names.iter().position(|known| *known == name) else {
                 return format!("error: no PC named `{name}` in config.toml");
@@ -79,6 +82,23 @@ fn obey(
             format!("ok: going to {name} once every key is released")
         }
     }
+}
+
+/// The answer to `mickey peers`.
+fn peers_text(this_pc: &[Monitor], peers: &[Peer], online: &[bool]) -> String {
+    Peers {
+        this_pc: this_pc.to_vec(),
+        peers: peers
+            .iter()
+            .zip(online)
+            .map(|(peer, &online)| PeerInfo {
+                name: peer.name.clone(),
+                online,
+                monitors: peer.monitors.clone(),
+            })
+            .collect(),
+    }
+    .to_text()
 }
 
 /// One configured peer and its link, if it is connected.
@@ -173,6 +193,10 @@ pub fn run(
     let mut next_ping = start;
     // Names never change; which peers are online is refreshed every turn.
     let names: Vec<String> = peers.iter().map(|peer| peer.name.clone()).collect();
+    let this_pc = monitors::this_pc().unwrap_or_else(|err| {
+        eprintln!("mickey: {err}; `mickey peers` will not show this PC's monitors");
+        Vec::new()
+    });
     let mut online: Vec<bool> = Vec::with_capacity(peers.len());
     loop {
         for (index, link) in back.try_iter() {
@@ -278,6 +302,7 @@ pub fn run(
                 }
             }
         };
+        let mut asked_for_peers = None;
         match wakes.recv_timeout(wait) {
             Ok(Wake::Input(event)) => switcher.handle(event, &online, &mut act),
             Ok(Wake::Pick(pick)) => {
@@ -291,6 +316,10 @@ pub fn run(
                     }
                 }
             }
+            // Answered below, once `act` no longer borrows the peers.
+            Ok(Wake::Control(request)) if request.order == Order::Peers => {
+                asked_for_peers = Some(request.reply);
+            }
             Ok(Wake::Control(request)) => {
                 let answer = obey(request.order, &names, &online, &mut switcher, &mut act);
                 let _ = request.reply.send(answer);
@@ -299,6 +328,9 @@ pub fn run(
             Err(RecvTimeoutError::Disconnected) => break,
         }
         drop(act);
+        if let Some(reply) = asked_for_peers {
+            let _ = reply.send(peers_text(&this_pc, &peers, &online));
+        }
         if switcher.focus() == Focus::Local && left != Focus::Local {
             println!("mickey: focus is back here");
         }
