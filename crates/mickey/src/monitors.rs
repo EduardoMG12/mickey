@@ -2,7 +2,7 @@
 //! the space the cursor moves in. Windows asks the system; Linux asks
 //! Hyprland over its IPC socket (other desktops come later).
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Monitor {
     pub x: i32,
     pub y: i32,
