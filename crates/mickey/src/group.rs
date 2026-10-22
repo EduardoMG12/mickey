@@ -20,6 +20,10 @@ pub const KIND: u8 = 16;
 /// lines of the PC where the owner saved them.
 pub const HOTKEYS: u8 = 17;
 
+/// The first byte of "show the switcher here": the focused card, then one
+/// card per line (`online:` or `offline:` and a name), the source first.
+pub const SWITCHER: u8 = 18;
+
 /// A map ready for the data link.
 pub fn message(text: &str) -> Vec<u8> {
     tagged(KIND, text)

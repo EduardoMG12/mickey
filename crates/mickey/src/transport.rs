@@ -202,7 +202,8 @@ pub fn serve(
             Message::Pong { .. }
             | Message::Monitors { .. }
             | Message::Leave { .. }
-            | Message::Refused => {}
+            | Message::Refused
+            | Message::Picked { .. } => {}
             Message::Hello { .. } => break Err(invalid("second Hello".into())),
         }
     };
