@@ -4,6 +4,7 @@
 mod capture;
 mod cli;
 mod control;
+mod discovery;
 mod edges;
 mod emit;
 mod event;
@@ -67,6 +68,24 @@ fn run(command: Command) -> Result<(), String> {
                 }
                 None => Err(answer.trim_start_matches("error: ").to_string()),
             }
+        }
+        Command::Discover => {
+            let mut any = false;
+            for line in control::request("discover")? {
+                let line = line.map_err(|err| err.to_string())?;
+                if let Some(err) = line.strip_prefix("error: ") {
+                    return Err(err.to_string());
+                }
+                let fields: Vec<&str> = line.split('\t').collect();
+                if let [name, address, fingerprint] = fields.as_slice() {
+                    println!("{name}  {address}  {fingerprint}");
+                    any = true;
+                }
+            }
+            if !any {
+                println!("mickey: no other PC heard yet (they announce every 3 s)");
+            }
+            Ok(())
         }
         Command::Peers => {
             for line in control::request("peers")? {
@@ -142,6 +161,7 @@ fn run(command: Command) -> Result<(), String> {
                 touchpad_speed,
                 switcher_position,
                 controlled,
+                None,
             )
         }
         Command::Target { listen } => target(listen, std::sync::mpsc::channel().0),
@@ -177,6 +197,17 @@ fn run_from_config() -> Result<(), String> {
         None => config::parse("").expect("an empty config is valid"),
     };
     let this_pc = &config.this_pc;
+    // Let the other PCs find this one, and hear them (PRD 0010). Without
+    // it Mickey still works with the addresses in config.toml.
+    let identity = identity::Identity::load_or_create(&identity::data_dir()?)?;
+    let me = discovery::Announce {
+        name: this_pc.name(),
+        port: this_pc.listen.port(),
+        key: *identity.public(),
+    };
+    let found = discovery::start(me)
+        .inspect_err(|err| eprintln!("mickey: {err}; other PCs will not show up by themselves"))
+        .ok();
     let source_wanted = this_pc.controls_others && !config.peers.is_empty();
     if !source_wanted && !this_pc.controlled {
         return Err("[this_pc] says this PC neither controls others nor is controlled".into());
@@ -196,6 +227,7 @@ fn run_from_config() -> Result<(), String> {
             config.touchpad.speed,
             config.interface.switcher_position,
             controlled,
+            found,
         )
     } else {
         println!("mickey: this PC only waits to be controlled");
