@@ -13,8 +13,6 @@ mod edges;
 mod emit;
 mod event;
 mod focus;
-// ponytail: the source shares and merges maps, next PR.
-#[allow(dead_code)]
 mod group;
 mod held;
 mod history;
@@ -206,6 +204,10 @@ fn run(command: Command) -> Result<(), String> {
                 switcher_position,
                 source::Services {
                     trusted: trust::shared(&identity::data_dir()?)?,
+                    name: config::parse("")
+                        .map(|empty| empty.this_pc.name())
+                        .unwrap_or_default(),
+                    port: config::DEFAULT_PORT,
                     controlled,
                     found: None,
                     keeper: clipboard::Keeper::start().ok(),
@@ -290,6 +292,8 @@ fn run_from_config() -> Result<(), String> {
             config.interface.switcher_position,
             source::Services {
                 trusted,
+                name: this_pc.name(),
+                port: this_pc.listen.port(),
                 controlled,
                 found,
                 history: keeper.clone().map(history::record),
@@ -358,7 +362,7 @@ fn target(
     })?;
     println!("mickey: listening on {listen}");
     if let Some(keeper) = keeper {
-        serve_clipboard(listen, &identity, &trusted, keeper);
+        serve_clipboard(listen, &identity, &trusted, keeper, &controlled);
     }
     loop {
         let (stream, peer) = match listener.accept() {
@@ -393,6 +397,7 @@ fn serve_clipboard(
     identity: &std::sync::Arc<identity::Identity>,
     trusted: &std::sync::Arc<std::sync::Mutex<trust::TrustedPeers>>,
     keeper: clipboard::Keeper,
+    controlled: &std::sync::mpsc::Sender<source::TargetNews>,
 ) {
     let data = transport::data_address(listen);
     let listener = match std::net::TcpListener::bind(data) {
@@ -402,10 +407,14 @@ fn serve_clipboard(
             return;
         }
     };
-    let (identity, trusted) = (identity.clone(), trusted.clone());
+    let (identity, trusted, controlled) = (identity.clone(), trusted.clone(), controlled.clone());
     std::thread::spawn(move || {
         for stream in listener.incoming().flatten() {
             let (identity, trusted, keeper) = (identity.clone(), trusted.clone(), keeper.clone());
+            let controlled = controlled.clone();
+            let Ok(from) = stream.peer_addr().map(|address| address.ip()) else {
+                continue;
+            };
             std::thread::spawn(move || {
                 let is_trusted = |key: &[u8; 32]| {
                     trusted
@@ -415,10 +424,18 @@ fn serve_clipboard(
                 };
                 match transport::accept_data(stream, &identity, is_trusted) {
                     Ok(link) => {
+                        // A group map from a paired PC goes up to the source.
+                        let group = |text: &str| match group::decode(text, from) {
+                            Ok(members) => {
+                                let _ = controlled.send(source::TargetNews::Group { members });
+                            }
+                            Err(err) => eprintln!("mickey: {err}"),
+                        };
                         let _ = clip_sync::answer(
                             link,
                             || keeper.read(),
                             |content| keeper.write(content),
+                            group,
                         );
                     }
                     Err(err) => eprintln!("mickey: data link refused: {err}"),
