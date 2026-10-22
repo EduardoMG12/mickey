@@ -13,6 +13,11 @@ impl HeldSet {
         HeldSet { bits: [0; 12] }
     }
 
+    /// Whether nothing is held.
+    pub fn is_empty(&self) -> bool {
+        self.bits.iter().all(|&word| word == 0)
+    }
+
     pub fn set(&mut self, code: u16, pressed: bool) {
         let code = usize::from(code);
         if code >= Self::CAPACITY {
