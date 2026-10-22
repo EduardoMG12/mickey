@@ -70,6 +70,11 @@ pub fn find_devices() -> io::Result<Vec<Found>> {
 
 fn classify(path: &Path) -> io::Result<Option<Found>> {
     let device = Device::open(path)?;
+    // Our own uinput device (a target in the same `mickey run`) carries
+    // input that came from another PC; capturing it would send it back.
+    if device.name()? == crate::platform::uinput::DEVICE_NAME {
+        return Ok(None);
+    }
     let kind = if device.supports(EV_KEY, KEY_A)? && device.supports(EV_KEY, KEY_Z)? {
         Kind::Keyboard
     } else if device.supports(EV_REL, REL_X)?

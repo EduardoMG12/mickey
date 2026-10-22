@@ -4,6 +4,8 @@ use std::net::SocketAddr;
 
 pub const USAGE: &str = "\
 usage:
+  mickey run                         do what config.toml says: control other PCs,
+                                     be controlled, or both (what the installer starts)
   mickey target --listen <ip:port>   on the machine to be controlled (Windows)
   mickey source [--to <ip:port>]     on the machine with the keyboard (Linux);
                                      without --to, uses the peers in config.toml
@@ -19,6 +21,7 @@ usage:
 #[derive(Debug, PartialEq, Eq)]
 pub enum Command {
     Help,
+    Run,
     Id,
     Status {
         waybar: bool,
@@ -42,6 +45,7 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
         [] => Ok(Command::Help),
         [help] if help == "-h" || help == "--help" || help == "help" => Ok(Command::Help),
         [command] if command == "id" => Ok(Command::Id),
+        [command] if command == "run" => Ok(Command::Run),
         [command] if command == "home" || command == "switcher" => {
             Ok(Command::Order(command.clone()))
         }
@@ -85,6 +89,7 @@ mod tests {
         assert_eq!(parse(&[]), Ok(Command::Help));
         assert_eq!(parse(&args("--help")), Ok(Command::Help));
         assert_eq!(parse(&args("id")), Ok(Command::Id));
+        assert_eq!(parse(&args("run")), Ok(Command::Run));
         assert_eq!(parse(&args("home")), Ok(Command::Order("home".into())));
         assert_eq!(
             parse(&["go".into(), "Windows A".into()]),

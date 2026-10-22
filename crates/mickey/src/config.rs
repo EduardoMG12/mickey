@@ -29,6 +29,11 @@ speed = 16
 
 [interface]
 switcher_position = "bottom-right"   # or center, top-left, top-right, bottom-left
+
+[this_pc]
+controls_others = true     # send this PC's keyboard and mouse to the peers
+controlled = true          # let paired peers drive this PC
+listen = "0.0.0.0:4242"    # where peers connect to this PC
 "#;
 
 // `deny_unknown_fields`: a typo like `adress` is an error, not ignored.
@@ -43,6 +48,44 @@ pub struct Config {
     pub hotkeys: Hotkeys,
     #[serde(default)]
     pub interface: Interface,
+    #[serde(default)]
+    pub this_pc: ThisPc,
+}
+
+/// `[this_pc]`: which roles `mickey run` plays on this machine.
+#[derive(Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct ThisPc {
+    /// Send this PC's keyboard and mouse to the peers (the source).
+    #[serde(default = "yes")]
+    pub controls_others: bool,
+    /// Let paired peers drive this PC (the target).
+    #[serde(default = "yes")]
+    pub controlled: bool,
+    /// Where the target waits for peers. All interfaces by default: only
+    /// paired machines can do anything (PRD 0002), so this needs no IP.
+    #[serde(default = "default_listen")]
+    pub listen: SocketAddr,
+}
+
+impl Default for ThisPc {
+    fn default() -> ThisPc {
+        ThisPc {
+            controls_others: true,
+            controlled: true,
+            listen: default_listen(),
+        }
+    }
+}
+
+fn yes() -> bool {
+    true
+}
+
+pub const DEFAULT_PORT: u16 = 4242;
+
+fn default_listen() -> SocketAddr {
+    SocketAddr::from(([0, 0, 0, 0], DEFAULT_PORT))
 }
 
 /// `[interface]`: how Mickey shows itself.
@@ -245,6 +288,7 @@ mod tests {
                 touchpad: Touchpad::default(),
                 hotkeys: Hotkeys::default(),
                 interface: Interface::default(),
+                this_pc: ThisPc::default(),
             }
         );
     }
@@ -285,6 +329,15 @@ mod tests {
         );
         let err = parse("[hotkeys]\nhome = \"RightShift+AltGr\"\n").unwrap_err();
         assert!(err.contains("same keys"), "{err}");
+    }
+
+    #[test]
+    fn this_pc_plays_both_roles_by_default() {
+        let config = parse("").unwrap();
+        assert!(config.this_pc.controls_others && config.this_pc.controlled);
+        assert_eq!(config.this_pc.listen.port(), DEFAULT_PORT);
+        let config = parse("[this_pc]\ncontrolled = false\n").unwrap();
+        assert!(!config.this_pc.controlled);
     }
 
     #[test]
