@@ -43,6 +43,41 @@ impl Emitter {
     }
 }
 
+/// Where the cursor was before `park`, to put it back on `unpark`.
+static PARKED_FROM: std::sync::Mutex<Option<(i32, i32)>> = std::sync::Mutex::new(None);
+
+/// Moves the cursor out of sight while another PC has the keyboard and
+/// mouse: into the bottom-right corner, where only its tip's pixel shows.
+/// Nothing is hidden for real, so a crash never leaves the owner without a
+/// cursor (CLAUDE.md rule 8).
+pub fn park() {
+    let Some(corner) = crate::monitors::this_pc().ok().as_deref().and_then(corner) else {
+        return;
+    };
+    let mut parked = PARKED_FROM.lock().unwrap_or_else(|p| p.into_inner());
+    if parked.is_none() {
+        *parked = cursor();
+    }
+    let _ = place(corner.0, corner.1);
+}
+
+/// Puts the cursor back where `park` found it, if it was parked.
+pub fn unpark() {
+    let from = PARKED_FROM.lock().unwrap_or_else(|p| p.into_inner()).take();
+    if let Some((x, y)) = from {
+        let _ = place(x, y);
+    }
+}
+
+/// The last pixel of the monitor whose bottom-right corner lies farthest
+/// right (then lowest).
+fn corner(monitors: &[crate::monitors::Monitor]) -> Option<(i32, i32)> {
+    monitors
+        .iter()
+        .map(|m| (m.x + m.width - 1, m.y + m.height - 1))
+        .max()
+}
+
 /// Puts this PC's cursor at `x, y` of its desktop.
 #[cfg(windows)]
 pub fn place(x: i32, y: i32) -> io::Result<()> {
@@ -151,5 +186,30 @@ impl Emitter {
     /// Puts the cursor at `x, y` of the desktop, where it came in.
     pub fn place(&mut self, x: i32, y: i32) -> io::Result<()> {
         place(x, y)
+    }
+}
+
+#[cfg(test)]
+mod park_tests {
+    use super::corner;
+    use crate::monitors::Monitor;
+
+    #[test]
+    fn the_corner_is_the_right_most_monitors_last_pixel() {
+        let left = Monitor {
+            x: 0,
+            y: 0,
+            width: 1920,
+            height: 1080,
+        };
+        let right = Monitor {
+            x: 1920,
+            y: 200,
+            width: 1280,
+            height: 720,
+        };
+        assert_eq!(corner(&[left, right]), Some((3199, 919)));
+        assert_eq!(corner(&[left]), Some((1919, 1079)));
+        assert_eq!(corner(&[]), None);
     }
 }

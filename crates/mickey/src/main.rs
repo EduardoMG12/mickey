@@ -603,6 +603,12 @@ fn serve_source(
             transport::Effect::Place { x, y } => emitter.place(x, y),
             // Nobody listens when this PC only waits to be controlled.
             transport::Effect::Controlled(here) => {
+                // The keyboard and mouse went elsewhere: the cursor too.
+                if here {
+                    emit::unpark();
+                } else {
+                    emit::park();
+                }
                 let _ = controlled.send(source::TargetNews::Controlled(here));
                 Ok(())
             }
