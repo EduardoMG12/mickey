@@ -4,13 +4,18 @@
 //! `mickey source` starts the switcher as
 //!
 //! ```text
-//! mickey-ui switcher <focused> <pc>...
+//! mickey-ui switcher [--at <corner>] <focused> <pc>...
 //! ```
+//!
+//! `<corner>` is `center`, `top-left`, `top-right`, `bottom-left` or
+//! `bottom-right` (the default).
 //!
 //! where each `<pc>` is `online:<name>` or `offline:<name>`, the first one is
 //! this PC, and `<focused>` is the index of the PC that has the focus. The
 //! switcher prints the index of the picked PC and exits 0, or prints nothing
 //! and exits 1 when closed without a choice.
+
+use crate::place::Corner;
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct Pc {
@@ -20,6 +25,7 @@ pub struct Pc {
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct Choice {
+    pub corner: Corner,
     pub pcs: Vec<Pc>,
     pub focused: usize,
     pub selected: usize,
@@ -27,7 +33,17 @@ pub struct Choice {
 
 impl Choice {
     pub fn from_args(args: &[String]) -> Result<Choice, String> {
-        let [command, focused, pcs @ ..] = args else {
+        let (corner, args) = match args {
+            [command, flag, corner, rest @ ..] if flag == "--at" => {
+                let corner = Corner::parse(corner)
+                    .ok_or_else(|| format!("`{corner}` is not a corner; {USAGE}"))?;
+                let mut args = vec![command.clone()];
+                args.extend_from_slice(rest);
+                (corner, args)
+            }
+            _ => (Corner::BottomRight, args.to_vec()),
+        };
+        let [command, focused, pcs @ ..] = args.as_slice() else {
             return Err(USAGE.into());
         };
         if command != "switcher" || pcs.is_empty() {
@@ -43,6 +59,7 @@ impl Choice {
             .filter(|&index| index < pcs.len())
             .ok_or_else(|| format!("focused PC `{focused}` is not one of the {} PCs", pcs.len()))?;
         let mut choice = Choice {
+            corner,
             pcs,
             focused,
             selected: focused,
@@ -73,7 +90,8 @@ impl Choice {
     }
 }
 
-const USAGE: &str = "usage: mickey-ui switcher <focused> online:<name>|offline:<name>...";
+const USAGE: &str =
+    "usage: mickey-ui switcher [--at <corner>] <focused> online:<name>|offline:<name>...";
 
 fn parse_pc(arg: &str) -> Result<Pc, String> {
     let (state, name) = arg
@@ -125,6 +143,17 @@ mod tests {
         assert_eq!(c.pick(0), Some(0));
         assert_eq!(c.pick(1), None);
         assert_eq!(c.pick(9), None);
+    }
+
+    #[test]
+    fn the_corner_is_optional_and_checked() {
+        assert_eq!(
+            choice("switcher 0 online:A").unwrap().corner,
+            Corner::BottomRight
+        );
+        let c = choice("switcher --at top-left 0 online:A online:B").unwrap();
+        assert_eq!((c.corner, c.selected), (Corner::TopLeft, 1));
+        assert!(choice("switcher --at middle 0 online:A").is_err());
     }
 
     #[test]

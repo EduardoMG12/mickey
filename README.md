@@ -116,8 +116,20 @@ bind = SUPER ALT, 1, exec, mickey go Windows
 Compositor binds only reach Mickey while the focus is on this PC; to come
 back from another PC, use Mickey's hotkey.
 
-On **Hyprland** the switcher tiles like any window unless a rule makes it
-float. Lua config (Hyprland 0.56+):
+The switcher appears in the **bottom-right corner** by default; choose
+another place in `config.toml`:
+
+```toml
+[interface]
+switcher_position = "bottom-right"   # or center, top-left, top-right, bottom-left
+```
+
+On Windows and X11 the window moves itself there. On Hyprland, `mickey-ui`
+adds the window rule itself (`hyprctl eval`), so nothing needs configuring.
+Other Wayland desktops place it themselves (usually centered) for now.
+
+On older Hyprland versions without `hyprctl eval`, the switcher tiles like
+any window unless a rule makes it float. Lua config (Hyprland 0.56+):
 
 ```lua
 hl.window_rule({ name = "mickey-ui", match = { class = "^(mickey-ui)$" },
