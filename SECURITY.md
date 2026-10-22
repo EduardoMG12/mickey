@@ -21,8 +21,8 @@ new feature.
 - Pairing needs the same six-digit code on both screens.
 - Mickey never logs the keys you type or what you copy, and never writes
   them to disk. The clipboard history lives in memory only.
-- A way home always exists: **AltGr + Right Shift + Esc** brings the
-  keyboard and mouse back, whatever is configured.
+- A way home always exists: **hold AltGr and Right Shift for 2 seconds**
+  and let go, and the keyboard and mouse come back, whatever is configured.
 
 How it works in detail: [PRD 0002](docs/prds/0002-secure-link.md) (the
 link), [PRD 0010](docs/prds/0010-easy-pairing.md) (pairing and group trust)
