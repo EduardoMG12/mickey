@@ -16,6 +16,9 @@ mod hotkey;
 mod identity;
 mod input;
 mod latency;
+// ponytail: only `mickey monitors` uses it until the exchange (#87).
+#[allow(dead_code)]
+mod monitors;
 // The Linux build never translates keys for Windows.
 #[cfg_attr(not(windows), allow(dead_code))]
 mod keymap;
@@ -155,6 +158,12 @@ fn run(command: Command) -> Result<(), String> {
         }
         Command::Target { listen } => target(listen),
         Command::Run => run_from_config(),
+        Command::Monitors => {
+            for (i, m) in monitors::this_pc()?.iter().enumerate() {
+                println!("monitor {i}: {}x{} at {},{}", m.width, m.height, m.x, m.y);
+            }
+            Ok(())
+        }
         Command::Settings => {
             // The window lives in mickey-ui, next to this program, so the
             // long-running mickey never links the GUI (PRD 0003).
