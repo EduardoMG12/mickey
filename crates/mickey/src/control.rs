@@ -50,14 +50,19 @@ pub struct Request {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Status {
-    /// `None`: the focus is on this PC.
+    /// `None`: this PC's keyboard and mouse are on this PC.
     pub focus: Option<usize>,
+    /// Whether the keyboard and mouse in use control this PC now: this
+    /// PC's own, or a peer's that came over. The last change wins (PRD
+    /// 0009).
+    pub here: bool,
     pub peers: Vec<(String, bool)>,
 }
 
 impl Status {
     pub fn to_line(&self) -> String {
         let mut line = self.focus.map_or(0, |peer| peer + 1).to_string();
+        line.push_str(if self.here { "\there" } else { "\telsewhere" });
         for (name, online) in &self.peers {
             line.push('\t');
             line.push_str(if *online { "online:" } else { "offline:" });
@@ -72,6 +77,11 @@ impl Status {
             0 => None,
             card => Some(card - 1),
         };
+        let here = match fields.next()? {
+            "here" => true,
+            "elsewhere" => false,
+            _ => return None,
+        };
         let peers = fields
             .map(|field| match field.split_once(':')? {
                 ("online", name) => Some((name.to_string(), true)),
@@ -82,7 +92,7 @@ impl Status {
         if focus.is_some_and(|peer| peer >= peers.len()) {
             return None;
         }
-        Some(Status { focus, peers })
+        Some(Status { focus, here, peers })
     }
 
     /// For people: `mickey status`.
@@ -92,6 +102,8 @@ impl Status {
             Some(peer) => &self.peers[peer].0,
         };
         let mut text = format!("focus: {focus}\n");
+        let control = if self.here { "this PC" } else { "another PC" };
+        text.push_str(&format!("in control: {control}\n"));
         for (name, online) in &self.peers {
             let state = if *online { "online" } else { "offline" };
             text.push_str(&format!("{name}: {state}\n"));
@@ -446,6 +458,7 @@ mod tests {
     fn status() -> Status {
         Status {
             focus: Some(1),
+            here: false,
             peers: vec![("Windows A".into(), true), ("Win: B".into(), false)],
         }
     }
@@ -453,7 +466,7 @@ mod tests {
     #[test]
     fn a_status_line_round_trips() {
         let line = status().to_line();
-        assert_eq!(line, "2\tonline:Windows A\toffline:Win: B");
+        assert_eq!(line, "2\telsewhere\tonline:Windows A\toffline:Win: B");
         assert_eq!(Status::from_line(&line), Some(status()));
     }
 
@@ -462,15 +475,17 @@ mod tests {
         assert_eq!(Status::from_line(""), None);
         assert_eq!(Status::from_line("x"), None);
         assert_eq!(
-            Status::from_line("2\tonline:A"),
+            Status::from_line("2\telsewhere\tonline:A"),
             None,
             "focus past the peers"
         );
-        assert_eq!(Status::from_line("0\tmaybe:A"), None);
+        assert_eq!(Status::from_line("0\there\tmaybe:A"), None);
+        assert_eq!(Status::from_line("0"), None, "no here or elsewhere");
         assert_eq!(
-            Status::from_line("0"),
+            Status::from_line("0\there"),
             Some(Status {
                 focus: None,
+                here: true,
                 peers: vec![]
             })
         );
@@ -480,7 +495,7 @@ mod tests {
     fn describe_is_for_people() {
         assert_eq!(
             status().describe(),
-            "focus: Win: B\nWindows A: online\nWin: B: offline\n"
+            "focus: Win: B\nin control: another PC\nWindows A: online\nWin: B: offline\n"
         );
     }
 
@@ -488,7 +503,7 @@ mod tests {
     fn waybar_lines_are_json_with_a_class() {
         assert_eq!(
             waybar_line(Some(&status())),
-            r#"{"text":"Win: B · 1/2","tooltip":"focus: Win: B\nWindows A: online\nWin: B: offline","class":"remote"}"#
+            r#"{"text":"Win: B · 1/2","tooltip":"focus: Win: B\nin control: another PC\nWindows A: online\nWin: B: offline","class":"remote"}"#
         );
         let home = Status {
             focus: None,

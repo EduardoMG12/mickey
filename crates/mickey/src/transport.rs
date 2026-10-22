@@ -70,6 +70,9 @@ pub enum Effect {
         x: i32,
         y: i32,
     },
+    /// The source's keyboard and mouse now control this PC, or not any
+    /// more (PRD 0009).
+    Controlled(bool),
 }
 
 /// `cursor` says where this PC's cursor is, to notice it pushing off the
@@ -138,6 +141,7 @@ pub fn serve(
                 left = None;
                 act(Effect::Place { x, y });
             }
+            Message::Focus { here } => act(Effect::Controlled(here)),
             Message::Pong { .. } | Message::Monitors { .. } | Message::Leave { .. } => {}
             Message::Hello { .. } => break Err(invalid("second Hello".into())),
         }
