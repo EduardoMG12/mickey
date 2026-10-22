@@ -19,7 +19,8 @@ usage:
   mickey monitors                    list this machine's monitors
   mickey peers                       list the PCs, whether they are online, and their monitors
   mickey discover                    list the PCs running Mickey on this network
-  mickey history                     list the recent copies on this PC (newest first)
+  mickey history [--lines]           list the recent copies on this PC (newest first);
+                                     --lines prints them tab-separated, for the window
   mickey history copy <id>           copy that entry again
   mickey clipboard [test]            say what kind of thing is copied (never what);
                                      test copies a short test text
@@ -35,8 +36,10 @@ pub enum Command {
     Peers,
     /// Ask the running Mickey for the PCs it hears on the network.
     Discover,
-    /// List the clipboard history.
-    History,
+    /// List the clipboard history; `lines`: tab-separated, for programs.
+    History {
+        lines: bool,
+    },
     /// Say what kind of thing is copied; `write_test` copies a test text.
     Clipboard {
         write_test: bool,
@@ -69,7 +72,10 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
         [command] if command == "monitors" => Ok(Command::Monitors),
         [command] if command == "peers" => Ok(Command::Peers),
         [command] if command == "discover" => Ok(Command::Discover),
-        [command] if command == "history" => Ok(Command::History),
+        [command] if command == "history" => Ok(Command::History { lines: false }),
+        [command, flag] if command == "history" && flag == "--lines" => {
+            Ok(Command::History { lines: true })
+        }
         [command, copy, id] if command == "history" && copy == "copy" => {
             let id: u64 = id
                 .parse()
