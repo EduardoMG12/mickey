@@ -179,7 +179,7 @@ pub struct Settings {
 const HOTKEY_ROWS: [(&str, &str); 6] = [
     ("Next PC / switcher", config::DEFAULT_NEXT),
     ("Back to this PC", "the hotkey above + 0"),
-    ("Open the switcher", ""),
+    ("Open the switcher", config::DEFAULT_SWITCHER),
     ("Next PC (one hand)", config::DEFAULT_FORWARD),
     ("Previous PC (one hand)", config::DEFAULT_BACK),
     ("Double tap (empty: off)", ""),
