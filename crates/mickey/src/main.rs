@@ -297,7 +297,8 @@ fn target(listen: SocketAddr, controlled: std::sync::mpsc::Sender<bool>) -> Resu
             }
         };
         let peer_key = *link.peer_key();
-        match trust::trust_or_ask(&identity, &mut trusted, &peer_key, peer) {
+        let code = link.pairing_code();
+        match trust::trust_or_ask(&mut trusted, &peer_key, peer, &code) {
             Ok(true) => println!("mickey: source {peer} connected"),
             Ok(false) => {
                 println!("mickey: refused {peer}");
