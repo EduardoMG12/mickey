@@ -1276,8 +1276,15 @@ dependencies = [
 name = "mickey"
 version = "0.1.0"
 dependencies = [
- "serde",
+ "mickey-config",
  "snow",
+]
+
+[[package]]
+name = "mickey-config"
+version = "0.1.0"
+dependencies = [
+ "serde",
  "toml",
 ]
 
