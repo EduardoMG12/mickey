@@ -5,9 +5,14 @@
 //! One request line, then answer lines:
 //!
 //! ```text
-//! status    →  one status line, then the connection closes
-//! follow    →  a status line now and one more after every change
+//! status       →  one status line, then the connection closes
+//! follow       →  a status line now and one more after every change
+//! go <name>    →  `ok: …` or `error: …` (focus to that PC)
+//! home         →  `ok: …` (focus back to this PC)
+//! switcher     →  `ok: …` or `error: …` (show the switcher window)
 //! ```
+//!
+//! The orders only move the focus; nothing on this socket can send input.
 //!
 //! A status line is tab-separated: the focused PC (0 is this PC), then one
 //! `online:<name>` or `offline:<name>` per peer.
@@ -27,6 +32,22 @@ const SOCKET: &str = "control.sock";
 const WRITE_TIMEOUT: Duration = Duration::from_millis(200);
 /// A client that connects and says nothing is dropped too.
 const READ_TIMEOUT: Duration = Duration::from_secs(1);
+/// How long a command waits for the source's main loop to answer.
+const ANSWER_TIMEOUT: Duration = Duration::from_secs(2);
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Order {
+    Go(String),
+    Home,
+    Switcher,
+}
+
+/// An order for the source's main loop, and where to send its one-line
+/// answer (`ok: …` or `error: …`).
+pub struct Request {
+    pub order: Order,
+    pub reply: Sender<String>,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Status {
@@ -140,11 +161,18 @@ pub struct Control {
 impl Control {
     /// Listens on the control socket. Fails if another `mickey source`
     /// already owns it.
-    pub fn start() -> Result<Control, String> {
-        Control::start_at(socket_path()?)
+    /// Orders arrive on `requests`, as any type that can be made from a
+    /// `Request`, so the source can share one channel with its input.
+    pub fn start<T: From<Request> + Send + 'static>(
+        requests: Sender<T>,
+    ) -> Result<Control, String> {
+        Control::start_at(socket_path()?, requests)
     }
 
-    fn start_at(path: PathBuf) -> Result<Control, String> {
+    fn start_at<T: From<Request> + Send + 'static>(
+        path: PathBuf,
+        requests: Sender<T>,
+    ) -> Result<Control, String> {
         let dir = path.parent().expect("the socket path has a directory");
         fs::DirBuilder::new()
             .recursive(true)
@@ -163,7 +191,7 @@ impl Control {
         let (followers_in, followers) = mpsc::channel();
         let (updates, updates_out) = mpsc::channel();
         let shared = Arc::clone(&latest);
-        thread::spawn(move || accept(listener, &shared, &followers_in));
+        thread::spawn(move || accept(listener, &shared, &followers_in, &requests));
         thread::spawn(move || publish(updates_out, followers, &latest));
         Ok(Control { updates })
     }
@@ -174,7 +202,12 @@ impl Control {
     }
 }
 
-fn accept(listener: UnixListener, latest: &Mutex<Option<Status>>, followers: &Sender<UnixStream>) {
+fn accept<T: From<Request>>(
+    listener: UnixListener,
+    latest: &Mutex<Option<Status>>,
+    followers: &Sender<UnixStream>,
+    requests: &Sender<T>,
+) {
     for stream in listener.incoming().flatten() {
         let _ = stream.set_write_timeout(Some(WRITE_TIMEOUT));
         let _ = stream.set_read_timeout(Some(READ_TIMEOUT));
@@ -200,7 +233,23 @@ fn accept(listener: UnixListener, latest: &Mutex<Option<Status>>, followers: &Se
                 let _ = followers.send(stream);
             }
             other => {
-                let _ = writeln!(stream, "error: unknown request `{other}`");
+                let order = match other.split_once(' ') {
+                    _ if other == "home" => Some(Order::Home),
+                    _ if other == "switcher" => Some(Order::Switcher),
+                    Some(("go", name)) => Some(Order::Go(name.to_string())),
+                    _ => None,
+                };
+                let answer = match order {
+                    None => format!("error: unknown request `{other}`"),
+                    Some(order) => {
+                        let (reply, answer) = mpsc::channel();
+                        let _ = requests.send(T::from(Request { order, reply }));
+                        answer
+                            .recv_timeout(ANSWER_TIMEOUT)
+                            .unwrap_or_else(|_| "error: mickey source did not answer".into())
+                    }
+                };
+                let _ = writeln!(stream, "{answer}");
             }
         }
     }
@@ -311,9 +360,10 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
         let path = dir.join("mickey").join(SOCKET);
 
-        let control = Control::start_at(path.clone()).unwrap();
+        let (requests, orders) = mpsc::channel::<Request>();
+        let control = Control::start_at(path.clone(), requests.clone()).unwrap();
         assert!(
-            Control::start_at(path.clone()).is_err(),
+            Control::start_at(path.clone(), requests).is_err(),
             "a second source is refused"
         );
         control.publish(status());
@@ -334,6 +384,13 @@ mod tests {
 
         let mut bad = request_at(&path, "dance").unwrap();
         assert!(bad.next().unwrap().unwrap().starts_with("error"));
+
+        // An order reaches the main loop, and its answer reaches the client.
+        let client = thread::spawn(move || request_at(&path, "go Windows A").unwrap().next());
+        let order = orders.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert_eq!(order.order, Order::Go("Windows A".into()));
+        order.reply.send("ok: going".into()).unwrap();
+        assert_eq!(client.join().unwrap().unwrap().unwrap(), "ok: going");
         fs::remove_dir_all(&dir).unwrap();
     }
 }
