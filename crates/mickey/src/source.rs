@@ -1,6 +1,8 @@
 //! The source side (Linux): capture local input, run the focus state
 //! machine, and send input to the focused peer.
 
+use crate::clip_sync::Mover;
+use crate::clipboard::Keeper;
 use crate::control::{self, Control, Order, Request, Status};
 use crate::discovery;
 use crate::edges;
@@ -229,6 +231,7 @@ pub fn run(
     switcher_position: String,
     controlled: mpsc::Receiver<bool>,
     found: Option<discovery::Table>,
+    keeper: Option<Keeper>,
 ) -> Result<(), String> {
     // Two sources would both capture the keyboard and fight over the grab.
     if control::source_running() {
@@ -267,9 +270,13 @@ pub fn run(
         });
     }
     let shared = Arc::new(Shared { identity, trusted });
+    // The clipboard follows the keyboard (PRD 0011), over data links.
+    let mover = keeper.map(Mover::start);
     for (index, peer) in peers.iter().enumerate() {
         if peer.link.is_none() {
             reconnect(index, peer.address, &shared, &back_sender);
+        } else if let Some(mover) = &mover {
+            open_data_link(index, peer.address, &shared, mover);
         }
     }
     println!("mickey: AltGr + Right Shift switches focus");
@@ -338,6 +345,9 @@ pub fn run(
     loop {
         for (index, link) in back.try_iter() {
             read_peer(index, &link, &pong_sender, start);
+            if let Some(mover) = &mover {
+                open_data_link(index, peers[index].address, &shared, mover);
+            }
             peers[index].link = Some(link);
             println!("mickey: {} is back online", peers[index].name);
         }
@@ -383,6 +393,9 @@ pub fn run(
             Focus::Local | Focus::WaitingForKeysUp(_) => None,
         };
         if let Some(was) = in_control.focus_is(focus) {
+            if let Some(mover) = &mover {
+                mover.moved(was, focus);
+            }
             // Tell the peers the keyboard left and where it went.
             for (index, now_here) in [(was, false), (focus, true)] {
                 if let Some(link) = index.and_then(|index| peers[index].link.as_mut()) {
@@ -579,6 +592,19 @@ fn connect_and_pair(
         _ => err.to_string(),
     })?;
     Ok(link)
+}
+
+/// Opens the data link to a connected peer in the background and hands it
+/// to the mover. A peer without one (an older Mickey) only misses the
+/// shared clipboard.
+fn open_data_link(index: usize, input: SocketAddr, shared: &Arc<Shared>, mover: &Mover) {
+    let (shared, mover) = (Arc::clone(shared), mover.clone());
+    thread::spawn(
+        move || match transport::connect_data(input, &shared.identity) {
+            Ok(link) => mover.link(index, link),
+            Err(err) => eprintln!("mickey: no shared clipboard with {input}: {err}"),
+        },
+    );
 }
 
 /// Retries a trusted peer in the background until it answers, then hands
