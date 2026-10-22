@@ -39,7 +39,12 @@ pub fn connect(addr: SocketAddr, identity: &Identity) -> io::Result<Link> {
 /// trusts us. Until then nothing else is sent.
 pub fn hello(link: &mut Link) -> io::Result<()> {
     link.send(&Message::Hello { version: VERSION })?;
-    match link.recv()? {
+    // The target may be showing its owner a pair window: give them time,
+    // but not for ever (a frozen target would hold this up for good).
+    link.set_read_timeout(Some(PAIR_WAIT))?;
+    let answer = link.recv();
+    link.set_read_timeout(None)?;
+    match answer? {
         Message::Hello { version: VERSION } => Ok(()),
         Message::Hello { version } => Err(invalid(format!(
             "target speaks protocol {version}, this Mickey speaks {VERSION}"
@@ -47,6 +52,9 @@ pub fn hello(link: &mut Link) -> io::Result<()> {
         _ => Err(invalid("target did not answer with Hello".into())),
     }
 }
+
+/// How long a new PC's owner has to answer the pair window.
+const PAIR_WAIT: Duration = Duration::from_secs(90);
 
 /// The target's side of the handshake, for one accepted connection. The
 /// caller checks the source's key (pairing) before calling `serve`.
