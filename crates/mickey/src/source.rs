@@ -158,13 +158,13 @@ impl InControl {
     }
 }
 
-/// Opens `mickey-ui settings`, installed next to this program, and leaves
-/// it running on its own.
-fn open_settings() {
+/// Opens `mickey-ui <window>` (settings, history), installed next to this
+/// program, and leaves it running on its own.
+fn open_window(window: &str) {
     let ui = std::env::current_exe()
         .map(|exe| exe.with_file_name(format!("mickey-ui{}", std::env::consts::EXE_SUFFIX)));
-    if let Err(err) = ui.and_then(|ui| Command::new(ui).arg("settings").spawn()) {
-        eprintln!("mickey: cannot open the settings: {err}");
+    if let Err(err) = ui.and_then(|ui| Command::new(ui).arg(window).spawn()) {
+        eprintln!("mickey: cannot open the {window} window: {err}");
     }
 }
 
@@ -511,7 +511,8 @@ pub fn run(
             }
             Ok(Wake::Controlled(here)) => in_control.peer_says(here),
             Ok(Wake::Tray(tray::Click::Quit)) => quit = true,
-            Ok(Wake::Tray(tray::Click::Settings)) => open_settings(),
+            Ok(Wake::Tray(tray::Click::Settings)) => open_window("settings"),
+            Ok(Wake::Tray(tray::Click::History)) => open_window("history"),
             Ok(Wake::Tray(tray::Click::Home)) => switcher.go_home(&mut act),
             Ok(Wake::Tray(tray::Click::Go(peer))) => {
                 // As from the switcher: only from here, only to a PC online.
