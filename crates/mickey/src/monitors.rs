@@ -44,6 +44,16 @@ pub mod hyprland {
         Ok(answer)
     }
 
+    /// Where the cursor is, in the same coordinates as `monitors`.
+    pub fn cursor() -> Result<(i32, i32), String> {
+        let answer = ask("cursorpos")?;
+        answer
+            .trim()
+            .split_once(", ")
+            .and_then(|(x, y)| Some((x.parse().ok()?, y.parse().ok()?)))
+            .ok_or_else(|| format!("Hyprland answered `{answer}`"))
+    }
+
     pub fn monitors() -> Result<Vec<Monitor>, String> {
         parse(&ask("monitors")?)
     }

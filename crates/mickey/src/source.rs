@@ -2,6 +2,8 @@
 //! machine, and send input to the focused peer.
 
 use crate::control::{self, Control, Order, Request, Status};
+use crate::edges;
+use crate::emit;
 use crate::event::InputEvent;
 use crate::focus::{Action, Focus, Switcher};
 use crate::hotkey::Hotkey;
@@ -84,6 +86,27 @@ fn obey(
     }
 }
 
+/// The peer the cursor is pushing onto, and where on its desktop. Never
+/// while a mouse button is down: dragging a window to the edge must not
+/// throw it to another PC.
+fn edge_crossed(
+    positions: &[Option<[i32; 2]>],
+    peers: &[Peer],
+    this_pc: &[Monitor],
+    delta: (i32, i32),
+    input: &Input,
+) -> Option<(usize, (i32, i32))> {
+    let placed = |index: usize| positions[index].filter(|_| peers[index].link.is_some());
+    // Without a placed peer online, the cursor is not even asked for.
+    (0..peers.len()).find(|&index| placed(index).is_some())?;
+    let off = edges::beyond(this_pc, input.cursor()?, delta)?;
+    let (index, there) = (0..peers.len()).find_map(|index| {
+        let there = edges::onto(&peers[index].monitors, placed(index)?, off)?;
+        Some((index, there))
+    })?;
+    (!input.button_down()).then_some((index, there))
+}
+
 /// The answer to `mickey peers`.
 fn peers_text(this_pc: &[Monitor], peers: &[Peer], online: &[bool]) -> String {
     Peers {
@@ -143,6 +166,7 @@ pub fn run(
     // Connect at start, asking to pair where needed (devices are not grabbed
     // yet, so the terminal still gets the keyboard).
     let mut peers = Vec::new();
+    let positions: Vec<Option<[i32; 2]>> = configured.iter().map(|peer| peer.position).collect();
     for (index, peer) in configured.into_iter().enumerate() {
         let link = match connect_and_pair(&identity, &mut trusted, &peer) {
             Ok(link) => {
@@ -204,8 +228,17 @@ pub fn run(
             peers[index].link = Some(link);
             println!("mickey: {} is back online", peers[index].name);
         }
+        // Where to put the cursor here, coming back from a peer's edge.
+        let mut home_at = None;
         for (index, news) in pongs.try_iter() {
             match news {
+                News::Leave(x, y) => {
+                    if switcher.focus() == Focus::Remote(index)
+                        && let Some(position) = positions[index]
+                    {
+                        home_at = edges::back(&this_pc, position, (x, y));
+                    }
+                }
                 News::RoundTrip(micros) => peers[index].latency.add_round_trip(micros),
                 News::Monitors(monitors) => {
                     let sizes: Vec<String> = monitors
@@ -302,9 +335,20 @@ pub fn run(
                 }
             }
         };
+        if home_at.is_some() {
+            switcher.go_home(&mut act);
+        }
         let mut asked_for_peers = None;
+        let mut pushed = None;
         match wakes.recv_timeout(wait) {
-            Ok(Wake::Input(event)) => switcher.handle(event, &online, &mut act),
+            Ok(Wake::Input(event)) => {
+                switcher.handle(event, &online, &mut act);
+                if let InputEvent::Motion { dx, dy } = event
+                    && switcher.focus() == Focus::Local
+                {
+                    pushed = Some((dx, dy));
+                }
+            }
             Ok(Wake::Pick(pick)) => {
                 switcher_open = false;
                 match pick {
@@ -328,6 +372,21 @@ pub fn run(
             Err(RecvTimeoutError::Disconnected) => break,
         }
         drop(act);
+        if let Some((x, y)) = home_at
+            && let Err(err) = emit::place(x, y)
+        {
+            eprintln!("mickey: cannot place the cursor: {err}");
+        }
+        let crossed =
+            pushed.and_then(|delta| edge_crossed(&positions, &peers, &this_pc, delta, &input));
+        if let Some((index, (x, y))) = crossed {
+            switcher.go_to(Some(index), &online);
+            if let Some(link) = &mut peers[index].link
+                && link.send(&Message::Enter { x, y }).is_err()
+            {
+                lost.push(index);
+            }
+        }
         if let Some(reply) = asked_for_peers {
             let _ = reply.send(peers_text(&this_pc, &peers, &online));
         }
@@ -444,6 +503,8 @@ enum News {
     /// A pong: the round-trip time in microseconds.
     RoundTrip(u32),
     Monitors(Vec<Monitor>),
+    /// The cursor is pushing off the peer's desktop onto this point of it.
+    Leave(i32, i32),
 }
 
 /// Reads what a peer sends on its own thread: pongs and its monitors.
@@ -458,6 +519,7 @@ fn read_peer(index: usize, link: &Link, news: &Sender<(usize, News)>, start: Ins
                 Message::Monitors { count, list } => {
                     News::Monitors(list[..usize::from(count)].to_vec())
                 }
+                Message::Leave { x, y } => News::Leave(x, y),
                 _ => continue,
             };
             if news.send((index, item)).is_err() {
