@@ -16,9 +16,18 @@ use std::net::{IpAddr, SocketAddr};
 /// are below 16.
 pub const KIND: u8 = 16;
 
+/// The first byte of the shared hotkeys on the data link: the `[hotkeys]`
+/// lines of the PC where the owner saved them.
+pub const HOTKEYS: u8 = 17;
+
 /// A map ready for the data link.
 pub fn message(text: &str) -> Vec<u8> {
-    [&[KIND], text.as_bytes()].concat()
+    tagged(KIND, text)
+}
+
+/// `text` behind its kind byte, for the data link.
+pub fn tagged(kind: u8, text: &str) -> Vec<u8> {
+    [&[kind], text.as_bytes()].concat()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

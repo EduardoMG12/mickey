@@ -53,6 +53,8 @@ enum Wake {
     Arranged(std::net::IpAddr, [i32; 2]),
     /// A peer's group map (PRD 0010).
     Group(Vec<group::Member>),
+    /// A peer's hotkeys, to take.
+    Hotkeys(String),
 }
 
 impl From<InputEvent> for Wake {
@@ -179,6 +181,18 @@ fn open_window(window: &str) {
         .map(|exe| exe.with_file_name(format!("mickey-ui{}", std::env::consts::EXE_SUFFIX)));
     if let Err(err) = ui.and_then(|ui| Command::new(ui).arg(window).spawn()) {
         eprintln!("mickey: cannot open the {window} window: {err}");
+    }
+}
+
+/// Uses `config`'s hotkeys at once, if they are valid.
+fn use_hotkeys(config: &config::Config, switcher: &mut Switcher, window: &mut Duration) {
+    match config.hotkeys() {
+        Ok(set) => {
+            let hotkey = Hotkey::from_config(&set);
+            *window = hotkey.double_tap_window();
+            switcher.set_hotkeys(hotkey);
+        }
+        Err(err) => eprintln!("mickey: hotkeys not changed: {err}"),
     }
 }
 
@@ -373,6 +387,8 @@ pub enum TargetNews {
     },
     /// A peer's group map (PRD 0010), in its own coordinates.
     Group { members: Vec<group::Member> },
+    /// A peer's `[hotkeys]` lines, saved there: the group shares hotkeys.
+    Hotkeys(String),
 }
 
 /// What the rest of Mickey shares with the source. Each is optional:
@@ -476,6 +492,7 @@ pub fn run(
                     TargetNews::Controlled(here) => Wake::Controlled(here),
                     TargetNews::Arranged { from, position } => Wake::Arranged(from, position),
                     TargetNews::Group { members } => Wake::Group(members),
+                    TargetNews::Hotkeys(lines) => Wake::Hotkeys(lines),
                 };
                 if wake.send(woken).is_err() {
                     return;
@@ -509,7 +526,7 @@ pub fn run(
             }
         });
     }
-    let double_tap_window = hotkeys.double_tap_window();
+    let mut double_tap_window = hotkeys.double_tap_window();
     let mut switcher = Switcher::with_hotkeys(hotkeys);
     // Dropping a `Grab` gives its device back, on every way out of here,
     // including `?` and panics.
@@ -685,6 +702,7 @@ pub fn run(
         let mut quit = false;
         let mut placed = None;
         let mut heard_map = None;
+        let mut heard_hotkeys = None;
         // A PC to connect to from the settings: handled below, like `join`.
         let mut connecting = None;
         let mut asked_to_arrange = None;
@@ -728,6 +746,7 @@ pub fn run(
             // Both handled below, once `act` no longer borrows the peers.
             Ok(Wake::Arranged(from, position)) => placed = Some((from, position)),
             Ok(Wake::Group(members)) => heard_map = Some(members),
+            Ok(Wake::Hotkeys(lines)) => heard_hotkeys = Some(lines),
             Ok(Wake::Control(request)) if request.order == Order::Arranged => {
                 asked_to_arrange = Some(request.reply);
             }
@@ -813,6 +832,13 @@ pub fn run(
         }
         if let Some(reply) = asked_to_arrange {
             let _ = reply.send(arrange(&mut positions, &mut peers));
+            // The hotkeys saved with it: used here at once, and shared.
+            if let Ok(Some(config)) = config::Config::load() {
+                use_hotkeys(&config, &mut switcher, &mut double_tap_window);
+                if let Some(mover) = &mover {
+                    mover.share_hotkeys(&config.hotkeys.to_lines());
+                }
+            }
             // Everyone gets the new places, not only the PCs moved.
             shared_with.clear();
         }
@@ -832,6 +858,22 @@ pub fn run(
                 }
             };
             let _ = reply.send(answer);
+        }
+        if let Some(lines) = heard_hotkeys {
+            let taken = config::Hotkeys::from_lines(&lines).and_then(|hotkeys| {
+                let path = config::path()?;
+                let text = std::fs::read_to_string(&path).map_err(|err| err.to_string())?;
+                std::fs::write(&path, config::set_hotkeys(&text, &hotkeys)?)
+                    .map_err(|err| err.to_string())?;
+                config::Config::load()?.ok_or_else(|| "config.toml is gone".to_string())
+            });
+            match taken {
+                Ok(config) => {
+                    use_hotkeys(&config, &mut switcher, &mut double_tap_window);
+                    println!("mickey: took the hotkeys saved on another PC");
+                }
+                Err(err) => eprintln!("mickey: cannot take another PC's hotkeys: {err}"),
+            }
         }
         if let Some(members) = heard_map {
             let me = *shared.identity.public();

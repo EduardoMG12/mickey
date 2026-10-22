@@ -147,7 +147,7 @@ fn default_switcher_position() -> String {
 }
 
 /// `[hotkeys]`, as written; `Config::hotkeys` parses and checks them.
-#[derive(Debug, Default, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Hotkeys {
     pub next: Option<String>,
@@ -410,6 +410,66 @@ pub fn set_position(text: &str, name: &str, position: [i32; 2]) -> Result<String
     Ok(text)
 }
 
+impl Hotkeys {
+    /// The section's lines, as config.toml takes them (no header). This is
+    /// what one PC sends the others so all share the same hotkeys.
+    pub fn to_lines(&self) -> String {
+        let mut lines = Vec::new();
+        for (key, value) in [
+            ("next", &self.next),
+            ("home", &self.home),
+            ("switcher", &self.switcher),
+            ("forward", &self.forward),
+            ("back", &self.back),
+            ("double_tap", &self.double_tap),
+        ] {
+            if let Some(value) = value {
+                lines.push(format!("{key} = {}", toml_string(value)));
+            }
+        }
+        if let Some(ms) = self.double_tap_ms {
+            lines.push(format!("double_tap_ms = {ms}"));
+        }
+        lines.join("\n")
+    }
+
+    /// Reads lines made by `to_lines`, e.g. from another PC.
+    pub fn from_lines(lines: &str) -> Result<Hotkeys, String> {
+        toml::from_str(lines).map_err(|err| err.to_string())
+    }
+}
+
+/// `text` (a config.toml) with its `[hotkeys]` section replaced by
+/// `hotkeys`, in place, or added at the end. Other lines are kept, and the
+/// result is checked with `parse`.
+pub fn set_hotkeys(text: &str, hotkeys: &Hotkeys) -> Result<String, String> {
+    let section = format!("[hotkeys]\n{}", hotkeys.to_lines());
+    let mut out: Vec<String> = Vec::new();
+    let (mut skipping, mut done) = (false, false);
+    for line in text.lines() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with('[') {
+            skipping = trimmed.starts_with("[hotkeys]");
+            if skipping {
+                out.push(section.clone());
+                out.push(String::new());
+                done = true;
+            }
+        }
+        if !skipping {
+            out.push(line.to_string());
+        }
+    }
+    if !done {
+        out.push(String::new());
+        out.push(section);
+    }
+    let mut text = out.join("\n").trim_end().to_string();
+    text.push('\n');
+    parse(&text)?;
+    Ok(text)
+}
+
 /// `text` (a config.toml) with a new peer at its end. A name already
 /// taken gets " (2)", " (3)"… so two PCs never share one. Checked with
 /// `parse`; returns the text and the name used.
@@ -472,6 +532,29 @@ mod tests {
         assert_eq!(window, std::time::Duration::from_millis(600));
         assert!(hotkeys("double_tap_ms = 50").is_err());
         assert_eq!(hotkeys("").unwrap().double_tap_window.as_millis(), 400);
+    }
+
+    #[test]
+    fn hotkeys_travel_as_lines_and_replace_the_section_in_place() {
+        let config = "[[peer]]\nname = \"Windows\"\naddress = \"192.0.2.7:4242\"\n\n[hotkeys]\nnext = \"AltGr+RightShift\"\n\n[touchpad]\nspeed = 16\n";
+        let mine = Hotkeys {
+            forward: Some("RightCtrl+Right".into()),
+            double_tap: Some("LeftCtrl".into()),
+            double_tap_ms: Some(500),
+            ..Hotkeys::default()
+        };
+        let read = Hotkeys::from_lines(&mine.to_lines()).unwrap();
+        assert_eq!(read, mine);
+        let text = set_hotkeys(config, &mine).unwrap();
+        let parsed = parse(&text).unwrap();
+        assert_eq!(parsed.hotkeys, mine);
+        assert_eq!(parsed.touchpad.speed, 16);
+        assert!(
+            text.find("[hotkeys]") < text.find("[touchpad]"),
+            "kept in place"
+        );
+        let added = set_hotkeys("[touchpad]\nspeed = 3\n", &mine).unwrap();
+        assert_eq!(parse(&added).unwrap().hotkeys, mine);
     }
 
     #[test]

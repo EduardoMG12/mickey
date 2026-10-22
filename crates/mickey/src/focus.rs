@@ -54,6 +54,11 @@ impl Switcher {
         Switcher::with_hotkeys(Hotkey::new())
     }
 
+    /// New hotkeys, from the settings or another PC, used at once.
+    pub fn set_hotkeys(&mut self, hotkey: Hotkey) {
+        self.hotkey = hotkey;
+    }
+
     pub fn with_hotkeys(hotkey: Hotkey) -> Switcher {
         Switcher {
             focus: Focus::Local,
