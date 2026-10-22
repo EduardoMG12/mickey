@@ -3,8 +3,7 @@
 #[cfg(target_os = "linux")]
 mod capture;
 mod cli;
-// ponytail: the clipboard sync uses it (#131).
-#[allow(dead_code)]
+mod clip_sync;
 mod clip_wire;
 mod clipboard;
 mod control;
@@ -184,9 +183,15 @@ fn run(command: Command) -> Result<(), String> {
                 switcher_position,
                 controlled,
                 None,
+                clipboard::Keeper::start().ok(),
             )
         }
-        Command::Target { listen } => target(listen, std::sync::mpsc::channel().0, None),
+        Command::Target { listen } => target(
+            listen,
+            std::sync::mpsc::channel().0,
+            None,
+            clipboard::Keeper::start().ok(),
+        ),
         Command::Run => run_from_config(),
         Command::Monitors => {
             for (i, m) in monitors::this_pc()?.iter().enumerate() {
@@ -237,9 +242,13 @@ fn run_from_config() -> Result<(), String> {
     // The target tells the source when a peer's keyboard comes over, for
     // the status and the tray (PRD 0009).
     let (controlled_sender, controlled) = std::sync::mpsc::channel();
+    // One clipboard for the whole process (PRD 0011).
+    let keeper = clipboard::Keeper::start()
+        .inspect_err(|err| eprintln!("mickey: {err}; the clipboard will not be shared"))
+        .ok();
     let target = this_pc.controlled.then(|| {
-        let (listen, found) = (this_pc.listen, found.clone());
-        std::thread::spawn(move || target(listen, controlled_sender, found))
+        let (listen, found, keeper) = (this_pc.listen, found.clone(), keeper.clone());
+        std::thread::spawn(move || target(listen, controlled_sender, found, keeper))
     });
     if source_wanted {
         let hotkeys = hotkey::Hotkey::from_config(&config.hotkeys()?);
@@ -250,6 +259,7 @@ fn run_from_config() -> Result<(), String> {
             config.interface.switcher_position,
             controlled,
             found,
+            keeper,
         )
     } else {
         println!("mickey: this PC only waits to be controlled");
@@ -289,11 +299,13 @@ fn follow_for_waybar() -> ! {
 
 /// Serves one source at a time, forever, injecting what it sends.
 /// `controlled` hears whether a source's keyboard and mouse control this PC;
-/// `found`, when discovery runs, names a PC asking to pair.
+/// `found`, when discovery runs, names a PC asking to pair; `keeper`, when
+/// the clipboard is reachable, lets paired PCs read and write it.
 fn target(
     listen: SocketAddr,
     controlled: std::sync::mpsc::Sender<bool>,
     found: Option<discovery::Table>,
+    keeper: Option<clipboard::Keeper>,
 ) -> Result<(), String> {
     use std::io::ErrorKind;
     use std::net::TcpListener;
@@ -310,6 +322,9 @@ fn target(
         _ => format!("cannot listen on {listen}: {err}"),
     })?;
     println!("mickey: listening on {listen}");
+    if let Some(keeper) = keeper {
+        serve_clipboard(listen, &identity, &trusted, keeper);
+    }
     loop {
         let (stream, peer) = match listener.accept() {
             Ok(connection) => connection,
@@ -334,6 +349,48 @@ fn target(
             );
         });
     }
+}
+
+/// Answers paired PCs' data links (PRD 0011) on the port after `listen`,
+/// each on its own thread, for as long as Mickey runs.
+fn serve_clipboard(
+    listen: SocketAddr,
+    identity: &std::sync::Arc<identity::Identity>,
+    trusted: &std::sync::Arc<std::sync::Mutex<trust::TrustedPeers>>,
+    keeper: clipboard::Keeper,
+) {
+    let data = transport::data_address(listen);
+    let listener = match std::net::TcpListener::bind(data) {
+        Ok(listener) => listener,
+        Err(err) => {
+            eprintln!("mickey: no shared clipboard: cannot listen on {data}: {err}");
+            return;
+        }
+    };
+    let (identity, trusted) = (identity.clone(), trusted.clone());
+    std::thread::spawn(move || {
+        for stream in listener.incoming().flatten() {
+            let (identity, trusted, keeper) = (identity.clone(), trusted.clone(), keeper.clone());
+            std::thread::spawn(move || {
+                let is_trusted = |key: &[u8; 32]| {
+                    trusted
+                        .lock()
+                        .unwrap_or_else(|p| p.into_inner())
+                        .is_trusted(key)
+                };
+                match transport::accept_data(stream, &identity, is_trusted) {
+                    Ok(link) => {
+                        let _ = clip_sync::answer(
+                            link,
+                            || keeper.read(),
+                            |content| keeper.write(content),
+                        );
+                    }
+                    Err(err) => eprintln!("mickey: data link refused: {err}"),
+                }
+            });
+        }
+    });
 }
 
 /// Pairs with one source if needed, then plays what it sends until it
