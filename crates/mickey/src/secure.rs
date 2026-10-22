@@ -27,13 +27,9 @@ const TAG_LEN: usize = 16;
 /// The largest Noise message we accept. Handshake messages are under 100
 /// bytes and transport messages under 30, so anything bigger is hostile.
 const MAX_NOISE_MESSAGE: usize = 256;
-// ponytail: the clipboard sync uses it (#131).
-#[allow(dead_code)]
 /// The largest bulk payload: a big screenshot fits, and a hostile peer
 /// cannot make us hold gigabytes.
 pub const MAX_BULK: usize = 64 << 20;
-// ponytail: the clipboard sync uses it (#131).
-#[allow(dead_code)]
 /// The most plaintext one Noise message carries (65 535 with its tag).
 const BULK_CHUNK: usize = u16::MAX as usize - TAG_LEN;
 /// A peer that stalls in the middle of the handshake is dropped.
@@ -120,8 +116,6 @@ impl Link {
         protocol::decode(&body[..body_len]).map_err(|err| invalid(err.to_string()))
     }
 
-    // ponytail: the clipboard sync uses it (#131).
-    #[allow(dead_code)]
     /// Sends `bytes` whole, on a data link (PRD 0011): never on the input
     /// link, where it would hold key presses behind it.
     pub fn send_bulk(&mut self, bytes: &[u8]) -> io::Result<()> {
@@ -146,8 +140,6 @@ impl Link {
         Ok(())
     }
 
-    // ponytail: the clipboard sync uses it (#131).
-    #[allow(dead_code)]
     /// Reads one payload sent with `send_bulk`.
     pub fn recv_bulk(&mut self) -> io::Result<Vec<u8>> {
         let mut sealed = vec![0u8; BULK_CHUNK + TAG_LEN];
