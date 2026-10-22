@@ -159,6 +159,8 @@ pub struct Hotkeys {
     /// A key tapped twice quickly also goes to the next PC; `""` turns it
     /// off.
     pub double_tap: Option<String>,
+    /// How close the two taps must be, in milliseconds.
+    pub double_tap_ms: Option<u64>,
 }
 
 /// Every hotkey, parsed. `peers[i]` is peer `i`'s own hotkey, if any.
@@ -171,8 +173,14 @@ pub struct HotkeySet {
     pub back: Chord,
     /// `None` when turned off.
     pub double_tap: Option<u16>,
+    /// Two taps closer than this are a double tap.
+    pub double_tap_window: std::time::Duration,
     pub peers: Vec<Option<Chord>>,
 }
+
+/// How close two taps must be by default, and the range allowed.
+pub const DEFAULT_DOUBLE_TAP_MS: u64 = 400;
+pub const DOUBLE_TAP_MS: std::ops::RangeInclusive<u64> = 150..=1000;
 
 /// The M0 hotkey, still the default for `next`.
 pub const DEFAULT_NEXT: &str = "AltGr+RightShift";
@@ -230,11 +238,26 @@ impl Config {
         let default = |text| chord::parse(text).expect("the defaults parse");
         let double_tap = match self.hotkeys.double_tap.as_deref().map(str::trim) {
             Some("") => None,
-            text => Some(
-                chord::parse_key(text.unwrap_or(DEFAULT_DOUBLE_TAP))
-                    .map_err(|err| format!("hotkeys.double_tap: {err}"))?,
-            ),
+            text => {
+                let text = text.unwrap_or(DEFAULT_DOUBLE_TAP);
+                let code =
+                    chord::parse_key(text).map_err(|err| format!("hotkeys.double_tap: {err}"))?;
+                if !chord::fits_a_double_tap(code) {
+                    return Err(format!(
+                        "hotkeys.double_tap: `{text}` is typed alone, so a double tap on it would get in the way; use Shift, Ctrl, Alt, AltGr, Super or an F key"
+                    ));
+                }
+                Some(code)
+            }
         };
+        let window = self.hotkeys.double_tap_ms.unwrap_or(DEFAULT_DOUBLE_TAP_MS);
+        if !DOUBLE_TAP_MS.contains(&window) {
+            return Err(format!(
+                "hotkeys.double_tap_ms: {window} is outside {} to {}",
+                DOUBLE_TAP_MS.start(),
+                DOUBLE_TAP_MS.end()
+            ));
+        }
         let set = HotkeySet {
             next: one("hotkeys.next", &self.hotkeys.next)?.unwrap_or_else(|| default(DEFAULT_NEXT)),
             home: one("hotkeys.home", &self.hotkeys.home)?,
@@ -243,6 +266,7 @@ impl Config {
                 .unwrap_or_else(|| default(DEFAULT_FORWARD)),
             back: one("hotkeys.back", &self.hotkeys.back)?.unwrap_or_else(|| default(DEFAULT_BACK)),
             double_tap,
+            double_tap_window: std::time::Duration::from_millis(window),
             peers: self
                 .peers
                 .iter()
@@ -432,6 +456,23 @@ fn toml_string(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_double_tap_needs_a_key_nobody_types_alone_and_a_sane_window() {
+        let hotkeys =
+            |body: &str| parse(&format!("[hotkeys]\n{body}\n")).and_then(|config| config.hotkeys());
+        assert_eq!(
+            hotkeys("double_tap = \"LeftCtrl\"").unwrap().double_tap,
+            Some(29)
+        );
+        assert_eq!(hotkeys("double_tap = \"F9\"").unwrap().double_tap, Some(67));
+        let letter = hotkeys("double_tap = \"W\"").unwrap_err();
+        assert!(letter.contains("typed alone"), "{letter}");
+        let window = hotkeys("double_tap_ms = 600").unwrap().double_tap_window;
+        assert_eq!(window, std::time::Duration::from_millis(600));
+        assert!(hotkeys("double_tap_ms = 50").is_err());
+        assert_eq!(hotkeys("").unwrap().double_tap_window.as_millis(), 400);
+    }
 
     #[test]
     fn a_peer_is_added_at_the_end_with_a_free_name() {

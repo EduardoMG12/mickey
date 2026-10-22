@@ -33,6 +33,8 @@ pub struct Form {
     pub back: String,
     /// A key name; empty turns the double tap off.
     pub double_tap: String,
+    /// How close the two taps must be, in milliseconds.
+    pub double_tap_ms: u64,
     pub position: String,
     pub speed: i32,
 }
@@ -65,6 +67,10 @@ impl Form {
                 .double_tap
                 .clone()
                 .unwrap_or_else(|| config::DEFAULT_DOUBLE_TAP.into()),
+            double_tap_ms: config
+                .hotkeys
+                .double_tap_ms
+                .unwrap_or(config::DEFAULT_DOUBLE_TAP_MS),
             position: config.interface.switcher_position.clone(),
             speed: config.touchpad.speed,
         }
@@ -128,6 +134,10 @@ impl Form {
             "double_tap = {}    # a key tapped twice quickly: next PC\n",
             quote(self.double_tap.trim())
         );
+        out += &format!(
+            "double_tap_ms = {}    # how close the two taps must be\n",
+            self.double_tap_ms
+        );
         out += "\n[interface]\n";
         out += &format!("switcher_position = {}\n", quote(&self.position));
         out += "\n[touchpad]\n";
@@ -153,6 +163,8 @@ pub struct Settings {
     message: String,
     /// A hotkey being recorded: its row, and where `mickey record` answers.
     recording: Option<(usize, std::sync::mpsc::Receiver<Result<String, String>>)>,
+    /// The hotkey row being typed into, if any.
+    typing: Option<usize>,
     /// The mascot in the header, loaded on the first frame.
     mascot: Option<egui::TextureHandle>,
     /// When config.toml last changed as far as this window knows, and when
@@ -245,6 +257,7 @@ impl Settings {
             tab: Tab::ThisPc,
             mascot: None,
             recording: None,
+            typing: None,
             message,
             config_changed: config_time(),
             looked: Instant::now(),
@@ -469,7 +482,7 @@ impl eframe::App for Settings {
                     layout::show(ui, canvas, peers, &mut form.pcs, &mut self.drag);
                 }
                 Tab::Hotkeys => {
-                    ui.weak("Record and press the keys together (or tap one key twice for the double tap), or type them, e.g. AltGr+RightShift+H.");
+                    ui.weak("Record, then press the keys together, or tap one key twice for the double tap. You can also type the names.");
                     ui.add_space(4.0);
                     // What the recording in progress gave, if it is done.
                     if let Some((row, answer)) = &self.recording
@@ -481,14 +494,33 @@ impl eframe::App for Settings {
                     }
                     let busy = self.recording.as_ref().map(|(row, _)| *row);
                     egui::Grid::new("hotkeys")
-                        .num_columns(4)
-                        .spacing([10.0, 10.0])
+                        .num_columns(5)
+                        .min_col_width(60.0)
+                        .spacing([10.0, 12.0])
                         .show(ui, |ui| {
                             for (row, (label, default)) in HOTKEY_ROWS.iter().enumerate() {
-                                ui.label(*label);
+                                ui.label(egui::RichText::new(*label).strong());
+                                let double = row == DOUBLE_TAP_ROW;
                                 let value = hotkey_field(form, row);
-                                let hint = if default.is_empty() { "none" } else { default };
-                                ui.add(egui::TextEdit::singleline(value).hint_text(hint).desired_width(220.0));
+                                if self.typing == Some(row) {
+                                    let hint = if default.is_empty() { "none" } else { default };
+                                    let field = ui.add(
+                                        egui::TextEdit::singleline(value).hint_text(hint).desired_width(260.0),
+                                    );
+                                    field.request_focus();
+                                    if ui.button(format!("{}  Done", icon::CHECK)).clicked()
+                                        || ui.input(|input| input.key_pressed(egui::Key::Enter))
+                                    {
+                                        self.typing = None;
+                                    }
+                                } else {
+                                    // The keys as keys; an empty setting shows its default, faded.
+                                    let shown = if value.trim().is_empty() && !double { default } else { value.trim() };
+                                    theme::keycaps(ui, shown, double, value.trim().is_empty());
+                                    if ui.button("Type").clicked() {
+                                        self.typing = Some(row);
+                                    }
+                                }
                                 if busy == Some(row) {
                                     ui.colored_label(theme::palette::BRUISE, "Press the keys…");
                                     ui.ctx().request_repaint_after(Duration::from_millis(100));
@@ -514,6 +546,17 @@ impl eframe::App for Settings {
                                 ui.end_row();
                             }
                         });
+                    ui.add_space(8.0);
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().slider_width = 220.0;
+                        ui.label("Double tap: both taps within");
+                        ui.add(
+                            egui::Slider::new(&mut form.double_tap_ms, config::DOUBLE_TAP_MS)
+                                .suffix(" ms")
+                                .step_by(50.0),
+                        );
+                    });
+                    ui.weak("Only keys nobody types alone can be a double tap: Shift, Ctrl, Alt, AltGr, Super, F1–F12.");
                     ui.add_space(6.0);
                     ui.weak("Each PC also gets the next number: the hotkey + 1, + 2… goes straight to it.");
                 }
