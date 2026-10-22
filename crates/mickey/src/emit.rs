@@ -1,28 +1,104 @@
-//! Turns Mickey events into real input on Windows.
+//! Turns Mickey events into real input on the target: `SendInput` on
+//! Windows, a uinput virtual device on Linux (PRD 0008).
 
 use crate::event::InputEvent;
-use crate::keymap;
-use crate::platform::windows;
 use std::io;
 
-/// Injects one event. Keys and buttons with no Windows equivalent are
-/// dropped.
-// ponytail: dropped silently; the PRD wants each unknown code logged once,
-// which waits for a logger that keeps codes at trace level.
-pub fn emit(event: InputEvent) -> io::Result<()> {
-    match event {
-        InputEvent::Key { code, pressed } => match keymap::scan_code(code) {
-            Some(scan) => windows::send_key(u16::from(scan.code), scan.extended, pressed),
-            None => Ok(()),
-        },
-        InputEvent::Button { code, pressed } => match keymap::mouse_button(code) {
-            Some(button) => windows::send_button(button, pressed),
-            None => Ok(()),
-        },
-        InputEvent::Motion { dx, dy } => windows::move_mouse(dx, dy),
-        InputEvent::Scroll {
-            vertical,
-            horizontal,
-        } => windows::scroll(vertical, horizontal),
+#[cfg(windows)]
+pub struct Emitter;
+
+#[cfg(windows)]
+impl Emitter {
+    pub fn new() -> Result<Emitter, String> {
+        Ok(Emitter)
+    }
+
+    /// Injects one event. Keys and buttons with no Windows equivalent are
+    /// dropped.
+    // ponytail: dropped silently; the PRD wants each unknown code logged
+    // once, which waits for a logger that keeps codes at trace level.
+    pub fn emit(&mut self, event: InputEvent) -> io::Result<()> {
+        use crate::keymap;
+        use crate::platform::windows;
+        match event {
+            InputEvent::Key { code, pressed } => match keymap::scan_code(code) {
+                Some(scan) => windows::send_key(u16::from(scan.code), scan.extended, pressed),
+                None => Ok(()),
+            },
+            InputEvent::Button { code, pressed } => match keymap::mouse_button(code) {
+                Some(button) => windows::send_button(button, pressed),
+                None => Ok(()),
+            },
+            InputEvent::Motion { dx, dy } => windows::move_mouse(dx, dy),
+            InputEvent::Scroll {
+                vertical,
+                horizontal,
+            } => windows::scroll(vertical, horizontal),
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+pub struct Emitter {
+    device: crate::platform::uinput::VirtualDevice,
+    /// Hi-res wheel units not yet worth a whole notch, per axis, so that
+    /// programs reading only `REL_WHEEL` still scroll.
+    partial: [i32; 2],
+}
+
+#[cfg(target_os = "linux")]
+impl Emitter {
+    pub fn new() -> Result<Emitter, String> {
+        use crate::platform::uinput::VirtualDevice;
+        let device = VirtualDevice::create("Mickey").map_err(|err| match err.kind() {
+            io::ErrorKind::PermissionDenied | io::ErrorKind::NotFound => format!(
+                "cannot create a virtual keyboard ({err}); allow the input group with the \
+                 udev rule in the README, or for this boot: \
+                 sudo chgrp input /dev/uinput && sudo chmod 660 /dev/uinput"
+            ),
+            _ => format!("cannot create a virtual keyboard: {err}"),
+        })?;
+        Ok(Emitter {
+            device,
+            partial: [0; 2],
+        })
+    }
+
+    /// Codes are evdev codes already, so keys pass straight through.
+    pub fn emit(&mut self, event: InputEvent) -> io::Result<()> {
+        use crate::platform::uinput::{EV_KEY, EV_REL};
+        const REL_X: u16 = 0;
+        const REL_Y: u16 = 1;
+        // (low-res, hi-res) codes for vertical and horizontal.
+        const WHEELS: [(u16, u16); 2] = [(8, 11), (6, 12)];
+        const NOTCH: i32 = 120;
+        match event {
+            InputEvent::Key { code, pressed } | InputEvent::Button { code, pressed } => {
+                self.device.emit(EV_KEY, code, i32::from(pressed))?;
+            }
+            InputEvent::Motion { dx, dy } => {
+                self.device.emit(EV_REL, REL_X, dx)?;
+                self.device.emit(EV_REL, REL_Y, dy)?;
+            }
+            InputEvent::Scroll {
+                vertical,
+                horizontal,
+            } => {
+                for (axis, amount) in [vertical, horizontal].into_iter().enumerate() {
+                    if amount == 0 {
+                        continue;
+                    }
+                    let (low, high) = WHEELS[axis];
+                    self.device.emit(EV_REL, high, amount)?;
+                    self.partial[axis] += amount;
+                    let notches = self.partial[axis] / NOTCH;
+                    if notches != 0 {
+                        self.device.emit(EV_REL, low, notches)?;
+                        self.partial[axis] -= notches * NOTCH;
+                    }
+                }
+            }
+        }
+        self.device.sync()
     }
 }
