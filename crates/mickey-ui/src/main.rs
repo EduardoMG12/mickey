@@ -5,6 +5,7 @@
 #![windows_subsystem = "windows"]
 
 mod choice;
+mod layout;
 mod place;
 mod settings;
 

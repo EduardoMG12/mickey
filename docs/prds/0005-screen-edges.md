@@ -48,13 +48,13 @@ The position is read only while the mouse moves.
 
 ## Requirements
 
-- [ ] `mickey monitors` lists this PC's monitors on Windows and Hyprland.
-- [ ] `Monitors` message (up to 8 monitors), protocol version 3.
-- [ ] `[[peer]] side = "left" | "right" | "above" | "below"`.
+- [x] `mickey monitors` lists this PC's monitors on Windows and Hyprland.
+- [x] `Monitors` message (up to 8 monitors), protocol version 3.
+- [x] `[[peer]] side = "left" | "right" | "above" | "below"`.
 - [ ] Edge crossing both ways, same relative height; no crossing while a
       mouse button is held (dragging a window must not throw it to another
       PC).
-- [ ] Settings window: PCs online and their monitors, drawn; drag to set
+- [x] Settings window: PCs online and their monitors, drawn; drag to set
       the side.
 
 ## Non-Goals
@@ -64,4 +64,18 @@ The position is read only while the mouse moves.
 
 ## Discoveries
 
-*(Filled in during execution.)*
+- **One peer per side.** `config.toml` refuses two peers on the same side,
+  so an edge always leads to a single PC; in the settings window, dropping
+  a PC on a taken side swaps the two. Chains (a PC right of a PC) are left
+  for later, if they are ever wanted.
+- **The settings window asks the running Mickey.** It is a separate
+  process, so it runs `mickey peers`, which goes over the control channel
+  (a Unix socket on Linux; on Windows, TCP on localhost with a token in the
+  user's own folder, since std has no Unix sockets there). `Monitor` and
+  the `peers` text format live in `mickey-config`, which both crates use.
+- **Games and raw input (Windows).** Found while testing the edges with
+  Counter-Strike open: games read input with raw input, which hooks cannot
+  block, and pin the cursor while aiming. While the focus is remote, an
+  invisible Mickey window takes the foreground (games only get raw input
+  in the foreground) and motion is read from raw input, not cursor
+  positions.
