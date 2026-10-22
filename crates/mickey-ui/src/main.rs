@@ -81,8 +81,10 @@ impl eframe::App for Switcher {
         }
         let (next, previous, enter, escape, digit) = ctx.input(|input| {
             (
-                input.key_pressed(egui::Key::ArrowRight) || input.key_pressed(egui::Key::Tab),
-                input.key_pressed(egui::Key::ArrowLeft),
+                input.key_pressed(egui::Key::ArrowRight)
+                    || input.key_pressed(egui::Key::ArrowDown)
+                    || input.key_pressed(egui::Key::Tab),
+                input.key_pressed(egui::Key::ArrowLeft) || input.key_pressed(egui::Key::ArrowUp),
                 input.key_pressed(egui::Key::Enter),
                 input.key_pressed(egui::Key::Escape),
                 // Card 0 is this PC, card 1 the first other PC, and so on.

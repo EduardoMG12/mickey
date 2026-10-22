@@ -22,6 +22,7 @@ use crate::secure::Link;
 use crate::transport;
 use crate::tray::{self, Tray};
 use crate::trust;
+use crate::window;
 use mickey_config as config;
 use mickey_config::peers::{PeerInfo, Peers};
 use std::net::SocketAddr;
@@ -484,6 +485,8 @@ pub fn run(
     let mut mirror: Option<std::process::Child> = None;
     // Whether switchers or copies are open anywhere for this PC.
     let mut copies_out = false;
+    // The switcher open on this PC for picking, to close it on a second press.
+    let shown_here = window::Slot::default();
     // The status for bars and commands; without a runtime directory Mickey
     // still works, just without them.
     let control = match Control::start(wake.clone()) {
@@ -975,7 +978,10 @@ pub fn run(
         }
         // The switcher shows on the PC in use, and a copy on every other
         // online PC, so it is seen wherever the owner looks (PRD 0007).
+        // The hotkey again while switchers are open closes them all.
+        let toggled_off = copies_out && (open || open_on.is_some());
         let in_use = match open_on {
+            _ if toggled_off => None,
             Some(peer) => Some(Some(peer)),
             None if open && !switcher_open => Some(None),
             None => None,
@@ -1001,14 +1007,16 @@ pub fn run(
                 Some(_) => mirror = open_mirror(&cards, &interface).or(mirror),
                 None => {
                     switcher_open = true;
-                    open_switcher(&cards, &interface, &wake);
+                    open_switcher(&cards, &interface, &wake, &shown_here);
                 }
             }
             copies_out = true;
         }
         // Closed once a pick is made, or when the focus moved some other way.
-        if copies_out && (picked || (in_use.is_none() && switcher.focus() != left)) {
+        let moved = in_use.is_none() && switcher.focus() != left;
+        if copies_out && (picked || toggled_off || moved) {
             copies_out = false;
+            window::close(&shown_here);
             if let Some(mover) = &mover {
                 mover.close_switchers();
             }
@@ -1176,24 +1184,24 @@ fn open_mirror(cards: &[String], interface: &config::Interface) -> Option<std::p
         .ok()
 }
 
-fn open_switcher(cards: &[String], interface: &config::Interface, wake: &Sender<Wake>) {
+fn open_switcher(
+    cards: &[String],
+    interface: &config::Interface,
+    wake: &Sender<Wake>,
+    slot: &window::Slot,
+) {
     let args = switcher_args(cards, interface, false);
-    let wake = wake.clone();
+    let (wake, slot) = (wake.clone(), slot.clone());
     thread::spawn(move || {
-        let pick = std::env::current_exe()
-            .map(|exe| exe.with_file_name(format!("mickey-ui{}", std::env::consts::EXE_SUFFIX)))
-            .and_then(|ui| Command::new(ui).args(&args).output())
-            .map_err(|err| format!("mickey-ui: {err}"))
-            .and_then(|output| match output.status.code() {
-                // The window prints the card index; card 0 is this PC.
-                Some(0) => String::from_utf8_lossy(&output.stdout)
-                    .trim()
-                    .parse::<usize>()
-                    .map(|card| card.checked_sub(1))
-                    .map_err(|err| format!("mickey-ui answered badly: {err}")),
-                Some(1) => Ok(None),
-                _ => Err(String::from_utf8_lossy(&output.stderr).trim().to_string()),
-            });
+        let pick = match window::run(&args, &slot) {
+            // The window prints the card's id; 0 is this PC.
+            window::Outcome::Answered(text) => text
+                .parse::<usize>()
+                .map(|card| card.checked_sub(1))
+                .map_err(|err| format!("mickey-ui answered badly: {err}")),
+            window::Outcome::Closed => Ok(None),
+            window::Outcome::Failed(err) => Err(err),
+        };
         let _ = wake.send(Wake::Pick(pick));
     });
 }
