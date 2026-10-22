@@ -15,3 +15,9 @@ snow = { version = "0.10", default-features = false, features = [
     "use-blake2",
     "use-getrandom",
 ] }
+
+# The tray icon on Linux (PRD 0009): the StatusNotifierItem protocol over
+# D-Bus, too large to write by hand. Without tokio: its blocking API runs on
+# the small async-io executor, on a thread of its own.
+[target.'cfg(target_os = "linux")'.dependencies]
+ksni = { version = "0.3", default-features = false, features = ["blocking", "async-io"] }
