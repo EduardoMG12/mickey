@@ -66,6 +66,16 @@ const _: () = assert!(size_of::<Input>() == 40);
 #[link(name = "user32")]
 unsafe extern "system" {
     fn SendInput(count: u32, inputs: *const Input, size: i32) -> u32;
+    fn SetCursorPos(x: i32, y: i32) -> i32;
+}
+
+/// Puts the cursor at a point of the virtual desktop.
+pub fn set_cursor_pos(x: i32, y: i32) -> io::Result<()> {
+    // SAFETY: takes two plain integers; Windows clamps them to the desktop.
+    match unsafe { SetCursorPos(x, y) } {
+        0 => Err(io::Error::last_os_error()),
+        _ => Ok(()),
+    }
 }
 
 /// Sends a scan code, so the target's keyboard layout decides the character.

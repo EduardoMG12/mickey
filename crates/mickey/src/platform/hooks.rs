@@ -300,8 +300,9 @@ pub fn start(events: Sender<HookEvent>) -> io::Result<()> {
                     }
                 }
                 WM_INPUT => {
-                    if swallowing()
-                        && let Some((dx, dy)) = raw_mouse_delta(msg.lparam)
+                    // Also while not swallowing: the source watches motion
+                    // to notice the cursor pushing against a screen edge.
+                    if let Some((dx, dy)) = raw_mouse_delta(msg.lparam)
                         && (dx != 0 || dy != 0)
                     {
                         report(HookEvent::Delta { dx, dy });
@@ -498,6 +499,15 @@ pub fn cursor_pos() -> Point {
     // SAFETY: `point` is a valid POINT for the call to fill.
     unsafe { GetCursorPos(&mut point) };
     point
+}
+
+/// Whether a mouse button is down right now.
+pub fn button_down() -> bool {
+    // VK_LBUTTON, VK_RBUTTON, VK_MBUTTON, VK_XBUTTON1, VK_XBUTTON2.
+    // SAFETY: as in `any_key_down`.
+    [0x01, 0x02, 0x04, 0x05, 0x06]
+        .into_iter()
+        .any(|vk| unsafe { GetAsyncKeyState(vk) } < 0)
 }
 
 /// Whether any key or mouse button is down right now.
