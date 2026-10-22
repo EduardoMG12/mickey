@@ -164,6 +164,7 @@ Order agreed with the owner on 2026-10-21: secure link, then steps 1–4.
 | Step 4 | Screens have edges | [0005](0005-screen-edges.md) | The cursor crosses to the neighbor placed in step 3, and back; the hotkey stays the way home. On Wayland this needs a spike: apps cannot read the cursor position |
 | Both ways | Windows drives Linux | [0008](0008-windows-drives-linux.md) | Linux targets (`uinput`) and Windows as the source (low-level hooks), brought forward from M1/M2 at the owner's request: peers become symmetric |
 | Tray | Tray icon | [0009](0009-tray-icon.md) | An icon in the system tray of every PC, with a green or red dot for "the keyboard and mouse are here", and a menu of PCs |
+| Pairing | Connect without a terminal | [0010](0010-easy-pairing.md) | PCs find each other on the LAN; the same six-digit code on both screens; Accept in a window; no restart |
 | M2 | Any desktop | 0004 (todo) | Native backends (wlroots, portals, X11); Windows as the source |
 
 ### Later (unordered, not committed)
