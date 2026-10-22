@@ -165,6 +165,8 @@ pub struct Settings {
     recording: Option<(usize, std::sync::mpsc::Receiver<Result<String, String>>)>,
     /// The hotkey row being typed into, if any.
     typing: Option<usize>,
+    /// The PCs heard on the network, from `mickey discover`.
+    nearby: Vec<Nearby>,
     /// The mascot in the header, loaded on the first frame.
     mascot: Option<egui::TextureHandle>,
     /// When config.toml last changed as far as this window knows, and when
@@ -250,7 +252,7 @@ impl Settings {
         Settings {
             saved: form.clone(),
             form,
-            fingerprint: ask_mickey("id").unwrap_or_else(|_| "(run `mickey id`)".into()),
+            fingerprint: ask_mickey(&["id"]).unwrap_or_else(|_| "(run `mickey id`)".into()),
             peers: load_peers(),
             asked: Instant::now(),
             drag: layout::Drag::default(),
@@ -258,6 +260,7 @@ impl Settings {
             mascot: None,
             recording: None,
             typing: None,
+            nearby: load_nearby(),
             message,
             config_changed: config_time(),
             looked: Instant::now(),
@@ -288,6 +291,7 @@ impl Settings {
         }
         if self.asked.elapsed() > Duration::from_secs(5) {
             self.peers = load_peers();
+            self.nearby = load_nearby();
             self.asked = Instant::now();
         }
     }
@@ -312,7 +316,7 @@ impl Settings {
                 self.config_changed = config_time();
                 // The layout is used at once and the other PCs follow it;
                 // other settings still wait for a restart.
-                match ask_mickey("arranged") {
+                match ask_mickey(&["arranged"]) {
                     Ok(_) => {
                         "Saved. The other PCs follow the new layout; restart Mickey for the rest."
                             .into()
@@ -331,12 +335,12 @@ fn empty() -> Config {
 
 /// Runs `mickey <argument>` from next to this program: its output, or
 /// what it said went wrong.
-fn ask_mickey(argument: &str) -> Result<String, String> {
+fn ask_mickey(arguments: &[&str]) -> Result<String, String> {
     std::env::current_exe()
         .map(|exe| exe.with_file_name(format!("mickey{}", std::env::consts::EXE_SUFFIX)))
         .and_then(|mickey| {
             let mut command = Command::new(mickey);
-            command.arg(argument);
+            command.args(arguments);
             // mickey.exe is a console program; without this, Windows would
             // flash a console window over the settings.
             #[cfg(windows)]
@@ -354,8 +358,37 @@ fn ask_mickey(argument: &str) -> Result<String, String> {
         })
 }
 
+/// A PC running Mickey heard on the network.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Nearby {
+    name: String,
+    address: String,
+    fingerprint: String,
+}
+
+/// `mickey discover --lines`: name, address, fingerprint per line. Empty
+/// when Mickey cannot say.
+fn load_nearby() -> Vec<Nearby> {
+    parse_nearby(&ask_mickey(&["discover", "--lines"]).unwrap_or_default())
+}
+
+fn parse_nearby(text: &str) -> Vec<Nearby> {
+    text.lines()
+        .filter_map(|line| {
+            let [name, address, fingerprint] = line.split('\t').collect::<Vec<_>>()[..] else {
+                return None;
+            };
+            Some(Nearby {
+                name: name.to_string(),
+                address: address.to_string(),
+                fingerprint: fingerprint.to_string(),
+            })
+        })
+        .collect()
+}
+
 fn load_peers() -> Result<Peers, String> {
-    let text = ask_mickey("peers")?;
+    let text = ask_mickey(&["peers"])?;
     Peers::from_text(&text).ok_or_else(|| format!("mickey peers answered `{text}`"))
 }
 
@@ -422,44 +455,85 @@ impl eframe::App for Settings {
                     ui.checkbox(&mut form.controlled, "Let paired PCs control this one");
                 }
                 Tab::Pcs => {
+                    // What the window last heard: who is online, their monitors.
+                    let online = |name: &str| {
+                        self.peers.as_ref().ok().and_then(|peers| peers.peers.iter().find(|peer| peer.name == name))
+                    };
+                    ui.label(egui::RichText::new(format!("{}  Your PCs", icon::DESKTOP)).size(16.0).strong());
+                    if form.pcs.is_empty() {
+                        ui.weak("None yet: connect one from the list below.");
+                    }
                     let mut remove = None;
-                    egui::Grid::new("pcs")
-                        .striped(true)
-                        .num_columns(4)
-                        .min_col_width(150.0)
-                        .show(ui, |ui| {
-                            ui.strong("Name");
-                            ui.strong("Address (ip:port)");
-                            ui.strong("Hotkey (optional)");
-                            ui.end_row();
-                            for (i, pc) in form.pcs.iter_mut().enumerate() {
-                                ui.add(
-                                    egui::TextEdit::singleline(&mut pc.name).desired_width(150.0),
-                                );
-                                ui.add(
-                                    egui::TextEdit::singleline(&mut pc.address)
-                                        .desired_width(170.0),
-                                );
-                                ui.add(
-                                    egui::TextEdit::singleline(&mut pc.hotkey).desired_width(170.0),
-                                );
-                                if ui.button(format!("{}  Remove", icon::TRASH)).clicked() {
-                                    remove = Some(i);
-                                }
-                                ui.end_row();
+                    egui::Grid::new("pcs").num_columns(5).spacing([10.0, 8.0]).show(ui, |ui| {
+                        for (i, pc) in form.pcs.iter_mut().enumerate() {
+                            let info = online(&pc.name);
+                            let up = info.is_some_and(|info| info.online);
+                            ui.horizontal(|ui| {
+                                let (spot, _) = ui.allocate_exact_size(egui::vec2(10.0, 10.0), egui::Sense::hover());
+                                let colour = if up { theme::palette::HERE } else { theme::palette::FUR };
+                                ui.painter().circle_filled(spot.center(), 4.0, colour);
+                                ui.add_sized([140.0, 24.0], egui::TextEdit::singleline(&mut pc.name));
+                            });
+                            ui.weak(format!("{}  {}", icon::LINK, pc.address));
+                            ui.weak(match info.map(|info| info.monitors.len()) {
+                                Some(0) | None => "monitors unknown".to_string(),
+                                Some(1) => format!("{}  1 monitor", icon::MONITOR),
+                                Some(n) => format!("{}  {n} monitors", icon::MONITOR),
+                            });
+                            ui.add_sized([170.0, 24.0], egui::TextEdit::singleline(&mut pc.hotkey).hint_text("own hotkey"));
+                            if ui.button(format!("{}  Remove", icon::TRASH)).clicked() {
+                                remove = Some(i);
                             }
-                        });
+                            ui.end_row();
+                        }
+                    });
                     if let Some(i) = remove {
                         form.pcs.remove(i);
                     }
-                    if ui.button(format!("{}  Add a PC", icon::PLUS)).clicked() {
-                        form.pcs.push(PcRow {
-                            name: "New PC".into(),
-                            address: format!("192.168.0.2:{}", config::DEFAULT_PORT),
-                            hotkey: String::new(),
-                            position: None,
-                        });
+
+                    ui.add_space(12.0);
+                    ui.label(egui::RichText::new(format!("{}  On this network", icon::SEARCH)).size(16.0).strong());
+                    let known: Vec<&str> = form.pcs.iter().map(|pc| pc.address.as_str()).collect();
+                    let nearby: Vec<&Nearby> = self
+                        .nearby
+                        .iter()
+                        .filter(|pc| !known.contains(&pc.address.as_str()))
+                        .collect();
+                    if nearby.is_empty() {
+                        ui.weak("No other PC running Mickey heard yet. Start Mickey on it; it shows up here within seconds.");
                     }
+                    let mut connect = None;
+                    egui::Grid::new("nearby").num_columns(4).spacing([10.0, 8.0]).show(ui, |ui| {
+                        for pc in nearby {
+                            ui.label(egui::RichText::new(format!("{}  {}", icon::LAPTOP, pc.name)).strong());
+                            ui.weak(&pc.address);
+                            ui.weak(pc.fingerprint.get(..9).unwrap_or(&pc.fingerprint));
+                            if ui.add(theme::primary(icon::LINK, "Connect")).clicked() {
+                                connect = Some((pc.address.clone(), pc.name.clone()));
+                            }
+                            ui.end_row();
+                        }
+                    });
+                    if let Some((address, name)) = connect {
+                        self.message = match ask_mickey(&["connect", &address, &name]) {
+                            Ok(answer) => answer.trim().trim_start_matches("mickey: ").to_string(),
+                            Err(err) => format!("Could not connect: {err}"),
+                        };
+                    }
+
+                    ui.add_space(12.0);
+                    egui::CollapsingHeader::new("Add by address…").show(ui, |ui| {
+                        ui.weak("Only if the PC does not show up above (another network, say).");
+                        if ui.button(format!("{}  Add a PC", icon::PLUS)).clicked() {
+                            form.pcs.push(PcRow {
+                                name: "New PC".into(),
+                                address: format!("192.168.0.2:{}", config::DEFAULT_PORT),
+                                hotkey: String::new(),
+                                position: None,
+                            });
+                        }
+                        ui.weak("Then edit its address in Your PCs, and Save.");
+                    });
                 }
                 Tab::Layout => {
                     // Mickey may still be starting: ask again every 2 s.
@@ -530,7 +604,7 @@ impl eframe::App for Settings {
                                 {
                                     let (send, answer) = std::sync::mpsc::channel();
                                     std::thread::spawn(move || {
-                                        let _ = send.send(ask_mickey("record"));
+                                        let _ = send.send(ask_mickey(&["record"]));
                                     });
                                     self.recording = Some((row, answer));
                                 }
@@ -628,6 +702,13 @@ mod tests {
             recorded(&mut form, 0, Ok("error: no keys were pressed".into())),
             "no keys were pressed"
         );
+    }
+
+    #[test]
+    fn nearby_lines_become_pcs() {
+        let nearby = parse_nearby("Desk\t192.0.2.64:4242\tVK2A-L4MJ\nnonsense\n");
+        assert_eq!(nearby.len(), 1);
+        assert_eq!(nearby[0].address, "192.0.2.64:4242");
     }
 
     #[test]

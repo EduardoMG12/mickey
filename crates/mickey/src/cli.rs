@@ -23,7 +23,8 @@ usage:
   mickey id                          show this machine's fingerprint
   mickey monitors                    list this machine's monitors
   mickey peers                       list the PCs, whether they are online, and their monitors
-  mickey discover                    list the PCs running Mickey on this network
+  mickey discover [--lines]          list the PCs running Mickey on this network
+  mickey connect <ip:port> <name>    add a PC found on the network and pair with it
   mickey history [--lines]           list the recent copies on this PC (newest first);
                                      --lines prints them tab-separated, for the window
   mickey history copy <id>           copy that entry again
@@ -39,8 +40,11 @@ pub enum Command {
     Monitors,
     /// Ask the running source for the PCs and their monitors.
     Peers,
-    /// Ask the running Mickey for the PCs it hears on the network.
-    Discover,
+    /// Ask the running Mickey for the PCs it hears on the network;
+    /// `lines`: tab-separated, for the settings window.
+    Discover {
+        lines: bool,
+    },
     /// List the clipboard history; `lines`: tab-separated, for programs.
     History {
         lines: bool,
@@ -76,7 +80,17 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
         [command] if command == "run" => Ok(Command::Run),
         [command] if command == "monitors" => Ok(Command::Monitors),
         [command] if command == "peers" => Ok(Command::Peers),
-        [command] if command == "discover" => Ok(Command::Discover),
+        [command] if command == "discover" => Ok(Command::Discover { lines: false }),
+        [command, flag] if command == "discover" && flag == "--lines" => {
+            Ok(Command::Discover { lines: true })
+        }
+        [command, address, name @ ..] if command == "connect" && !name.is_empty() => {
+            let address = parse_addr(address)?;
+            Ok(Command::Order(format!(
+                "connect {address} {}",
+                name.join(" ")
+            )))
+        }
         [command] if command == "history" => Ok(Command::History { lines: false }),
         [command, flag] if command == "history" && flag == "--lines" => {
             Ok(Command::History { lines: true })
