@@ -151,12 +151,62 @@ pub struct Settings {
     drag: layout::Drag,
     tab: Tab,
     message: String,
+    /// A hotkey being recorded: its row, and where `mickey record` answers.
+    recording: Option<(usize, std::sync::mpsc::Receiver<Result<String, String>>)>,
     /// The mascot in the header, loaded on the first frame.
     mascot: Option<egui::TextureHandle>,
     /// When config.toml last changed as far as this window knows, and when
     /// it last looked: another PC may place itself and rewrite the file.
     config_changed: Option<std::time::SystemTime>,
     looked: Instant,
+}
+
+/// The Hotkeys tab's rows: what each is for, and what empty means.
+const HOTKEY_ROWS: [(&str, &str); 6] = [
+    ("Next PC / switcher", config::DEFAULT_NEXT),
+    ("Back to this PC", "the hotkey above + 0"),
+    ("Open the switcher", ""),
+    ("Next PC (one hand)", config::DEFAULT_FORWARD),
+    ("Previous PC (one hand)", config::DEFAULT_BACK),
+    ("Double tap (empty: off)", ""),
+];
+const DOUBLE_TAP_ROW: usize = 5;
+
+fn hotkey_field(form: &mut Form, row: usize) -> &mut String {
+    match row {
+        0 => &mut form.next,
+        1 => &mut form.home,
+        2 => &mut form.switcher,
+        3 => &mut form.forward,
+        4 => &mut form.back,
+        _ => &mut form.double_tap,
+    }
+}
+
+/// Puts what `mickey record` heard into the row, and says how it went.
+fn recorded(form: &mut Form, row: usize, result: Result<String, String>) -> String {
+    let answer = match result {
+        Ok(answer) => answer,
+        Err(err) => return format!("Could not record: {err}"),
+    };
+    let heard = answer.trim().strip_prefix("ok: ").map(str::to_string);
+    match (heard, row == DOUBLE_TAP_ROW) {
+        (Some(heard), true) => match heard.strip_prefix("double ") {
+            Some(key) => {
+                *hotkey_field(form, row) = key.to_string();
+                format!("Recorded: double tap {key}")
+            }
+            None => "That was keys together; tap one key twice here.".into(),
+        },
+        (Some(heard), false) if heard.starts_with("double ") => {
+            "That was a double tap; it belongs in the Double tap row.".into()
+        }
+        (Some(heard), false) => {
+            *hotkey_field(form, row) = heard.clone();
+            format!("Recorded: {heard}")
+        }
+        (None, _) => answer.trim().trim_start_matches("error: ").to_string(),
+    }
 }
 
 /// When config.toml was last written, if it exists.
@@ -194,6 +244,7 @@ impl Settings {
             drag: layout::Drag::default(),
             tab: Tab::ThisPc,
             mascot: None,
+            recording: None,
             message,
             config_changed: config_time(),
             looked: Instant::now(),
@@ -418,26 +469,53 @@ impl eframe::App for Settings {
                     layout::show(ui, canvas, peers, &mut form.pcs, &mut self.drag);
                 }
                 Tab::Hotkeys => {
-                    ui.weak("e.g. AltGr+RightShift or AltGr+RightShift+H");
-                    ui.weak(
-                        "Empty: AltGr+RightShift (next), +0 (home), +1 to +9 (each PC in order)",
-                    );
+                    ui.weak("Record and press the keys together (or tap one key twice for the double tap), or type them, e.g. AltGr+RightShift+H.");
+                    ui.add_space(4.0);
+                    // What the recording in progress gave, if it is done.
+                    if let Some((row, answer)) = &self.recording
+                        && let Ok(result) = answer.try_recv()
+                    {
+                        let row = *row;
+                        self.recording = None;
+                        self.message = recorded(form, row, result);
+                    }
+                    let busy = self.recording.as_ref().map(|(row, _)| *row);
                     egui::Grid::new("hotkeys")
-                        .min_col_width(150.0)
+                        .num_columns(4)
+                        .spacing([10.0, 10.0])
                         .show(ui, |ui| {
-                            for (label, value) in [
-                                ("Next PC / switcher", &mut form.next),
-                                ("Back to this PC", &mut form.home),
-                                ("Open the switcher", &mut form.switcher),
-                                ("Next PC (one hand)", &mut form.forward),
-                                ("Previous PC (one hand)", &mut form.back),
-                                ("Double tap (empty: off)", &mut form.double_tap),
-                            ] {
-                                ui.label(label);
-                                ui.add_sized([240.0, 20.0], egui::TextEdit::singleline(value));
+                            for (row, (label, default)) in HOTKEY_ROWS.iter().enumerate() {
+                                ui.label(*label);
+                                let value = hotkey_field(form, row);
+                                let hint = if default.is_empty() { "none" } else { default };
+                                ui.add(egui::TextEdit::singleline(value).hint_text(hint).desired_width(220.0));
+                                if busy == Some(row) {
+                                    ui.colored_label(theme::palette::BRUISE, "Press the keys…");
+                                    ui.ctx().request_repaint_after(Duration::from_millis(100));
+                                } else if ui
+                                    .add_enabled(busy.is_none(), egui::Button::new(format!("{}  Record", icon::KEYBOARD)))
+                                    .clicked()
+                                {
+                                    let (send, answer) = std::sync::mpsc::channel();
+                                    std::thread::spawn(move || {
+                                        let _ = send.send(ask_mickey("record"));
+                                    });
+                                    self.recording = Some((row, answer));
+                                }
+                                if ui.button(format!("{}  Default", icon::UNDO)).clicked() {
+                                    // Empty means the default, except the double tap,
+                                    // where empty turns it off.
+                                    *hotkey_field(form, row) = if row == DOUBLE_TAP_ROW {
+                                        config::DEFAULT_DOUBLE_TAP.to_string()
+                                    } else {
+                                        String::new()
+                                    };
+                                }
                                 ui.end_row();
                             }
                         });
+                    ui.add_space(6.0);
+                    ui.weak("Each PC also gets the next number: the hotkey + 1, + 2… goes straight to it.");
                 }
                 Tab::Look => {
                     egui::ComboBox::from_label("Switcher position")
@@ -487,6 +565,26 @@ mod tests {
         let form = Form::from_config(&original);
         let reread = config::parse(&form.to_toml()).unwrap();
         assert_eq!(Form::from_config(&reread), form);
+    }
+
+    #[test]
+    fn a_recording_lands_in_the_right_row_or_says_why_not() {
+        let mut form = Form::from_config(&empty());
+        recorded(&mut form, 3, Ok("ok: AltGr+Right\n".into()));
+        assert_eq!(form.forward, "AltGr+Right");
+        recorded(&mut form, DOUBLE_TAP_ROW, Ok("ok: double LeftShift".into()));
+        assert_eq!(form.double_tap, "LeftShift");
+        let before = form.next.clone();
+        let said = recorded(&mut form, 0, Ok("ok: double LeftShift".into()));
+        assert!(said.contains("Double tap row"));
+        assert_eq!(
+            form.next, before,
+            "a double tap does not go into a chord row"
+        );
+        assert_eq!(
+            recorded(&mut form, 0, Ok("error: no keys were pressed".into())),
+            "no keys were pressed"
+        );
     }
 
     #[test]

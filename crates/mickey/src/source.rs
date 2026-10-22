@@ -16,6 +16,7 @@ use crate::input::Input;
 use crate::latency::{self, Latency};
 use crate::monitors::{self, Monitor};
 use crate::protocol::Message;
+use crate::record::{Heard, Recording};
 use crate::secure::Link;
 use crate::transport;
 use crate::tray::{self, Tray};
@@ -85,7 +86,8 @@ fn obey(
         | Order::History
         | Order::HistoryCopy(_)
         | Order::Quit
-        | Order::Arranged => "error: not an order".into(),
+        | Order::Arranged
+        | Order::Record => "error: not an order".into(),
         Order::Go(name) => {
             let Some(peer) = names.iter().position(|known| *known == name) else {
                 return format!("error: no PC named `{name}` in config.toml");
@@ -388,6 +390,8 @@ pub fn run(
         });
     }
     let mut in_control = InControl::default();
+    // A hotkey being recorded: what was heard, where to answer, since when.
+    let mut recording: Option<(Recording, Sender<String>, Instant)> = None;
     // The tray icon (PRD 0009); Mickey works the same without one.
     let (clicks, picked) = mpsc::channel();
     let first = Status {
@@ -565,6 +569,25 @@ pub fn run(
         let mut placed = None;
         let mut asked_to_arrange = None;
         match wakes.recv_timeout(wait) {
+            // While recording a hotkey, keys are named, never acted on.
+            Ok(Wake::Input(InputEvent::Key { code, pressed })) if recording.is_some() => {
+                let answer = recording.as_mut().and_then(|(record, _, _)| {
+                    match record.key(code, pressed, Instant::now()) {
+                        Heard::Waiting => None,
+                        Heard::Chord(text) => Some(format!("ok: {text}")),
+                        Heard::DoubleTap(key) => Some(format!("ok: double {key}")),
+                        Heard::Mistake(why) => Some(format!("error: {why}")),
+                    }
+                });
+                if let Some(answer) = answer
+                    && let Some((_, reply, _)) = recording.take()
+                {
+                    let _ = reply.send(answer);
+                }
+            }
+            Ok(Wake::Control(request)) if request.order == Order::Record => {
+                recording = Some((Recording::new(), request.reply, Instant::now()));
+            }
             Ok(Wake::Input(event)) => {
                 switcher.handle(event, &online, &mut act);
                 if let InputEvent::Motion { dx, dy } = event
@@ -646,6 +669,13 @@ pub fn run(
             Err(RecvTimeoutError::Disconnected) => break,
         }
         drop(act);
+        if recording
+            .as_ref()
+            .is_some_and(|(_, _, since)| since.elapsed() > control::RECORD_TIMEOUT)
+            && let Some((_, reply, _)) = recording.take()
+        {
+            let _ = reply.send("error: no keys were pressed".into());
+        }
         if let Some((from, position)) = placed
             && let Some(index) = peers.iter().position(|peer| peer.address.ip() == from)
         {
