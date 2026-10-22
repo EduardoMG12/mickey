@@ -31,6 +31,8 @@ const WRITE_TIMEOUT: Duration = Duration::from_millis(200);
 const READ_TIMEOUT: Duration = Duration::from_secs(1);
 /// How long a command waits for the source's main loop to answer.
 const ANSWER_TIMEOUT: Duration = Duration::from_secs(2);
+/// How long `record` waits for keys before giving up.
+pub const RECORD_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Order {
@@ -49,6 +51,8 @@ pub enum Order {
     Quit,
     /// The owner placed PCs: use config.toml's positions and tell the peers.
     Arranged,
+    /// Name the next keys pressed together, or a key tapped twice.
+    Record,
 }
 
 /// An order for the source's main loop, and where to send its one-line
@@ -410,6 +414,7 @@ fn accept<T: From<Request>>(
                     _ if other == "history" => Some(Order::History),
                     _ if other == "quit" => Some(Order::Quit),
                     _ if other == "arranged" => Some(Order::Arranged),
+                    _ if other == "record" => Some(Order::Record),
                     Some(("history", id)) => id
                         .strip_prefix("copy ")
                         .and_then(|id| id.parse().ok())
@@ -420,10 +425,16 @@ fn accept<T: From<Request>>(
                 let answer = match order {
                     None => format!("error: unknown request `{other}`"),
                     Some(order) => {
+                        // Recording waits for the owner to press the keys.
+                        let wait = if order == Order::Record {
+                            RECORD_TIMEOUT + ANSWER_TIMEOUT
+                        } else {
+                            ANSWER_TIMEOUT
+                        };
                         let (reply, answer) = mpsc::channel();
                         let _ = requests.send(T::from(Request { order, reply }));
                         answer
-                            .recv_timeout(ANSWER_TIMEOUT)
+                            .recv_timeout(wait)
                             .unwrap_or_else(|_| "error: mickey source did not answer".into())
                     }
                 };

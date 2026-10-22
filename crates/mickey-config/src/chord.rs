@@ -105,9 +105,99 @@ pub fn parse(text: &str) -> Result<Chord, String> {
     Ok(Chord { modifiers, key })
 }
 
+/// A key's name as config.toml writes it, e.g. `RightShift`, `A`, `F5`.
+pub fn key_name(code: u16) -> Option<String> {
+    const MODIFIER_NAMES: [(u16, &str); 8] = [
+        (29, "LeftCtrl"),
+        (97, "RightCtrl"),
+        (42, "LeftShift"),
+        (54, "RightShift"),
+        (56, "LeftAlt"),
+        (100, "AltGr"),
+        (125, "LeftSuper"),
+        (126, "RightSuper"),
+    ];
+    if let Some((_, name)) = MODIFIER_NAMES.iter().find(|(known, _)| *known == code) {
+        return Some(name.to_string());
+    }
+    let named = match code {
+        57 => "Space",
+        15 => "Tab",
+        1 => "Esc",
+        102 => "Home",
+        107 => "End",
+        105 => "Left",
+        106 => "Right",
+        103 => "Up",
+        108 => "Down",
+        87 => "F11",
+        88 => "F12",
+        59..=68 => return Some(format!("F{}", code - 58)),
+        _ => {
+            // Letters and digits: find the row they are on.
+            const ROWS: [(&str, u16); 4] = [
+                ("1234567890", 2),
+                ("QWERTYUIOP", 16),
+                ("ASDFGHJKL", 30),
+                ("ZXCVBNM", 44),
+            ];
+            return ROWS.iter().find_map(|(row, first)| {
+                let at = code.checked_sub(*first)? as usize;
+                row.get(at..at + 1).map(str::to_string)
+            });
+        }
+    };
+    Some(named.to_string())
+}
+
+/// The text for keys pressed together, in the order they went down: the
+/// modifiers first, then the other key. Checked with `parse`, so what
+/// comes out is a hotkey Mickey accepts.
+pub fn name_keys(pressed: &[u16]) -> Result<String, String> {
+    let is_modifier = |code: &u16| MODIFIERS.iter().any(|(_, known)| known == code);
+    let mut names = Vec::new();
+    for code in pressed.iter().filter(|code| is_modifier(code)) {
+        names.push(key_name(*code).ok_or("an unknown modifier")?);
+    }
+    let others: Vec<&u16> = pressed.iter().filter(|code| !is_modifier(code)).collect();
+    match others[..] {
+        [] => {}
+        [code] => names
+            .push(key_name(*code).ok_or_else(|| format!("key {code} has no name in Mickey yet"))?),
+        _ => return Err("only one key besides the modifiers, e.g. AltGr+RightShift+H".into()),
+    }
+    let text = names.join("+");
+    parse(&text)?;
+    Ok(text)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn names_go_back_to_what_parses() {
+        for text in [
+            "AltGr+RightShift",
+            "LeftCtrl+LeftShift+H",
+            "AltGr+Right",
+            "RightCtrl+F5",
+            "LeftSuper+1",
+        ] {
+            let chord = parse(text).unwrap();
+            let pressed: Vec<u16> = chord.keys().collect();
+            assert_eq!(
+                parse(&name_keys(&pressed).unwrap()).unwrap(),
+                chord,
+                "{text}"
+            );
+        }
+        assert_eq!(name_keys(&[100, 106]).unwrap(), "AltGr+Right");
+        assert_eq!(key_name(54).unwrap(), "RightShift");
+        assert_eq!(key_name(30).unwrap(), "A");
+        assert!(name_keys(&[30]).is_err(), "no modifier");
+        assert!(name_keys(&[29, 30, 31]).is_err(), "two plain keys");
+    }
 
     #[test]
     fn the_m0_hotkey_parses() {

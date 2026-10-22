@@ -34,7 +34,7 @@ pub enum Trigger {
 }
 
 /// Two taps closer than this count as a double tap.
-const DOUBLE_TAP: Duration = Duration::from_millis(400);
+pub const DOUBLE_TAP: Duration = Duration::from_millis(400);
 
 /// One hotkey key pressed during the current attempt.
 #[derive(Clone, Copy)]
