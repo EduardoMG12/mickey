@@ -3,6 +3,7 @@
 #[cfg(target_os = "linux")]
 mod capture;
 mod cli;
+mod clipboard;
 mod control;
 mod discovery;
 mod edges;
@@ -70,6 +71,22 @@ fn run(command: Command) -> Result<(), String> {
                 }
                 None => Err(answer.trim_start_matches("error: ").to_string()),
             }
+        }
+        Command::Clipboard { write_test } => {
+            let mut board = clipboard::Clipboard::open()?;
+            if write_test {
+                board.write(&clipboard::Content::Text("Mickey clipboard test".into()))?;
+                // On Wayland and X11 the text lives only while we do: give
+                // a moment to paste it somewhere.
+                println!("mickey: copied a test text; paste it within 30 s");
+                std::thread::sleep(std::time::Duration::from_secs(30));
+                return Ok(());
+            }
+            match board.read() {
+                Some(content) => println!("mickey: the clipboard holds {content:?}"),
+                None => println!("mickey: the clipboard holds nothing Mickey carries"),
+            }
+            Ok(())
         }
         Command::Discover => {
             let mut any = false;
