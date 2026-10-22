@@ -13,7 +13,7 @@ use crate::monitors::Monitor;
 use std::fmt;
 
 /// 2: messages travel inside the secure link (PRD 0002).
-/// 3: `Monitors` (PRD 0005).
+/// 3: `Monitors`, `Enter` and `Leave` (PRD 0005).
 pub const VERSION: u8 = 3;
 
 /// Longest frame: length byte, type byte and an 8-byte payload.
@@ -40,6 +40,17 @@ pub enum Message {
         count: u8,
         list: [Monitor; MAX_MONITORS],
     },
+    /// To the target: the cursor crossed onto your desktop at `x, y`.
+    Enter {
+        x: i32,
+        y: i32,
+    },
+    /// To the source: the cursor is pushing off my desktop onto `x, y`
+    /// (just off my monitors, in my coordinates).
+    Leave {
+        x: i32,
+        y: i32,
+    },
 }
 
 const HELLO: u8 = 1;
@@ -51,6 +62,8 @@ const RELEASE_ALL: u8 = 6;
 const PING: u8 = 7;
 const PONG: u8 = 8;
 const MONITORS: u8 = 9;
+const ENTER: u8 = 10;
+const LEAVE: u8 = 11;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum DecodeError {
@@ -124,6 +137,16 @@ pub fn encode(message: &Message, frame: &mut [u8; MAX_FRAME]) -> usize {
                 }
             }
         }
+        Message::Enter { x, y } => {
+            put(&[ENTER]);
+            put(&x.to_be_bytes());
+            put(&y.to_be_bytes());
+        }
+        Message::Leave { x, y } => {
+            put(&[LEAVE]);
+            put(&x.to_be_bytes());
+            put(&y.to_be_bytes());
+        }
     }
     // At most MAX_FRAME (131), so it always fits in the length byte.
     frame[0] = (len - 1) as u8;
@@ -180,6 +203,16 @@ pub fn decode(body: &[u8]) -> Result<Message, DecodeError> {
         PONG => Message::Pong {
             id: u32::from_be_bytes(exact(kind, payload)?),
         },
+        ENTER | LEAVE => {
+            let bytes: [u8; 8] = exact(kind, payload)?;
+            let x = i32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
+            let y = i32::from_be_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]);
+            if kind == ENTER {
+                Message::Enter { x, y }
+            } else {
+                Message::Leave { x, y }
+            }
+        }
         MONITORS => {
             let (&count, rects) = payload
                 .split_first()
@@ -269,6 +302,11 @@ mod tests {
         round_trip(Message::ReleaseAll);
         round_trip(Message::Ping { id: 7 });
         round_trip(Message::Pong { id: u32::MAX });
+        round_trip(Message::Enter { x: -1536, y: 216 });
+        round_trip(Message::Leave {
+            x: i32::MIN,
+            y: i32::MAX,
+        });
         round_trip(monitors(&[
             Monitor {
                 x: 0,
@@ -291,6 +329,7 @@ mod tests {
         assert!(decode(&[MONITORS, 1]).is_err());
         assert!(decode(&[MONITORS, 9]).is_err());
         assert!(decode(&[MONITORS]).is_err());
+        assert!(decode(&[ENTER, 0, 0, 0, 1]).is_err());
     }
 
     #[test]

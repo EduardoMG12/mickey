@@ -4,6 +4,9 @@
 mod capture;
 mod cli;
 mod control;
+// ponytail: the source and target cross edges in the next PR (#89).
+#[allow(dead_code)]
+mod edges;
 mod emit;
 mod event;
 mod focus;
