@@ -1,0 +1,2 @@
+# Lets the input group create Mickey's virtual keyboard and mouse.
+KERNEL=="uinput", GROUP="input", MODE="0660", OPTIONS+="static_node=uinput"

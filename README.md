@@ -26,7 +26,23 @@ be understood line by line.
   traffic is encrypted and machines must be paired before they can talk
   (from M1a on).
 
-## Try it (M0: Linux → Windows)
+## Install
+
+Download the latest release from the repository's **Releases** page:
+
+- **Windows:** run `Mickey-Setup-<version>.exe`. Mickey starts with Windows
+  (no window), is allowed through the firewall on **private** networks only,
+  and can be removed from *Settings → Apps*.
+- **Linux:** unpack `mickey-linux-x86_64.tar.gz` and run `./install.sh`. It
+  asks for your password once (input group and a udev rule for the virtual
+  keyboard), installs to `~/.local/bin` and starts Mickey with your desktop
+  session (`systemctl --user status mickey`). `./uninstall.sh` removes it.
+
+Then list your other PCs in `config.toml` (below) and pair them: the first
+time two PCs meet, run Mickey in a terminal on both (on Windows: Start menu
+→ *Mickey (terminal, for pairing)*) and confirm the fingerprints.
+
+## Try it from source
 
 Mickey is a command-line program today; a setup window comes later (M1b).
 
