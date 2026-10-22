@@ -79,12 +79,14 @@ impl Hotkey {
     /// for where a setting is empty: `…+0` home and `…+1` to `…+9` for the
     /// first nine peers. A default that clashes with a setting is skipped.
     pub fn from_config(set: &HotkeySet) -> Hotkey {
-        let mut chords = vec![(set.next.clone(), Trigger::Next)];
+        // First, so no setting can take it: the way home that always works.
+        let mut chords = vec![(default_chord(ESCAPE), Trigger::Home)];
         let mut add = |chord: Chord, trigger| {
             if !chords.iter().any(|(known, _)| *known == chord) {
                 chords.push((chord, trigger));
             }
         };
+        add(set.next.clone(), Trigger::Next);
         add(set.switcher.clone(), Trigger::Switcher);
         add(set.forward.clone(), Trigger::Forward);
         add(set.back.clone(), Trigger::Back);
@@ -279,6 +281,11 @@ impl Hotkey {
 
 const DEFAULT_NEXT: &str = mickey_config::DEFAULT_NEXT;
 
+/// The way home that no setting changes (CLAUDE.md rule 8, #182): keys a
+/// laptop always has, and the same AltGr and Right Shift the default
+/// hotkeys already use, so no other key is held back while away.
+pub const ESCAPE: &str = "AltGr+RightShift+Esc";
+
 fn default_chord(text: &str) -> Chord {
     chord::parse(text).expect("the built-in hotkeys parse")
 }
@@ -315,6 +322,29 @@ mod tests {
             }
         }
         (forwarded, fired)
+    }
+
+    #[test]
+    fn the_escape_chord_always_comes_home() {
+        const ESC: u16 = 1;
+        // Someone set every hotkey to the escape chord's keys, and home away.
+        let set = mickey_config::parse(
+            "[[peer]]\nname = \"A\"\naddress = \"192.0.2.10:1\"\nhotkey = \"AltGr+RightShift+Esc\"\n\n[hotkeys]\nhome = \"LeftCtrl+F12\"\ndouble_tap = \"\"\n",
+        )
+        .unwrap()
+        .hotkeys()
+        .unwrap();
+        let events = [
+            key(ALT, true),
+            key(SHIFT, true),
+            key(ESC, true),
+            key(ESC, false),
+            key(SHIFT, false),
+            key(ALT, false),
+        ];
+        let (forwarded, fired) = run(&mut Hotkey::from_config(&set), &events);
+        assert_eq!(fired, [Trigger::Home], "the way home wins");
+        assert!(forwarded.is_empty());
     }
 
     #[test]
