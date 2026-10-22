@@ -11,6 +11,8 @@ pub struct PcRow {
     pub name: String,
     pub address: String,
     pub hotkey: String,
+    /// Kept as read; the Layout tab sets it.
+    pub position: Option<[i32; 2]>,
 }
 
 /// Everything editable, as the text the fields show.
@@ -45,6 +47,7 @@ impl Form {
                     name: peer.name.clone(),
                     address: peer.address.to_string(),
                     hotkey: text(&peer.hotkey),
+                    position: peer.position,
                 })
                 .collect(),
             next: text(&config.hotkeys.next),
@@ -89,6 +92,9 @@ impl Form {
                     "hotkey = {}    # straight to this PC\n",
                     quote(pc.hotkey.trim())
                 );
+            }
+            if let Some([x, y]) = pc.position {
+                out += &format!("position = [{x}, {y}]    # where it sits next to this PC\n");
             }
         }
         let hotkeys: Vec<(&str, &str)> = [
@@ -270,6 +276,7 @@ impl eframe::App for Settings {
                             name: "New PC".into(),
                             address: format!("192.168.0.2:{}", config::DEFAULT_PORT),
                             hotkey: String::new(),
+                            position: None,
                         });
                     }
                 }
@@ -332,7 +339,7 @@ mod tests {
     #[test]
     fn what_the_form_writes_parses_back_to_the_same_form() {
         let original = config::parse(
-            "[[peer]]\nname = \"Windows \\\"main\\\"\"\naddress = \"192.0.2.10:4242\"\nhotkey = \"AltGr+RightShift+1\"\n\n[hotkeys]\nhome = \"AltGr+RightShift+H\"\n\n[interface]\nswitcher_position = \"top-left\"\n\n[this_pc]\ncontrolled = false\n",
+            "[[peer]]\nname = \"Windows \\\"main\\\"\"\naddress = \"192.0.2.10:4242\"\nhotkey = \"AltGr+RightShift+1\"\nposition = [-1920, 0]\n\n[hotkeys]\nhome = \"AltGr+RightShift+H\"\n\n[interface]\nswitcher_position = \"top-left\"\n\n[this_pc]\ncontrolled = false\n",
         )
         .unwrap();
         let form = Form::from_config(&original);
@@ -347,6 +354,7 @@ mod tests {
             name: "A".into(),
             address: "nowhere".into(),
             hotkey: String::new(),
+            position: None,
         });
         assert!(config::parse(&form.to_toml()).is_err());
     }
