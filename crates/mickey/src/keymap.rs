@@ -77,6 +77,31 @@ const fn build_table() -> [u16; TABLE_LEN] {
     table
 }
 
+/// The same mapping the other way round, for a Windows source (PRD 0008).
+/// Indexed by scan code, plus 256 for `E0` (extended) keys. Built from
+/// `TABLE` so the two directions can never disagree.
+const REVERSE: [u16; 512] = build_reverse();
+
+const fn build_reverse() -> [u16; 512] {
+    let mut reverse = [0u16; 512];
+    let mut evdev = 0;
+    while evdev < TABLE_LEN {
+        let entry = TABLE[evdev];
+        if entry != 0 {
+            let extended = if entry & E0 != 0 { 256 } else { 0 };
+            reverse[extended + (entry & 0xFF) as usize] = evdev as u16;
+        }
+        evdev += 1;
+    }
+    reverse
+}
+
+/// The evdev code for a Windows scan code; `None` for unknown keys.
+pub fn evdev_code(scan: ScanCode) -> Option<u16> {
+    let index = usize::from(scan.code) + if scan.extended { 256 } else { 0 };
+    Some(REVERSE[index]).filter(|&code| code != 0)
+}
+
 /// `None` when the key has no Windows equivalent; the caller drops it.
 pub fn scan_code(evdev_code: u16) -> Option<ScanCode> {
     let entry = *TABLE.get(usize::from(evdev_code))?;
@@ -152,6 +177,68 @@ mod tests {
         assert_eq!(scan_code(255), None);
         assert_eq!(scan_code(256), None); // past the table
         assert_eq!(scan_code(u16::MAX), None);
+    }
+
+    #[test]
+    fn every_mapped_key_comes_back_the_same() {
+        for evdev in 0..TABLE_LEN as u16 {
+            if let Some(scan) = scan_code(evdev) {
+                assert_eq!(evdev_code(scan), Some(evdev), "evdev {evdev}");
+            }
+        }
+    }
+
+    #[test]
+    fn windows_keys_become_evdev_codes() {
+        assert_eq!(
+            evdev_code(ScanCode {
+                code: 0x1E,
+                extended: false
+            }),
+            Some(30)
+        ); // A
+        assert_eq!(
+            evdev_code(ScanCode {
+                code: 0x38,
+                extended: true
+            }),
+            Some(100)
+        ); // Right Alt / AltGr
+        assert_eq!(
+            evdev_code(ScanCode {
+                code: 0x38,
+                extended: false
+            }),
+            Some(56)
+        ); // Left Alt
+        assert_eq!(
+            evdev_code(ScanCode {
+                code: 0x73,
+                extended: false
+            }),
+            Some(89)
+        ); // ABNT2 "/ ?"
+        assert_eq!(
+            evdev_code(ScanCode {
+                code: 0x48,
+                extended: true
+            }),
+            Some(103)
+        ); // Up
+        assert_eq!(
+            evdev_code(ScanCode {
+                code: 0x48,
+                extended: false
+            }),
+            Some(72)
+        ); // keypad 8
+        assert_eq!(
+            evdev_code(ScanCode {
+                code: 0x7F,
+                extended: false
+            }),
+            None
+        );
     }
 
     #[test]
