@@ -515,9 +515,20 @@ pub fn run(
         }
         // Where to put the cursor here, coming back from a peer's edge.
         let mut home_at = None;
+        // A peer refused the input: bring the focus home.
+        let mut refused = false;
         for (index, news) in pongs.try_iter() {
             peers[index].heard = Instant::now();
             match news {
+                News::Refused => {
+                    if switcher.focus() == Focus::Remote(index) {
+                        println!(
+                            "mickey: {} refused the keyboard and mouse (a window running as administrator in front?); they are back here",
+                            peers[index].name
+                        );
+                        refused = true;
+                    }
+                }
                 News::Leave(x, y) => {
                     if switcher.focus() == Focus::Remote(index)
                         && let Some(position) = positions[index]
@@ -644,7 +655,7 @@ pub fn run(
                 }
             }
         };
-        if home_at.is_some() {
+        if home_at.is_some() || refused {
             switcher.go_home(&mut act);
         }
         let mut asked_for_peers = None;
@@ -989,6 +1000,8 @@ enum News {
     Monitors(Vec<Monitor>),
     /// The cursor is pushing off the peer's desktop onto this point of it.
     Leave(i32, i32),
+    /// The peer's system refused the input sent to it.
+    Refused,
 }
 
 /// Reads what a peer sends on its own thread: pongs and its monitors.
@@ -1004,6 +1017,7 @@ fn read_peer(index: usize, link: &Link, news: &Sender<(usize, News)>, start: Ins
                     News::Monitors(list[..usize::from(count)].to_vec())
                 }
                 Message::Leave { x, y } => News::Leave(x, y),
+                Message::Refused => News::Refused,
                 _ => continue,
             };
             if news.send((index, item)).is_err() {
