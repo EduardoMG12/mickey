@@ -614,8 +614,10 @@ impl eframe::App for Settings {
                     ui.horizontal(|ui| {
                         ui.label(egui::RichText::new(format!("{}  Always home:", crate::theme::icon::SHIELD)).strong());
                         ui.weak("hold");
-                        crate::theme::keycaps(ui, "AltGr+RightShift", false, false);
-                        ui.weak("for 2 seconds and let go: works whatever is set here");
+                        crate::theme::keycaps(ui, "RightShift", false, false);
+                        ui.weak("alone 3 s, or with");
+                        crate::theme::keycaps(ui, "AltGr", false, false);
+                        ui.weak("2 s, and let go: works whatever is set here");
                     });
                     ui.add_space(4.0);
                     // What the recording in progress gave, if it is done.
