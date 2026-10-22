@@ -150,13 +150,44 @@ impl Tray {
             };
             let _ = clicks.lock().unwrap_or_else(|p| p.into_inner()).send(click);
         };
-        crate::platform::tray::Icon::start(look(&status), Box::new(picked))
+        let icon = crate::platform::tray::Icon::start(look(&status), Box::new(picked))
             .map(Tray)
-            .map_err(|err| format!("no tray icon: {err}"))
+            .map_err(|err| format!("no tray icon: {err}"))?;
+        std::thread::spawn(keep_in_sight);
+        Ok(icon)
     }
 
     pub fn show(&self, status: &Status) {
         self.0.show(look(status));
+    }
+}
+
+/// Windows 11 hides every new tray icon behind the ^ arrow, where the
+/// owner never sees Mickey's status. Explorer notes each icon under
+/// `HKCU\Control Panel\NotifyIconSettings`, a moment after it appears;
+/// Mickey marks its own as shown (`IsPromoted = 1`), unless the owner
+/// already chose (the value exists), so hiding it on purpose sticks.
+#[cfg(windows)]
+fn keep_in_sight() {
+    const SCRIPT: &str = concat!(
+        r"Get-ChildItem 'HKCU:\Control Panel\NotifyIconSettings' -ErrorAction SilentlyContinue | ",
+        r"Where-Object { $p = Get-ItemProperty $_.PSPath; ",
+        r"$p.ExecutablePath -eq $env:MICKEY_EXE -and $null -eq $p.IsPromoted } | ",
+        r"ForEach-Object { Set-ItemProperty $_.PSPath -Name IsPromoted -Value 1 -Type DWord }",
+    );
+    let Ok(exe) = std::env::current_exe() else {
+        return;
+    };
+    // Explorer may take a few seconds to note a new icon.
+    for _ in 0..6 {
+        std::thread::sleep(std::time::Duration::from_secs(5));
+        use std::os::windows::process::CommandExt;
+        // CREATE_NO_WINDOW: no console flashing up.
+        let _ = std::process::Command::new("powershell")
+            .args(["-NoProfile", "-Command", SCRIPT])
+            .env("MICKEY_EXE", &exe)
+            .creation_flags(0x0800_0000)
+            .output();
     }
 }
 
