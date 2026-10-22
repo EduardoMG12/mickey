@@ -23,8 +23,10 @@ mod protocol;
 mod secure;
 mod source;
 mod transport;
-// ponytail: shown by the tray, next (#110, #111).
-#[allow(dead_code)]
+// ponytail: on Windows only the stub, until its tray (#111).
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+mod tray;
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 mod tray_picture;
 mod trust;
 
