@@ -150,7 +150,7 @@ pub fn window() -> std::process::ExitCode {
     // A small floating window in the middle, not a tile (Hyprland).
     crate::place::ask_compositor(crate::place::Corner::Center, "mickey-history");
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
+        viewport: crate::theme::viewport()
             .with_title("Mickey: clipboard history")
             .with_app_id("mickey-history")
             .with_inner_size([460.0, 420.0])

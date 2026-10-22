@@ -283,7 +283,9 @@ fn run_from_config() -> Result<(), String> {
     let found = discovery::start(me)
         .inspect_err(|err| eprintln!("mickey: {err}; other PCs will not show up by themselves"))
         .ok();
-    let source_wanted = this_pc.controls_others && !config.peers.is_empty();
+    // Even with no PCs listed yet: the group or a pairing brings them, and
+    // the tray shows (peers are symmetric, PRD 0010).
+    let source_wanted = this_pc.controls_others;
     if !source_wanted && !this_pc.controlled {
         return Err("[this_pc] says this PC neither controls others nor is controlled".into());
     }
@@ -303,7 +305,7 @@ fn run_from_config() -> Result<(), String> {
     });
     if source_wanted {
         let hotkeys = hotkey::Hotkey::from_config(&config.hotkeys()?);
-        source::run(
+        let result = source::run(
             config.peers,
             hotkeys,
             config.touchpad.speed,
@@ -317,7 +319,20 @@ fn run_from_config() -> Result<(), String> {
                 history: keeper.clone().map(history::record),
                 keeper,
             },
-        )
+        );
+        match (result, target) {
+            // Say why, and still be controlled (say, no access to the
+            // keyboard on Linux yet).
+            (Err(err), Some(target)) => {
+                eprintln!(
+                    "mickey: cannot control other PCs: {err}; this PC can still be controlled"
+                );
+                target
+                    .join()
+                    .map_err(|_| "the target stopped unexpectedly".to_string())?
+            }
+            (result, _) => result,
+        }
     } else {
         println!("mickey: this PC only waits to be controlled");
         target

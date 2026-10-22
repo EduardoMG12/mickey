@@ -144,6 +144,26 @@ pub fn stitch(ui: &egui::Ui, rect: egui::Rect, colour: Color32) {
 
 /// The mascot, loaded once per window from the PNG built in.
 pub fn mascot(ctx: &egui::Context) -> Option<egui::TextureHandle> {
+    let (rgba, width, height) = mascot_rgba()?;
+    let image = egui::ColorImage::from_rgba_unmultiplied([width as usize, height as usize], &rgba);
+    Some(ctx.load_texture("mascot", image, egui::TextureOptions::LINEAR))
+}
+
+/// A window's builder with the mascot as its icon (taskbar, Alt+Tab).
+pub fn viewport() -> egui::ViewportBuilder {
+    let builder = egui::ViewportBuilder::default();
+    match mascot_rgba() {
+        Some((rgba, width, height)) => builder.with_icon(egui::IconData {
+            rgba,
+            width,
+            height,
+        }),
+        None => builder,
+    }
+}
+
+/// The built-in mascot PNG as RGBA pixels, its width and height.
+fn mascot_rgba() -> Option<(Vec<u8>, u32, u32)> {
     let mut reader = png::Decoder::new(std::io::Cursor::new(include_bytes!(
         "../assets/mascot-128.png"
     )))
@@ -154,9 +174,8 @@ pub fn mascot(ctx: &egui::Context) -> Option<egui::TextureHandle> {
     if info.color_type != png::ColorType::Rgba {
         return None;
     }
-    let size = [info.width as usize, info.height as usize];
-    let image = egui::ColorImage::from_rgba_unmultiplied(size, &rgba[..info.buffer_size()]);
-    Some(ctx.load_texture("mascot", image, egui::TextureOptions::LINEAR))
+    rgba.truncate(info.buffer_size());
+    Some((rgba, info.width, info.height))
 }
 
 /// A tab: an icon and a word, the chosen one filled with the accent.
