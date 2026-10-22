@@ -3,9 +3,8 @@
 //! AltGr), to name the next keys pressed together, or a key tapped twice.
 //! While it records, those keys do not switch PCs.
 
-use crate::hotkey::DOUBLE_TAP;
 use mickey_config::chord;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 /// What one key event made of the recording so far.
 #[derive(Debug, PartialEq, Eq)]
@@ -26,14 +25,17 @@ pub struct Recording {
     down: Vec<u16>,
     /// A key pressed alone, and when it went up: half a double tap.
     tapped: Option<(u16, Instant)>,
+    /// How close two taps must be: the same as the hotkeys use.
+    window: Duration,
 }
 
 impl Recording {
-    pub fn new() -> Recording {
+    pub fn new(window: Duration) -> Recording {
         Recording {
             pressed: Vec::new(),
             down: Vec::new(),
             tapped: None,
+            window,
         }
     }
 
@@ -56,8 +58,13 @@ impl Recording {
             // A key alone: the first half of a double tap, or the second.
             let second = self
                 .tapped
-                .is_some_and(|(key, up)| key == alone && now.duration_since(up) <= DOUBLE_TAP);
+                .is_some_and(|(key, up)| key == alone && now.duration_since(up) <= self.window);
             if second {
+                if !chord::fits_a_double_tap(alone) {
+                    return Heard::Mistake(
+                        "a double tap on a key typed alone would get in the way; use Shift, Ctrl, Alt, AltGr, Super or an F key".into(),
+                    );
+                }
                 return match chord::key_name(alone) {
                     Some(name) => Heard::DoubleTap(name),
                     None => Heard::Mistake("Mickey has no name for that key yet".into()),
@@ -76,15 +83,15 @@ impl Recording {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::Duration;
 
     const ALTGR: u16 = 100;
     const RIGHT_SHIFT: u16 = 54;
     const RIGHT: u16 = 106;
+    const WINDOW: Duration = Duration::from_millis(400);
 
     #[test]
     fn keys_pressed_together_are_named_when_all_are_up() {
-        let (mut recording, now) = (Recording::new(), Instant::now());
+        let (mut recording, now) = (Recording::new(WINDOW), Instant::now());
         assert_eq!(recording.key(ALTGR, true, now), Heard::Waiting);
         assert_eq!(recording.key(RIGHT, true, now), Heard::Waiting);
         assert_eq!(recording.key(RIGHT, false, now), Heard::Waiting);
@@ -96,7 +103,7 @@ mod tests {
 
     #[test]
     fn a_key_tapped_twice_quickly_is_a_double_tap() {
-        let (mut recording, now) = (Recording::new(), Instant::now());
+        let (mut recording, now) = (Recording::new(WINDOW), Instant::now());
         recording.key(RIGHT_SHIFT, true, now);
         assert_eq!(recording.key(RIGHT_SHIFT, false, now), Heard::Waiting);
         recording.key(RIGHT_SHIFT, true, now);
@@ -108,12 +115,22 @@ mod tests {
     }
 
     #[test]
+    fn a_letter_tapped_twice_is_refused() {
+        const W: u16 = 17;
+        let (mut recording, now) = (Recording::new(WINDOW), Instant::now());
+        recording.key(W, true, now);
+        assert_eq!(recording.key(W, false, now), Heard::Waiting);
+        recording.key(W, true, now);
+        assert!(matches!(recording.key(W, false, now), Heard::Mistake(_)));
+    }
+
+    #[test]
     fn too_slow_is_not_a_double_tap_and_a_plain_key_is_a_mistake() {
-        let (mut recording, now) = (Recording::new(), Instant::now());
+        let (mut recording, now) = (Recording::new(WINDOW), Instant::now());
         recording.key(RIGHT_SHIFT, true, now);
         recording.key(RIGHT_SHIFT, false, now);
         recording.key(RIGHT_SHIFT, true, now);
-        let late = now + DOUBLE_TAP + Duration::from_millis(50);
+        let late = now + WINDOW + Duration::from_millis(50);
         assert_eq!(recording.key(RIGHT_SHIFT, false, late), Heard::Waiting);
         recording.key(30, true, late);
         recording.key(31, true, late);

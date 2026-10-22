@@ -105,6 +105,14 @@ pub fn parse(text: &str) -> Result<Chord, String> {
     Ok(Chord { modifiers, key })
 }
 
+/// Whether a key can be a double tap without getting in the way: a
+/// modifier or an F key, which nobody types alone. A letter would be held
+/// back on every press (no key repeat while it is held, as in a game) and
+/// "ss" or "ee" typed quickly would switch PCs.
+pub fn fits_a_double_tap(code: u16) -> bool {
+    MODIFIERS.iter().any(|(_, known)| *known == code) || matches!(code, 59..=68 | 87 | 88)
+}
+
 /// A key's name as config.toml writes it, e.g. `RightShift`, `A`, `F5`.
 pub fn key_name(code: u16) -> Option<String> {
     const MODIFIER_NAMES: [(u16, &str); 8] = [
