@@ -234,7 +234,11 @@ Everything you type crosses the network, so Mickey protects it:
 - **All `unsafe` code is confined to the platform modules**; the core and the
   protocol are safe Rust.
 
-Full design: [docs/prds/0000-vision.md](docs/prds/0000-vision.md).
+Full design: [docs/prds/0000-vision.md](docs/prds/0000-vision.md). To learn
+the code, read [docs/architecture.md](docs/architecture.md) (crates, threads,
+the platform layer), [docs/protocol.md](docs/protocol.md) (what crosses the
+network) and [docs/flows.md](docs/flows.md) (pairing, focus and edges, the
+switcher, the clipboard), each with diagrams.
 
 ## How this project is developed
 
