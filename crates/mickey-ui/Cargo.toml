@@ -6,6 +6,7 @@ license = "GPL-3.0-or-later"
 publish = false
 
 [dependencies]
+mickey-config = { path = "../mickey-config" }
 # The GUI lives in its own program so `mickey source`, which runs all day and
 # holds the keyboard, never links it (spike #47: 90-125 MB while a window is
 # open). Only what the switcher needs: OpenGL (glow), the built-in fonts, and
