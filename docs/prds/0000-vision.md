@@ -162,7 +162,7 @@ Order agreed with the owner on 2026-10-21: secure link, then steps 1–4.
 | Step 2b | Ways to switch | [0007](0007-ways-to-switch.md) | Control socket and commands (`mickey status`, `go`, `home`, `switcher`), a Waybar module, a corner indicator, configurable hotkeys including one per PC |
 | Step 3 | Setup window | 0006 (todo) | A GUI that adds and pairs PCs, changes settings (touchpad speed, hotkey) and places each PC and its monitors, editing the same `config.toml` |
 | Step 4 | Screens have edges | 0005 (todo) | The cursor crosses to the neighbor placed in step 3, and back; the hotkey stays the way home. On Wayland this needs a spike: apps cannot read the cursor position |
-| Later in M1 | Linux targets | — | `uinput`, so Linux can be controlled too |
+| Both ways | Windows drives Linux | [0008](0008-windows-drives-linux.md) | Linux targets (`uinput`) and Windows as the source (low-level hooks), brought forward from M1/M2 at the owner's request: peers become symmetric |
 | M2 | Any desktop | 0004 (todo) | Native backends (wlroots, portals, X11); Windows as the source |
 
 ### Later (unordered, not committed)
