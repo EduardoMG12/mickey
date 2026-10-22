@@ -33,7 +33,8 @@ The position is read only while the mouse moves.
 1. **Monitors.** Each PC finds its monitors (position and logical size):
    `EnumDisplayMonitors` on Windows, Hyprland's `monitors` on Linux.
    `mickey monitors` prints them.
-2. **Exchange.** After `Hello`, each side sends a `Monitors` message; the
+2. **Exchange.** After `Hello`, each side sends a `Monitors` message
+   *(only the target does; see Discoveries, 2026-10-22)*; the
    source keeps every peer's, and `mickey status` and the settings window
    show them.
 3. **Layout.** `config.toml` says where each peer's desktop sits next to
@@ -95,3 +96,17 @@ The position is read only while the mouse moves.
   block, and pin the cursor while aiming. While the focus is remote, an
   invisible Mickey window takes the foreground (games only get raw input
   in the foreground) and motion is read from raw input.
+
+### Checked against the code (2026-10-22)
+
+- **Only the target sends `Monitors`**, right after `Hello`
+  (`transport::serve`). The source never sends its own: it reads them
+  locally (`monitors::this_pc`) and is the one that needs the peer's to
+  cross, while the way back is decided by the target with its own
+  monitors. So "each side sends" above never happened; nothing needs it.
+- **"No crossing while a mouse button is held" was enforced only on the
+  way out.** The source refused to cross with a button down, but a
+  target still sent `Leave` mid-drag, so dragging a window or file
+  against a peer's edge brought the focus home with the button still held
+  there. Fixed in PR #208: the target sends `Leave` only when no button is
+  held.
