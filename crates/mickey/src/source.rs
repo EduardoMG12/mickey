@@ -3,6 +3,7 @@
 
 use crate::capture;
 use crate::config;
+use crate::control::{self, Control, Status};
 use crate::focus::{Action, Focus, Switcher};
 use crate::identity::{self, Identity};
 use crate::latency::{self, Latency};
@@ -63,6 +64,10 @@ struct Shared {
 /// its own secure link; one that is offline is retried in the background
 /// and never blocks the others.
 pub fn run(configured: Vec<config::Peer>, touchpad_speed: i32) -> Result<(), String> {
+    // Two sources would both capture the keyboard and fight over the grab.
+    if control::source_running() {
+        return Err("another mickey source is already running".into());
+    }
     let devices = open_devices()?;
     let data_dir = identity::data_dir()?;
     let identity = Identity::load_or_create(&data_dir)?;
@@ -105,6 +110,16 @@ pub fn run(configured: Vec<config::Peer>, touchpad_speed: i32) -> Result<(), Str
     capture::spawn_readers(&devices, sender, touchpad_speed);
     let (pick_sender, picks) = mpsc::channel();
     let mut switcher_open = false;
+    // The status for bars and commands; without a runtime directory Mickey
+    // still works, just without them.
+    let control = match Control::start() {
+        Ok(control) => Some(control),
+        Err(err) => {
+            eprintln!("mickey: no control socket: {err}");
+            None
+        }
+    };
+    let mut published = None;
     let mut switcher = Switcher::new();
     // Dropping a `Grab` gives its device back, on every way out of here,
     // including `?` and panics.
@@ -144,6 +159,23 @@ pub fn run(configured: Vec<config::Peer>, touchpad_speed: i32) -> Result<(), Str
                 .map_err(|err| format!("cannot grab the input devices: {err}"))?;
             switcher.grabbed();
             println!("mickey: focus is on {}", peers[index].name);
+        }
+
+        let status = Status {
+            focus: match switcher.focus() {
+                Focus::Remote(peer) => Some(peer),
+                Focus::Local | Focus::WaitingForKeysUp(_) => None,
+            },
+            peers: peers
+                .iter()
+                .map(|peer| (peer.name.clone(), peer.link.is_some()))
+                .collect(),
+        };
+        if published.as_ref() != Some(&status) {
+            if let Some(control) = &control {
+                control.publish(status.clone());
+            }
+            published = Some(status);
         }
 
         let mut lost = Vec::new();

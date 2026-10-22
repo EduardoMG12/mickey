@@ -8,6 +8,8 @@ mod capture;
 mod chord;
 mod cli;
 mod config;
+#[cfg(target_os = "linux")]
+mod control;
 #[cfg(windows)]
 mod emit;
 mod event;
@@ -63,6 +65,22 @@ fn run(command: Command) -> Result<(), String> {
             let identity = identity::Identity::load_or_create(&identity::data_dir()?)?;
             println!("{}", identity.fingerprint());
             Ok(())
+        }
+        Command::Status => {
+            #[cfg(target_os = "linux")]
+            {
+                let mut answer = control::request("status")?;
+                let line = answer
+                    .next()
+                    .ok_or("mickey source has no status yet")?
+                    .map_err(|err| err.to_string())?;
+                let status = control::Status::from_line(&line)
+                    .ok_or_else(|| format!("mickey source answered `{line}`"))?;
+                print!("{}", status.describe());
+                Ok(())
+            }
+            #[cfg(not(target_os = "linux"))]
+            Err("mickey status needs the source, which runs only on Linux in M0".into())
         }
         Command::Forget { fingerprint } => {
             let mut trusted = trust::TrustedPeers::load(&identity::data_dir()?)?;
