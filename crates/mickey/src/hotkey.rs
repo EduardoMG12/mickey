@@ -14,9 +14,8 @@ use mickey_config::HotkeySet;
 use mickey_config::chord::{self, Chord};
 use std::time::{Duration, Instant};
 
-#[cfg(test)]
+/// Evdev codes of the two keys the escape uses.
 pub const KEY_RIGHTSHIFT: u16 = 54;
-#[cfg(test)]
 pub const KEY_RIGHTALT: u16 = 100;
 
 /// What a hotkey asks for.
@@ -55,6 +54,71 @@ pub struct Hotkey {
     attempt: Vec<Pressed>,
     /// Something else was pressed: this attempt can no longer fire.
     spoiled: bool,
+    /// The way home that no setting changes.
+    escape: Escape,
+}
+
+/// How long AltGr and Right Shift must be held, alone, to come home.
+pub const ESCAPE_HOLD: Duration = Duration::from_secs(2);
+
+/// The way home that no setting changes (CLAUDE.md rule 8, #182): hold
+/// AltGr and Right Shift together for `ESCAPE_HOLD`, nothing else, and let
+/// go. Watched apart from the configured hotkeys, so a shared or broken
+/// setting cannot take it away; the default hotkeys use the same keys, so
+/// no other key is held back while away.
+#[derive(Debug, Default)]
+struct Escape {
+    /// AltGr, Right Shift.
+    down: [bool; 2],
+    /// When both went down.
+    since: Option<Instant>,
+    /// Both were held long enough, alone.
+    held: bool,
+    /// Something else was pressed meanwhile.
+    spoiled: bool,
+}
+
+impl Escape {
+    /// Whether `event` completes the escape: the last of the two let go
+    /// after holding both long enough.
+    fn feed(&mut self, event: InputEvent, now: Instant) -> bool {
+        let (code, pressed) = match event {
+            InputEvent::Key { code, pressed } => (code, pressed),
+            InputEvent::Button { pressed: true, .. } => {
+                self.spoiled = true;
+                return false;
+            }
+            _ => return false,
+        };
+        let index = match code {
+            KEY_RIGHTALT => 0,
+            KEY_RIGHTSHIFT => 1,
+            _ => {
+                self.spoiled |= pressed;
+                return false;
+            }
+        };
+        let both = self.down == [true, true];
+        self.down[index] = pressed;
+        if pressed && self.down == [true, true] && !both {
+            self.since = Some(now);
+            self.spoiled = false;
+        }
+        if !pressed && both {
+            // The first of the two let go: was it long enough?
+            self.held = self
+                .since
+                .take()
+                .is_some_and(|since| now.duration_since(since) >= ESCAPE_HOLD);
+        }
+        if self.down == [false, false] {
+            let fired = self.held && !self.spoiled;
+            self.held = false;
+            self.spoiled = false;
+            return fired;
+        }
+        false
+    }
 }
 
 impl Hotkey {
@@ -72,6 +136,7 @@ impl Hotkey {
             last_tap: None,
             attempt: Vec::new(),
             spoiled: false,
+            escape: Escape::default(),
         }
     }
 
@@ -79,14 +144,12 @@ impl Hotkey {
     /// for where a setting is empty: `…+0` home and `…+1` to `…+9` for the
     /// first nine peers. A default that clashes with a setting is skipped.
     pub fn from_config(set: &HotkeySet) -> Hotkey {
-        // First, so no setting can take it: the way home that always works.
-        let mut chords = vec![(default_chord(ESCAPE), Trigger::Home)];
+        let mut chords = vec![(set.next.clone(), Trigger::Next)];
         let mut add = |chord: Chord, trigger| {
             if !chords.iter().any(|(known, _)| *known == chord) {
                 chords.push((chord, trigger));
             }
         };
-        add(set.next.clone(), Trigger::Next);
         add(set.switcher.clone(), Trigger::Switcher);
         add(set.forward.clone(), Trigger::Forward);
         add(set.back.clone(), Trigger::Back);
@@ -123,6 +186,23 @@ impl Hotkey {
 
     /// `feed` with the time given, so tests can control it.
     fn feed_at(
+        &mut self,
+        event: InputEvent,
+        now: Instant,
+        forward: impl FnMut(InputEvent),
+    ) -> Option<Trigger> {
+        let escape = self.escape.feed(event, now);
+        let fired = self.match_hotkeys(event, now, forward);
+        if escape {
+            // Instead of whatever the same keys would do as a hotkey.
+            self.attempt.clear();
+            self.spoiled = false;
+            return Some(Trigger::Home);
+        }
+        fired
+    }
+
+    fn match_hotkeys(
         &mut self,
         event: InputEvent,
         now: Instant,
@@ -281,11 +361,6 @@ impl Hotkey {
 
 const DEFAULT_NEXT: &str = mickey_config::DEFAULT_NEXT;
 
-/// The way home that no setting changes (CLAUDE.md rule 8, #182): keys a
-/// laptop always has, and the same AltGr and Right Shift the default
-/// hotkeys already use, so no other key is held back while away.
-pub const ESCAPE: &str = "AltGr+RightShift+Esc";
-
 fn default_chord(text: &str) -> Chord {
     chord::parse(text).expect("the built-in hotkeys parse")
 }
@@ -325,26 +400,56 @@ mod tests {
     }
 
     #[test]
-    fn the_escape_chord_always_comes_home() {
-        const ESC: u16 = 1;
-        // Someone set every hotkey to the escape chord's keys, and home away.
+    fn holding_altgr_and_right_shift_comes_home_whatever_is_set() {
+        // Someone set the hotkeys away from these keys and turned home off.
         let set = mickey_config::parse(
-            "[[peer]]\nname = \"A\"\naddress = \"192.0.2.10:1\"\nhotkey = \"AltGr+RightShift+Esc\"\n\n[hotkeys]\nhome = \"LeftCtrl+F12\"\ndouble_tap = \"\"\n",
+            "[[peer]]\nname = \"A\"\naddress = \"192.0.2.10:1\"\n\n[hotkeys]\nnext = \"LeftCtrl+F12\"\nhome = \"LeftCtrl+F11\"\ndouble_tap = \"\"\n",
         )
         .unwrap()
         .hotkeys()
         .unwrap();
-        let events = [
-            key(ALT, true),
-            key(SHIFT, true),
-            key(ESC, true),
-            key(ESC, false),
-            key(SHIFT, false),
-            key(ALT, false),
+        let start = Instant::now();
+        let at = |ms| start + Duration::from_millis(ms);
+        let press = |hotkey: &mut Hotkey, events: &[(InputEvent, u64)]| {
+            let mut fired = Vec::new();
+            for &(event, ms) in events {
+                fired.extend(hotkey.feed_at(event, at(ms), |_| {}));
+            }
+            fired
+        };
+        let hold = |ms| {
+            [
+                (key(ALT, true), 0),
+                (key(SHIFT, true), 10),
+                (key(SHIFT, false), ms),
+                (key(ALT, false), ms + 10),
+            ]
+        };
+        let mut hotkey = Hotkey::from_config(&set);
+        assert_eq!(
+            press(&mut hotkey, &hold(2100)),
+            [Trigger::Home],
+            "held 2 s: home"
+        );
+        assert_eq!(
+            press(&mut hotkey, &hold(500)),
+            [],
+            "a short press is not the escape"
+        );
+        // With the default hotkeys a short press is Next, a long one home.
+        let mut defaults = Hotkey::new();
+        assert_eq!(press(&mut defaults, &hold(500)), [Trigger::Next]);
+        assert_eq!(press(&mut defaults, &hold(2100)), [Trigger::Home]);
+        // Another key while holding spoils it.
+        let spoiled = [
+            (key(ALT, true), 0),
+            (key(SHIFT, true), 10),
+            (key(Q, true), 100),
+            (key(Q, false), 150),
+            (key(SHIFT, false), 2200),
+            (key(ALT, false), 2210),
         ];
-        let (forwarded, fired) = run(&mut Hotkey::from_config(&set), &events);
-        assert_eq!(fired, [Trigger::Home], "the way home wins");
-        assert!(forwarded.is_empty());
+        assert!(!press(&mut Hotkey::from_config(&set), &spoiled).contains(&Trigger::Home));
     }
 
     #[test]
