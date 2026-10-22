@@ -1,12 +1,11 @@
 //! The tray icon (PRD 0009): the rat with a green, red or grey dot, a
 //! tooltip naming the PC in control, and a menu to move the keyboard, open
 //! the settings or quit. On Linux it is a StatusNotifierItem (Waybar's
-//! tray, KDE, GNOME with the AppIndicator extension), through `ksni`.
+//! tray, KDE, GNOME with the AppIndicator extension), through `ksni`; on
+//! Windows an icon in the notification area (`platform::tray`).
 
 use crate::control::Status;
-#[cfg(target_os = "linux")]
-use crate::tray_picture;
-use crate::tray_picture::Dot;
+use crate::tray_picture::{self, Dot};
 use std::sync::mpsc::Sender;
 
 /// What the owner picked in the menu.
@@ -121,17 +120,61 @@ impl Tray {
     }
 }
 
-// ponytail: the Windows tray is the next ticket (#111).
-#[cfg(not(target_os = "linux"))]
-pub struct Tray;
+/// The icon in the notification area, while this lives.
+#[cfg(windows)]
+pub struct Tray(crate::platform::tray::Icon);
 
-#[cfg(not(target_os = "linux"))]
+/// Menu ids on Windows: 1 is this PC, 2 and up the peers in order.
+#[cfg(windows)]
+const SETTINGS: u32 = 1000;
+#[cfg(windows)]
+const QUIT: u32 = 1001;
+
+#[cfg(windows)]
 impl Tray {
-    pub fn start(_status: Status, _clicks: Sender<Click>) -> Result<Tray, String> {
-        Err("no tray icon on this system yet".into())
+    pub fn start(status: Status, clicks: Sender<Click>) -> Result<Tray, String> {
+        // `Sender` may not be shared between threads, so it sits in a lock.
+        let clicks = std::sync::Mutex::new(clicks);
+        let picked = move |id: u32| {
+            let click = match id {
+                SETTINGS => Click::Settings,
+                QUIT => Click::Quit,
+                1 => Click::Home,
+                peer => Click::Go(peer as usize - 2),
+            };
+            let _ = clicks.lock().unwrap_or_else(|p| p.into_inner()).send(click);
+        };
+        crate::platform::tray::Icon::start(look(&status), Box::new(picked))
+            .map(Tray)
+            .map_err(|err| format!("no tray icon: {err}"))
     }
 
-    pub fn show(&self, _status: &Status) {}
+    pub fn show(&self, status: &Status) {
+        self.0.show(look(status));
+    }
+}
+
+#[cfg(windows)]
+fn look(status: &Status) -> crate::platform::tray::Look {
+    use crate::platform::tray::{Look, MenuItem};
+    let (dot, tip) = looks(status);
+    let item = |label: &str, enabled: bool, id: u32| MenuItem {
+        label: label.to_string(),
+        enabled,
+        id,
+    };
+    let mut menu = vec![item("This PC", true, 1)];
+    for (index, (name, online)) in status.peers.iter().enumerate() {
+        menu.push(item(name, *online, index as u32 + 2));
+    }
+    menu.push(item("", true, 0));
+    menu.push(item("Settings", true, SETTINGS));
+    menu.push(item("Quit Mickey", true, QUIT));
+    Look {
+        picture: tray_picture::picture(dot, false),
+        tip: format!("Mickey · {tip}"),
+        menu,
+    }
 }
 
 #[cfg(test)]
