@@ -2,6 +2,7 @@
 //! machine, and send input to the focused peer.
 
 use crate::control::{self, Control, Order, Request, Status};
+use crate::discovery;
 use crate::edges;
 use crate::emit;
 use crate::event::InputEvent;
@@ -70,8 +71,8 @@ fn obey(
             "ok: showing the switcher".into()
         }
         Order::Switcher => "error: the focus is on another PC; press the hotkey".into(),
-        // The main loop answers it, since it knows the monitors.
-        Order::Peers => "error: peers is not an order".into(),
+        // The main loop answers these, since it knows the answers.
+        Order::Peers | Order::Discover => "error: not an order".into(),
         Order::Go(name) => {
             let Some(peer) = names.iter().position(|known| *known == name) else {
                 return format!("error: no PC named `{name}` in config.toml");
@@ -149,6 +150,27 @@ impl InControl {
     }
 }
 
+/// The answer to `mickey discover`: one PC per line, its name, address
+/// and fingerprint, tab-separated.
+fn found_text(found: Option<&discovery::Table>) -> String {
+    let Some(table) = found else {
+        return "error: this Mickey is not looking for other PCs".into();
+    };
+    let lines: Vec<String> = table
+        .list(Instant::now())
+        .iter()
+        .map(|pc| {
+            format!(
+                "{}\t{}\t{}",
+                pc.name,
+                pc.address,
+                identity::fingerprint(&pc.key)
+            )
+        })
+        .collect();
+    lines.join("\n")
+}
+
 /// The answer to `mickey peers`.
 fn peers_text(this_pc: &[Monitor], peers: &[Peer], online: &[bool]) -> String {
     Peers {
@@ -193,6 +215,7 @@ pub fn run(
     touchpad_speed: i32,
     switcher_position: String,
     controlled: mpsc::Receiver<bool>,
+    found: Option<discovery::Table>,
 ) -> Result<(), String> {
     // Two sources would both capture the keyboard and fight over the grab.
     if control::source_running() {
@@ -427,6 +450,9 @@ pub fn run(
                 }
             }
             // Answered below, once `act` no longer borrows the peers.
+            Ok(Wake::Control(request)) if request.order == Order::Discover => {
+                let _ = request.reply.send(found_text(found.as_ref()));
+            }
             Ok(Wake::Control(request)) if request.order == Order::Peers => {
                 asked_for_peers = Some(request.reply);
             }
