@@ -75,6 +75,8 @@ enum Job {
     Map(Vec<u8>),
     /// Send this to every peer once (the shared hotkeys).
     Broadcast(Vec<u8>),
+    /// Send this to one peer (the switcher, shown there).
+    SendTo(usize, Vec<u8>),
     /// The keyboard went from `from` to `to` (`None`: this PC).
     Moved {
         from: Option<usize>,
@@ -99,6 +101,13 @@ impl Mover {
                     Job::Broadcast(bytes) => {
                         links.retain(|_, link| link.send_bulk(&bytes).is_ok());
                     }
+                    Job::SendTo(peer, bytes) => {
+                        if let Some(link) = links.get_mut(&peer)
+                            && link.send_bulk(&bytes).is_err()
+                        {
+                            links.remove(&peer);
+                        }
+                    }
                     Job::Map(bytes) => {
                         links.retain(|_, link| link.send_bulk(&bytes).is_ok());
                         map = Some(bytes);
@@ -117,6 +126,14 @@ impl Mover {
     /// Shares the group map with every peer, now and as links open.
     pub fn share_map(&self, text: &str) {
         let _ = self.0.send(Job::Map(crate::group::message(text)));
+    }
+
+    /// Asks `peer` to show the switcher with these cards.
+    pub fn show_switcher(&self, peer: usize, cards: &str) {
+        let _ = self.0.send(Job::SendTo(
+            peer,
+            crate::group::tagged(crate::group::SWITCHER, cards),
+        ));
     }
 
     /// Sends this PC's `[hotkeys]` lines to every peer.

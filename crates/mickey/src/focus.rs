@@ -37,6 +37,9 @@ pub enum Action {
     Ungrab,
     /// Show the switcher window; its answer comes back through `go_to`.
     OpenSwitcher,
+    /// Show it on this peer, where the owner is looking: the focus stays
+    /// there, and the peer sends the pick back.
+    OpenSwitcherOn(usize),
 }
 
 pub struct Switcher {
@@ -128,16 +131,10 @@ impl Switcher {
                             self.focus = Focus::WaitingForKeysUp(target);
                         }
                     }
-                    Some(Trigger::Switcher) => {
-                        self.go_home(&mut act);
-                        act(Action::OpenSwitcher);
-                    }
-                    Some(Trigger::Next) => {
-                        self.go_home(&mut act);
-                        if online.len() >= 2 {
-                            act(Action::OpenSwitcher);
-                        }
-                    }
+                    Some(Trigger::Switcher) => act(Action::OpenSwitcherOn(peer)),
+                    Some(Trigger::Next) if online.len() >= 2 => act(Action::OpenSwitcherOn(peer)),
+                    // With one peer, Next simply comes back.
+                    Some(Trigger::Next) => self.go_home(&mut act),
                     None => {}
                 }
             }
@@ -288,7 +285,7 @@ mod tests {
     }
 
     #[test]
-    fn from_a_peer_the_hotkey_comes_home_then_asks() {
+    fn from_a_peer_the_hotkey_asks_there() {
         let online = [true, true];
         let (mut switcher, mut actions) = (Switcher::new(), Vec::new());
         switcher.go_to(Some(1), &online);
@@ -296,16 +293,11 @@ mod tests {
         switcher.handle(key(A, true), &online, |action| actions.push(action));
         actions.clear();
 
+        // The owner is looking at peer 1: the switcher shows there, and the
+        // focus stays until a card is picked.
         hotkey(&mut switcher, &online, &mut actions);
-        assert_eq!(switcher.focus(), Focus::Local);
-        assert_eq!(
-            actions,
-            [
-                Action::Send(1, key(A, false)),
-                Action::Ungrab,
-                Action::OpenSwitcher,
-            ]
-        );
+        assert_eq!(switcher.focus(), Focus::Remote(1));
+        assert_eq!(actions, [Action::OpenSwitcherOn(1)]);
     }
 
     #[test]

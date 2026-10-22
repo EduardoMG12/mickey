@@ -87,7 +87,13 @@ fn obey(
             act(Action::OpenSwitcher);
             "ok: showing the switcher".into()
         }
-        Order::Switcher => "error: the focus is on another PC; press the hotkey".into(),
+        Order::Switcher => match switcher.focus() {
+            Focus::Remote(peer) => {
+                act(Action::OpenSwitcherOn(peer));
+                "ok: showing the switcher on the PC in use".into()
+            }
+            _ => "error: the focus is moving; try again".into(),
+        },
         // The main loop answers these, since it knows the answers.
         Order::Peers
         | Order::Discover
@@ -556,9 +562,17 @@ pub fn run(
         let mut home_at = None;
         // A peer refused the input: bring the focus home.
         let mut refused = false;
+        // A card picked in the switcher shown on the focused peer.
+        let mut remote_pick = None;
+        let peer_count = peers.len();
         for (index, news) in pongs.try_iter() {
             peers[index].heard = Instant::now();
             match news {
+                News::Picked(card) => {
+                    if switcher.focus() == Focus::Remote(index) {
+                        remote_pick = Some(card);
+                    }
+                }
                 News::Refused => {
                     if switcher.focus() == Focus::Remote(index) {
                         println!(
@@ -677,9 +691,13 @@ pub fn run(
         online.clear();
         online.extend(peers.iter().map(|peer| peer.link.is_some()));
         let mut open = false;
+        // The switcher shown on the focused peer instead (it is where the
+        // owner is looking).
+        let mut open_on = None;
         let left = switcher.focus();
         let mut act = |action| match action {
             Action::OpenSwitcher => open = true,
+            Action::OpenSwitcherOn(peer) => open_on = Some(peer),
             Action::Send(index, event) => {
                 if let Some(link) = &mut peers[index].link
                     && link.send(&Message::Input(event)).is_err()
@@ -696,6 +714,15 @@ pub fn run(
         };
         if home_at.is_some() || refused {
             switcher.go_home(&mut act);
+        }
+        // 0 is this PC; `i + 1` is peer `i`; anything else is "none".
+        match remote_pick.map(usize::from) {
+            Some(0) => switcher.go_home(&mut act),
+            Some(card) if card <= peer_count && switcher.focus() != Focus::Remote(card - 1) => {
+                switcher.go_home(&mut act);
+                switcher.go_to(Some(card - 1), &online);
+            }
+            _ => {}
         }
         let mut asked_for_peers = None;
         let mut pushed = None;
@@ -937,6 +964,20 @@ pub fn run(
         if switcher.focus() == Focus::Local && left != Focus::Local {
             println!("mickey: focus is back here");
         }
+        if let Some(peer) = open_on
+            && let Some(mover) = &mover
+        {
+            let mut cards = vec![(peer + 1).to_string(), format!("online:{my_name}")];
+            for other in &peers {
+                let state = if other.link.is_some() {
+                    "online"
+                } else {
+                    "offline"
+                };
+                cards.push(format!("{state}:{}", other.name));
+            }
+            mover.show_switcher(peer, &cards.join("\n"));
+        }
         if open && !switcher_open {
             switcher_open = true;
             open_switcher(&peers, &switcher_position, &wake);
@@ -1093,6 +1134,8 @@ enum News {
     Leave(i32, i32),
     /// The peer's system refused the input sent to it.
     Refused,
+    /// The owner picked a card in the switcher shown on the peer.
+    Picked(u8),
 }
 
 /// Reads what a peer sends on its own thread: pongs and its monitors.
@@ -1109,6 +1152,7 @@ fn read_peer(index: usize, link: &Link, news: &Sender<(usize, News)>, start: Ins
                 }
                 Message::Leave { x, y } => News::Leave(x, y),
                 Message::Refused => News::Refused,
+                Message::Picked { card } => News::Picked(card),
                 _ => continue,
             };
             if news.send((index, item)).is_err() {
@@ -1158,11 +1202,9 @@ mod tests {
         let mut switcher = Switcher::new();
         switcher.go_to(Some(1), &[true, true]);
         switcher.grabbed();
-        let (answer, _) = run(Order::Switcher, &mut switcher, &[true, true]);
-        assert!(
-            answer.starts_with("error"),
-            "the window would open on the wrong screen"
-        );
+        let (answer, actions) = run(Order::Switcher, &mut switcher, &[true, true]);
+        assert!(answer.starts_with("ok"));
+        assert_eq!(actions, [Action::OpenSwitcherOn(1)], "on the screen in use");
         let (answer, actions) = run(Order::Home, &mut switcher, &[true, true]);
         assert!(answer.starts_with("ok"));
         assert_eq!(actions, [Action::Ungrab]);
