@@ -13,6 +13,9 @@ mod edges;
 mod emit;
 mod event;
 mod focus;
+// ponytail: the source shares and merges maps, next PR.
+#[allow(dead_code)]
+mod group;
 mod held;
 mod history;
 mod hotkey;
