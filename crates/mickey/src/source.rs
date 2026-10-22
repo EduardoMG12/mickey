@@ -15,6 +15,7 @@ use crate::monitors::{self, Monitor};
 use crate::protocol::Message;
 use crate::secure::Link;
 use crate::transport;
+use crate::tray::{self, Tray};
 use crate::trust::{self, TrustedPeers};
 use mickey_config as config;
 use mickey_config::peers::{PeerInfo, Peers};
@@ -38,6 +39,8 @@ enum Wake {
     Control(Request),
     /// A peer's keyboard and mouse came over to this PC, or left.
     Controlled(bool),
+    /// A pick in the tray icon's menu.
+    Tray(tray::Click),
 }
 
 impl From<InputEvent> for Wake {
@@ -147,6 +150,16 @@ impl InControl {
     /// A peer's keyboard came over (`true`) or left (`false`).
     fn peer_says(&mut self, here: bool) {
         self.here = here;
+    }
+}
+
+/// Opens `mickey-ui settings`, installed next to this program, and leaves
+/// it running on its own.
+fn open_settings() {
+    let ui = std::env::current_exe()
+        .map(|exe| exe.with_file_name(format!("mickey-ui{}", std::env::consts::EXE_SUFFIX)));
+    if let Err(err) = ui.and_then(|ui| Command::new(ui).arg("settings").spawn()) {
+        eprintln!("mickey: cannot open the settings: {err}");
     }
 }
 
@@ -287,6 +300,29 @@ pub fn run(
         });
     }
     let mut in_control = InControl::default();
+    // The tray icon (PRD 0009); Mickey works the same without one.
+    let (clicks, picked) = mpsc::channel();
+    let first = Status {
+        focus: None,
+        here: true,
+        peers: peers
+            .iter()
+            .map(|peer| (peer.name.clone(), peer.link.is_some()))
+            .collect(),
+    };
+    let tray = Tray::start(first, clicks)
+        .inspect_err(|err| eprintln!("mickey: {err}"))
+        .ok();
+    {
+        let wake = wake.clone();
+        thread::spawn(move || {
+            for click in picked {
+                if wake.send(Wake::Tray(click)).is_err() {
+                    return;
+                }
+            }
+        });
+    }
     let mut switcher = Switcher::with_hotkeys(hotkeys);
     // Dropping a `Grab` gives its device back, on every way out of here,
     // including `?` and panics.
@@ -376,6 +412,9 @@ pub fn run(
             if let Some(control) = &control {
                 control.publish(status.clone());
             }
+            if let Some(tray) = &tray {
+                tray.show(&status);
+            }
             published = Some(status);
         }
 
@@ -428,6 +467,7 @@ pub fn run(
         }
         let mut asked_for_peers = None;
         let mut pushed = None;
+        let mut quit = false;
         match wakes.recv_timeout(wait) {
             Ok(Wake::Input(event)) => {
                 switcher.handle(event, &online, &mut act);
@@ -438,6 +478,15 @@ pub fn run(
                 }
             }
             Ok(Wake::Controlled(here)) => in_control.peer_says(here),
+            Ok(Wake::Tray(tray::Click::Quit)) => quit = true,
+            Ok(Wake::Tray(tray::Click::Settings)) => open_settings(),
+            Ok(Wake::Tray(tray::Click::Home)) => switcher.go_home(&mut act),
+            Ok(Wake::Tray(tray::Click::Go(peer))) => {
+                // As from the switcher: only from here, only to a PC online.
+                if switcher.focus() == Focus::Local && online[peer] {
+                    switcher.go_to(Some(peer), &online);
+                }
+            }
             Ok(Wake::Pick(pick)) => {
                 switcher_open = false;
                 match pick {
@@ -464,6 +513,11 @@ pub fn run(
             Err(RecvTimeoutError::Disconnected) => break,
         }
         drop(act);
+        if quit {
+            // Returning drops the grab: the devices go back to this PC.
+            println!("mickey: quitting, as asked from the tray");
+            return Ok(());
+        }
         if let Some((x, y)) = home_at
             && let Err(err) = emit::place(x, y)
         {
