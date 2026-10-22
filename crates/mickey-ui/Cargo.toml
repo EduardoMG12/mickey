@@ -11,6 +11,8 @@ mickey-config = { path = "../mickey-config" }
 # holds the keyboard, never links it (spike #47: 90-125 MB while a window is
 # open). Only what the switcher needs: OpenGL (glow), the built-in fonts, and
 # both Linux display protocols.
+# The mascot in the windows is a PNG; already in the tree through eframe.
+png = "0.18"
 eframe = { version = "0.37", default-features = false, features = [
     "glow",
     "default_fonts",
