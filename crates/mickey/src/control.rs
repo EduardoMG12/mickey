@@ -39,6 +39,8 @@ pub enum Order {
     Switcher,
     /// Not a move: the answer is `mickey_config::peers::Peers` as text.
     Peers,
+    /// Not a move: the PCs found on the network, one per line.
+    Discover,
 }
 
 /// An order for the source's main loop, and where to send its one-line
@@ -396,6 +398,7 @@ fn accept<T: From<Request>>(
                     _ if other == "home" => Some(Order::Home),
                     _ if other == "switcher" => Some(Order::Switcher),
                     _ if other == "peers" => Some(Order::Peers),
+                    _ if other == "discover" => Some(Order::Discover),
                     Some(("go", name)) => Some(Order::Go(name.to_string())),
                     _ => None,
                 };

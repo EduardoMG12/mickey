@@ -69,6 +69,31 @@ pub struct ThisPc {
     /// paired machines can do anything (PRD 0002), so this needs no IP.
     #[serde(default = "default_listen")]
     pub listen: SocketAddr,
+    /// How the other PCs see this one (PRD 0010); the host name when unset.
+    #[serde(default)]
+    pub name: Option<String>,
+}
+
+impl ThisPc {
+    /// `name`, or the host name, or "Mickey" when even that is unknown.
+    pub fn name(&self) -> String {
+        self.name
+            .clone()
+            .or_else(host_name)
+            .unwrap_or_else(|| "Mickey".into())
+    }
+}
+
+/// The machine's host name, without any crate: Linux keeps it in /proc,
+/// Windows in the COMPUTERNAME variable.
+fn host_name() -> Option<String> {
+    let name = if cfg!(windows) {
+        std::env::var("COMPUTERNAME").ok()?
+    } else {
+        std::fs::read_to_string("/proc/sys/kernel/hostname").ok()?
+    };
+    let name = name.trim();
+    (!name.is_empty()).then(|| name.to_string())
 }
 
 impl Default for ThisPc {
@@ -77,6 +102,7 @@ impl Default for ThisPc {
             controls_others: true,
             controlled: true,
             listen: default_listen(),
+            name: None,
         }
     }
 }
@@ -284,6 +310,14 @@ pub fn parse(text: &str) -> Result<Config, String> {
             peer.name
         ));
     }
+    // It travels in discovery packets, tab-separated lines, one length byte.
+    if let Some(name) = &config.this_pc.name
+        && (name.contains(['\t', '\n']) || name.is_empty() || name.len() > 64)
+    {
+        return Err(format!(
+            "this PC's name {name:?} must be 1 to 64 bytes, without tabs or line breaks"
+        ));
+    }
     if !SWITCHER_POSITIONS.contains(&config.interface.switcher_position.as_str()) {
         return Err(format!(
             "switcher_position {:?} is not one of {}",
@@ -395,6 +429,12 @@ mod tests {
         assert_eq!(config.this_pc.listen.port(), DEFAULT_PORT);
         let config = parse("[this_pc]\ncontrolled = false\n").unwrap();
         assert!(!config.this_pc.controlled);
+        assert!(
+            !config.this_pc.name().is_empty(),
+            "the host name, or Mickey"
+        );
+        let named = parse("[this_pc]\nname = \"Desk\"\n").unwrap();
+        assert_eq!(named.this_pc.name(), "Desk");
     }
 
     #[test]
