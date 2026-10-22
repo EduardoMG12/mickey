@@ -9,6 +9,7 @@ use crate::edges;
 use crate::emit;
 use crate::event::InputEvent;
 use crate::focus::{Action, Focus, Switcher};
+use crate::group;
 use crate::history;
 use crate::hotkey::Hotkey;
 use crate::identity::{self, Identity};
@@ -47,6 +48,8 @@ enum Wake {
     Tray(tray::Click),
     /// The peer at this address placed itself on this PC's desktop.
     Arranged(std::net::IpAddr, [i32; 2]),
+    /// A peer's group map (PRD 0010).
+    Group(Vec<group::Member>),
 }
 
 impl From<InputEvent> for Wake {
@@ -202,6 +205,64 @@ fn arrange(positions: &mut [Option<[i32; 2]>], peers: &mut [Peer]) -> String {
     format!("ok: told {told} PC(s) about the layout")
 }
 
+/// One PC from a peer's map (already in this PC's coordinates): trusted,
+/// because a trusted member vouches for it (the owner's choice, PRD 0010);
+/// its place taken if it has one; added to config.toml and to `peers` if
+/// this PC did not know it. Returns the new peer's index, to connect to.
+fn join(
+    member: group::Member,
+    shared: &Shared,
+    peers: &mut Vec<Peer>,
+    positions: &mut Vec<Option<[i32; 2]>>,
+) -> Option<usize> {
+    {
+        let mut trusted = shared.trusted.lock().unwrap_or_else(|p| p.into_inner());
+        if !trusted.is_trusted(&member.key)
+            && let Err(err) =
+                trusted.add(member.key, &format!("{} (via the group)", member.address))
+        {
+            eprintln!("mickey: {err}");
+            return None;
+        }
+    }
+    let known = peers
+        .iter()
+        .position(|peer| peer.key == Some(member.key) || peer.address == member.address);
+    if let Some(index) = known {
+        if let Some(position) = member.position
+            && positions[index] != Some(position)
+        {
+            positions[index] = Some(position);
+            save_position(&peers[index].name, position);
+        }
+        return None;
+    }
+    let added = config::path().and_then(|path| {
+        let text = std::fs::read_to_string(&path).unwrap_or_default();
+        let (text, name) = config::add_peer(&text, &member.name, member.address, member.position)?;
+        std::fs::write(&path, text).map_err(|err| err.to_string())?;
+        Ok(name)
+    });
+    let name = match added {
+        Ok(name) => name,
+        Err(err) => {
+            eprintln!("mickey: cannot add {} from the group: {err}", member.name);
+            return None;
+        }
+    };
+    println!("mickey: {name} joined through the group");
+    peers.push(Peer {
+        name,
+        address: member.address,
+        link: None,
+        key: Some(member.key),
+        latency: Latency::new(),
+        monitors: Vec::new(),
+    });
+    positions.push(member.position);
+    Some(peers.len() - 1)
+}
+
 /// Writes where a peer placed itself into config.toml, so the settings
 /// window and the next start see it too.
 fn save_position(name: &str, position: [i32; 2]) {
@@ -259,6 +320,8 @@ struct Peer {
     name: String,
     address: SocketAddr,
     link: Option<Link>,
+    /// Its public key, once it has connected; how the group knows it.
+    key: Option<[u8; 32]>,
     latency: Latency,
     /// What the peer reported (PRD 0005); empty until it does.
     monitors: Vec<Monitor>,
@@ -281,6 +344,8 @@ pub enum TargetNews {
         from: std::net::IpAddr,
         position: [i32; 2],
     },
+    /// A peer's group map (PRD 0010), in its own coordinates.
+    Group { members: Vec<group::Member> },
 }
 
 /// What the rest of Mickey shares with the source. Each is optional:
@@ -292,6 +357,9 @@ pub struct Services {
     pub found: Option<discovery::Table>,
     /// The PCs this one trusts, shared with the target.
     pub trusted: trust::Shared,
+    /// This PC as the group knows it: its name and the port it listens on.
+    pub name: String,
+    pub port: u16,
     /// The clipboard, and its history (PRD 0011).
     pub keeper: Option<Keeper>,
     pub history: Option<history::Shared>,
@@ -309,6 +377,8 @@ pub fn run(
 ) -> Result<(), String> {
     let Services {
         trusted,
+        name: my_name,
+        port: my_port,
         controlled,
         found,
         keeper,
@@ -345,6 +415,7 @@ pub fn run(
         peers.push(Peer {
             name: peer.name,
             address: peer.address,
+            key: link.as_ref().map(|link| *link.peer_key()),
             link,
             latency: Latency::new(),
             monitors: Vec::new(),
@@ -384,6 +455,7 @@ pub fn run(
                 let woken = match news {
                     TargetNews::Controlled(here) => Wake::Controlled(here),
                     TargetNews::Arranged { from, position } => Wake::Arranged(from, position),
+                    TargetNews::Group { members } => Wake::Group(members),
                 };
                 if wake.send(woken).is_err() {
                     return;
@@ -423,7 +495,9 @@ pub fn run(
     let mut grabbed = None;
     let mut next_ping = start;
     // Names never change; which peers are online is refreshed every turn.
-    let names: Vec<String> = peers.iter().map(|peer| peer.name.clone()).collect();
+    let mut names: Vec<String> = peers.iter().map(|peer| peer.name.clone()).collect();
+    // Which peers were online when the group map was last shared.
+    let mut shared_with: Vec<bool> = Vec::new();
     let this_pc = monitors::this_pc().unwrap_or_else(|err| {
         eprintln!("mickey: {err}; `mickey peers` will not show this PC's monitors");
         Vec::new()
@@ -435,6 +509,7 @@ pub fn run(
             if let Some(mover) = &mover {
                 open_data_link(index, peers[index].address, &shared, mover);
             }
+            peers[index].key = Some(*link.peer_key());
             peers[index].link = Some(link);
             println!("mickey: {} is back online", peers[index].name);
         }
@@ -569,6 +644,7 @@ pub fn run(
         let mut pushed = None;
         let mut quit = false;
         let mut placed = None;
+        let mut heard_map = None;
         let mut asked_to_arrange = None;
         match wakes.recv_timeout(wait) {
             // While recording a hotkey, keys are named, never acted on.
@@ -601,6 +677,7 @@ pub fn run(
             Ok(Wake::Controlled(here)) => in_control.peer_says(here),
             // Both handled below, once `act` no longer borrows the peers.
             Ok(Wake::Arranged(from, position)) => placed = Some((from, position)),
+            Ok(Wake::Group(members)) => heard_map = Some(members),
             Ok(Wake::Control(request)) if request.order == Order::Arranged => {
                 asked_to_arrange = Some(request.reply);
             }
@@ -686,6 +763,44 @@ pub fn run(
         }
         if let Some(reply) = asked_to_arrange {
             let _ = reply.send(arrange(&mut positions, &mut peers));
+            // Everyone gets the new places, not only the PCs moved.
+            shared_with.clear();
+        }
+        if let Some(members) = heard_map {
+            let me = *shared.identity.public();
+            for member in group::as_seen_by(&members, &me) {
+                if let Some(index) = join(member, &shared, &mut peers, &mut positions) {
+                    names.push(peers[index].name.clone());
+                    reconnect(index, peers[index].address, &shared, &back_sender);
+                }
+            }
+        }
+        // Share the group map when the PCs online changed (one came, or
+        // went), so a PC paired with this one reaches every other.
+        let now_online: Vec<bool> = peers.iter().map(|peer| peer.link.is_some()).collect();
+        if now_online != shared_with
+            && let Some(mover) = &mover
+        {
+            let me = group::Member {
+                key: *shared.identity.public(),
+                name: my_name.clone(),
+                address: SocketAddr::from(([0, 0, 0, 0], my_port)),
+                position: Some([0, 0]),
+            };
+            let others: Vec<group::Member> = peers
+                .iter()
+                .zip(&positions)
+                .filter_map(|(peer, position)| {
+                    Some(group::Member {
+                        key: peer.key?,
+                        name: peer.name.clone(),
+                        address: peer.address,
+                        position: *position,
+                    })
+                })
+                .collect();
+            mover.share_map(&group::encode(&me, &others));
+            shared_with = now_online;
         }
         if quit {
             // Returning drops the grab: the devices go back to this PC.
