@@ -11,6 +11,7 @@
 //! ```
 
 pub mod chord;
+pub mod peers;
 
 use chord::Chord;
 use serde::Deserialize;

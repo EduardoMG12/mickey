@@ -67,6 +67,12 @@ fn run(command: Command) -> Result<(), String> {
                 None => Err(answer.trim_start_matches("error: ").to_string()),
             }
         }
+        Command::Peers => {
+            for line in control::request("peers")? {
+                println!("{}", line.map_err(|err| err.to_string())?);
+            }
+            Ok(())
+        }
         Command::Status { waybar: true } => follow_for_waybar(),
         Command::Status { waybar: false } => {
             let mut answer = control::request("status")?;
