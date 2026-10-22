@@ -1,5 +1,7 @@
-//! Mickey's windows. Today only the switcher: one card per PC, pick where
-//! the keyboard and mouse go. See `choice.rs` for how it is started.
+//! Mickey's windows: the switcher (one card per PC, pick where the
+//! keyboard and mouse go; see `choice.rs` for how it is started), the
+//! settings (`settings`), the clipboard history (`history`) and the
+//! pairing question (`pair`).
 
 // No console window next to the GUI on Windows.
 #![windows_subsystem = "windows"]

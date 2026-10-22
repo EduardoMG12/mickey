@@ -16,7 +16,8 @@ use std::fmt;
 /// 3: `Monitors`, `Enter` and `Leave` (PRD 0005), `Focus` (PRD 0009).
 pub const VERSION: u8 = 3;
 
-/// Longest frame: length byte, type byte and an 8-byte payload.
+/// Longest frame, a full `Monitors`: length, type and count bytes, then
+/// 16 bytes (four `i32`) per monitor.
 pub const MAX_FRAME: usize = 3 + 16 * MAX_MONITORS;
 /// The most monitors one `Monitors` message carries.
 pub const MAX_MONITORS: usize = 8;

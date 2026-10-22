@@ -4,8 +4,11 @@
 //! `mickey source` starts the switcher as
 //!
 //! ```text
-//! mickey-ui switcher [--at <corner>] [--vertical] <focused> <pc>...
+//! mickey-ui switcher [--mirror] [--at <corner>] [--vertical] <focused> <pc>...
 //! ```
+//!
+//! (`main.rs` takes `--mirror` out first: a view-only copy for the PCs not
+//! in use.)
 //!
 //! `<corner>` is `center`, `top-left`, `top-right`, `bottom-left` or
 //! `bottom-right` (the default).
