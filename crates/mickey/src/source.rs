@@ -4,6 +4,7 @@
 use crate::control::{self, Control, Order, Request, Status};
 use crate::event::InputEvent;
 use crate::focus::{Action, Focus, Switcher};
+use crate::hotkey::Hotkey;
 use crate::identity::{self, Identity};
 use crate::input::Input;
 use crate::latency::{self, Latency};
@@ -100,6 +101,7 @@ struct Shared {
 /// and never blocks the others.
 pub fn run(
     configured: Vec<config::Peer>,
+    hotkeys: Hotkey,
     touchpad_speed: i32,
     switcher_position: String,
 ) -> Result<(), String> {
@@ -160,7 +162,7 @@ pub fn run(
         }
     };
     let mut published = None;
-    let mut switcher = Switcher::new();
+    let mut switcher = Switcher::with_hotkeys(hotkeys);
     // Dropping a `Grab` gives its device back, on every way out of here,
     // including `?` and panics.
     let mut grabbed = None;

@@ -126,19 +126,34 @@ pub struct Hotkeys {
     pub next: Option<String>,
     pub home: Option<String>,
     pub switcher: Option<String>,
+    /// One hand: the next and the previous PC in the list.
+    pub forward: Option<String>,
+    pub back: Option<String>,
+    /// A key tapped twice quickly also goes to the next PC; `""` turns it
+    /// off.
+    pub double_tap: Option<String>,
 }
 
 /// Every hotkey, parsed. `peers[i]` is peer `i`'s own hotkey, if any.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct HotkeySet {
     pub next: Chord,
     pub home: Option<Chord>,
     pub switcher: Option<Chord>,
+    pub forward: Chord,
+    pub back: Chord,
+    /// `None` when turned off.
+    pub double_tap: Option<u16>,
     pub peers: Vec<Option<Chord>>,
 }
 
 /// The M0 hotkey, still the default for `next`.
 pub const DEFAULT_NEXT: &str = "AltGr+RightShift";
+/// One-hand defaults, asked for by the owner: AltGr and the arrows next to
+/// it, and a double tap on Right Shift.
+pub const DEFAULT_FORWARD: &str = "AltGr+Right";
+pub const DEFAULT_BACK: &str = "AltGr+Left";
+pub const DEFAULT_DOUBLE_TAP: &str = "RightShift";
 
 #[derive(Debug, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -179,22 +194,39 @@ impl Config {
                 .transpose()
                 .map_err(|err| format!("{setting}: {err}"))
         };
+        let default = |text| chord::parse(text).expect("the defaults parse");
+        let double_tap = match self.hotkeys.double_tap.as_deref().map(str::trim) {
+            Some("") => None,
+            text => Some(
+                chord::parse_key(text.unwrap_or(DEFAULT_DOUBLE_TAP))
+                    .map_err(|err| format!("hotkeys.double_tap: {err}"))?,
+            ),
+        };
         let set = HotkeySet {
-            next: one("hotkeys.next", &self.hotkeys.next)?
-                .unwrap_or_else(|| chord::parse(DEFAULT_NEXT).expect("the default parses")),
+            next: one("hotkeys.next", &self.hotkeys.next)?.unwrap_or_else(|| default(DEFAULT_NEXT)),
             home: one("hotkeys.home", &self.hotkeys.home)?,
             switcher: one("hotkeys.switcher", &self.hotkeys.switcher)?,
+            forward: one("hotkeys.forward", &self.hotkeys.forward)?
+                .unwrap_or_else(|| default(DEFAULT_FORWARD)),
+            back: one("hotkeys.back", &self.hotkeys.back)?.unwrap_or_else(|| default(DEFAULT_BACK)),
+            double_tap,
             peers: self
                 .peers
                 .iter()
                 .map(|peer| one(&format!("hotkey of {}", peer.name), &peer.hotkey))
                 .collect::<Result<_, _>>()?,
         };
-        let all: Vec<&Chord> = [Some(&set.next), set.home.as_ref(), set.switcher.as_ref()]
-            .into_iter()
-            .flatten()
-            .chain(set.peers.iter().flatten())
-            .collect();
+        let all: Vec<&Chord> = [
+            Some(&set.next),
+            set.home.as_ref(),
+            set.switcher.as_ref(),
+            Some(&set.forward),
+            Some(&set.back),
+        ]
+        .into_iter()
+        .flatten()
+        .chain(set.peers.iter().flatten())
+        .collect();
         for (i, chord) in all.iter().enumerate() {
             if all[..i].contains(chord) {
                 return Err(format!("two hotkeys use the same keys: {chord:?}"));

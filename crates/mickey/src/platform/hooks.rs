@@ -9,12 +9,17 @@
 
 use crate::keymap::ScanCode;
 use std::io;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::mpsc::{self, Sender};
 use std::sync::{Mutex, OnceLock};
 use std::thread;
 
 const WH_KEYBOARD_LL: i32 = 13;
+/// Thread messages that turn the mouse hook on and off (`WM_APP` + n).
+const MOUSE_ON: u32 = 0x8000 + 1;
+const MOUSE_OFF: u32 = 0x8000 + 2;
+const PM_NOREMOVE: u32 = 0;
+const THREAD_PRIORITY_TIME_CRITICAL: i32 = 15;
 const WH_MOUSE_LL: i32 = 14;
 const HC_ACTION: i32 = 0;
 const WM_KEYDOWN: usize = 0x0100;
@@ -84,6 +89,9 @@ unsafe extern "system" {
     fn SetWindowsHookExW(id: i32, proc: HookProc, module: isize, thread: u32) -> isize;
     fn CallNextHookEx(hook: isize, code: i32, wparam: usize, lparam: isize) -> isize;
     fn GetMessageW(msg: *mut Msg, hwnd: isize, min: u32, max: u32) -> i32;
+    fn PeekMessageW(msg: *mut Msg, hwnd: isize, min: u32, max: u32, remove: u32) -> i32;
+    fn PostThreadMessageW(thread: u32, message: u32, wparam: usize, lparam: isize) -> i32;
+    fn UnhookWindowsHookEx(hook: isize) -> i32;
     fn GetCursorPos(point: *mut Point) -> i32;
     fn GetAsyncKeyState(vk: i32) -> i16;
 }
@@ -91,6 +99,9 @@ unsafe extern "system" {
 #[link(name = "kernel32")]
 unsafe extern "system" {
     fn GetModuleHandleW(name: *const u16) -> isize;
+    fn GetCurrentThreadId() -> u32;
+    fn GetCurrentThread() -> isize;
+    fn SetThreadPriority(thread: isize, priority: i32) -> i32;
 }
 
 /// What the hooks saw, before any translation.
@@ -120,37 +131,47 @@ pub enum HookEvent {
 struct Shared {
     events: Mutex<Sender<HookEvent>>,
     swallow: AtomicBool,
+    /// The hook thread, which installs and removes the mouse hook.
+    thread: AtomicU32,
 }
 
 /// The hook procedures are plain functions Windows calls, so they reach
 /// their state through this. Set once by `start`.
 static SHARED: OnceLock<Shared> = OnceLock::new();
 
-/// Installs both hooks on their own thread, which runs the message loop
-/// Windows needs to call them. Events go to `events`.
+/// Installs the keyboard hook on its own thread, which runs the message
+/// loop Windows needs to call hooks. The mouse hook is only installed while
+/// swallowing: a game sends thousands of mouse events a second, and none of
+/// them should pass through Mickey while the focus is local.
+/// Events go to `events`.
 pub fn start(events: Sender<HookEvent>) -> io::Result<()> {
     let shared = Shared {
         events: Mutex::new(events),
         swallow: AtomicBool::new(false),
+        thread: AtomicU32::new(0),
     };
     SHARED
         .set(shared)
         .map_err(|_| io::Error::other("the hooks are already running"))?;
     let (ready, installed) = mpsc::channel();
     thread::spawn(move || {
+        // Windows waits for this thread on every key and mouse event, and
+        // skips the hook if it is late: under load (a game) a late hook
+        // means input lag locally and lost key releases on the target. The
+        // thread only ever runs for a moment per event, so it may go first.
+        // SAFETY: GetCurrentThread returns a pseudo-handle valid for this
+        // call; raising our own thread's priority has no other effect.
+        unsafe { SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL) };
         // SAFETY: a null name asks for this program's own module handle.
         let module = unsafe { GetModuleHandleW(std::ptr::null()) };
         // SAFETY: both procedures have the `HookProc` signature and live as
         // long as the program; `module` is this program; thread 0 means
         // every thread on this desktop, as low-level hooks require.
         let keyboard = unsafe { SetWindowsHookExW(WH_KEYBOARD_LL, keyboard_proc, module, 0) };
-        // SAFETY: as above.
-        let mouse = unsafe { SetWindowsHookExW(WH_MOUSE_LL, mouse_proc, module, 0) };
-        if keyboard == 0 || mouse == 0 {
+        if keyboard == 0 {
             let _ = ready.send(Err(io::Error::last_os_error()));
             return;
         }
-        let _ = ready.send(Ok(()));
         let mut msg = Msg {
             hwnd: 0,
             message: 0,
@@ -160,19 +181,48 @@ pub fn start(events: Sender<HookEvent>) -> io::Result<()> {
             pt: Point::default(),
             private: 0,
         };
+        // A thread gets a message queue on its first message call; create
+        // it now, so `set_swallow` can post to it right away.
+        // SAFETY: `msg` is a valid MSG; nothing is removed from the queue.
+        unsafe { PeekMessageW(&mut msg, 0, 0, 0, PM_NOREMOVE) };
+        if let Some(shared) = SHARED.get() {
+            // SAFETY: no arguments; returns this thread's id.
+            shared
+                .thread
+                .store(unsafe { GetCurrentThreadId() }, Ordering::SeqCst);
+        }
+        let _ = ready.send(Ok(()));
+        let mut mouse = 0;
         // SAFETY: `msg` is a valid MSG for every call; GetMessageW only
         // returns when a message arrives, which keeps the hooks alive.
-        while unsafe { GetMessageW(&mut msg, 0, 0, 0) } > 0 {}
+        while unsafe { GetMessageW(&mut msg, 0, 0, 0) } > 0 {
+            match msg.message {
+                MOUSE_ON if mouse == 0 => {
+                    // SAFETY: as for the keyboard hook above.
+                    mouse = unsafe { SetWindowsHookExW(WH_MOUSE_LL, mouse_proc, module, 0) };
+                }
+                MOUSE_OFF if mouse != 0 => {
+                    // SAFETY: `mouse` is the hook this thread installed.
+                    unsafe { UnhookWindowsHookEx(mouse) };
+                    mouse = 0;
+                }
+                _ => {}
+            }
+        }
     });
     installed
         .recv()
         .map_err(|_| io::Error::other("the hook thread stopped"))?
 }
 
-/// While `true`, every hooked event is swallowed.
+/// While `true`, every hooked event is swallowed, and the mouse is hooked.
 pub fn set_swallow(on: bool) {
     if let Some(shared) = SHARED.get() {
         shared.swallow.store(on, Ordering::SeqCst);
+        let message = if on { MOUSE_ON } else { MOUSE_OFF };
+        // SAFETY: posting a plain message to our own hook thread; if it has
+        // gone, the call fails harmlessly.
+        unsafe { PostThreadMessageW(shared.thread.load(Ordering::SeqCst), message, 0, 0) };
     }
 }
 
