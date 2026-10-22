@@ -104,6 +104,13 @@ fn obey(
         | Order::Arranged
         | Order::Record
         | Order::Connect { .. } => "error: not an order".into(),
+        Order::Pairing => {
+            trust::open_pairing();
+            format!(
+                "ok: a new PC may ask to pair for {} s",
+                trust::PAIRING_OPEN.as_secs()
+            )
+        }
         Order::Go(name) => {
             let Some(peer) = names.iter().position(|known| *known == name) else {
                 return format!("error: no PC named `{name}` in config.toml");
@@ -882,6 +889,8 @@ pub fn run(
             shared_with.clear();
         }
         if let Some((address, name, reply)) = connecting {
+            // The owner is connecting a PC now: it may answer back.
+            trust::open_pairing();
             let answer = if peers.iter().any(|peer| peer.address == address) {
                 format!("error: {address} is already one of this PC's PCs")
             } else {

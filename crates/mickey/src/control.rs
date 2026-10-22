@@ -53,6 +53,8 @@ pub enum Order {
     Arranged,
     /// Name the next keys pressed together, or a key tapped twice.
     Record,
+    /// Let a new PC ask to pair with this one, for a short while (#181).
+    Pairing,
     /// Add the PC at this address, found on the network, and pair with it.
     Connect {
         address: std::net::SocketAddr,
@@ -420,6 +422,7 @@ fn accept<T: From<Request>>(
                     _ if other == "quit" => Some(Order::Quit),
                     _ if other == "arranged" => Some(Order::Arranged),
                     _ if other == "record" => Some(Order::Record),
+                    _ if other == "pairing" => Some(Order::Pairing),
                     Some(("history", id)) => id
                         .strip_prefix("copy ")
                         .and_then(|id| id.parse().ok())
