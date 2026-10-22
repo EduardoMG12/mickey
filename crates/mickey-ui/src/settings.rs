@@ -775,11 +775,53 @@ fn switcher_order(ui: &mut egui::Ui, form: &mut Form) {
             ui.label(format!("{i}  {name}"));
         });
     }
+    ui.add_space(8.0);
+    ui.weak("Preview: how the switcher will look.");
+    preview(ui, &shown, form.vertical);
     if let Some((from, to)) = moved {
         let mut order = shown;
         order.swap(from, to);
         form.order = order;
     }
+}
+
+/// The switcher as it will show, drawn by the same code as the real one
+/// (`crate::cards`), with the first PC in use and the next one selected.
+fn preview(ui: &mut egui::Ui, names: &[String], vertical: bool) {
+    let choice = crate::choice::Choice {
+        corner: crate::place::Corner::BottomRight,
+        vertical,
+        pcs: names
+            .iter()
+            .enumerate()
+            .map(|(id, name)| crate::choice::Pc {
+                id,
+                name: name.clone(),
+                online: true,
+            })
+            .collect(),
+        focused: 0,
+        selected: usize::from(names.len() > 1),
+    };
+    // Measuring lays the cards out off screen, so it is done again only
+    // when the names or the direction change.
+    static WIDTH: std::sync::Mutex<Option<(Vec<String>, bool, f32)>> = std::sync::Mutex::new(None);
+    let mut cached = WIDTH.lock().unwrap_or_else(|p| p.into_inner());
+    let width = match cached.as_ref() {
+        Some((known, was_vertical, width)) if known == names && *was_vertical == vertical => *width,
+        _ => {
+            let width = crate::measure(&choice).1;
+            *cached = Some((names.to_vec(), vertical, width));
+            width
+        }
+    };
+    egui::Frame::NONE
+        .fill(crate::theme::palette::INK)
+        .corner_radius(10.0)
+        .inner_margin(8.0)
+        .show(ui, |ui| {
+            crate::cards(ui, &choice, width);
+        });
 }
 
 #[cfg(test)]
