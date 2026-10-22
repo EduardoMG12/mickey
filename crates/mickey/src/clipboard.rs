@@ -6,6 +6,7 @@
 //! its kind and size.
 
 use std::fmt;
+use std::path::PathBuf;
 
 #[derive(Clone, PartialEq, Eq)]
 pub enum Content {
@@ -16,6 +17,8 @@ pub enum Content {
         height: usize,
         rgba: Vec<u8>,
     },
+    /// Files copied in a file manager, by their paths on this PC.
+    Files(Vec<PathBuf>),
 }
 
 /// Only the kind and size: the content itself may be secret.
@@ -24,6 +27,7 @@ impl fmt::Debug for Content {
         match self {
             Content::Text(text) => write!(f, "text, {} bytes", text.len()),
             Content::Image { width, height, .. } => write!(f, "image, {width}x{height}"),
+            Content::Files(paths) => write!(f, "{} file(s)", paths.len()),
         }
     }
 }
@@ -40,9 +44,14 @@ impl Clipboard {
             .map_err(|err| format!("cannot reach the clipboard: {err}"))
     }
 
-    /// What is copied now: text if there is text, else an image, else
-    /// nothing (empty, or something Mickey does not carry yet).
+    /// What is copied now: files if a file manager copied some (it also
+    /// offers their paths as text), else text, else an image, else nothing.
     pub fn read(&mut self) -> Option<Content> {
+        if let Ok(paths) = self.0.get().file_list()
+            && !paths.is_empty()
+        {
+            return Some(Content::Files(paths));
+        }
         if let Ok(text) = self.0.get_text() {
             return Some(Content::Text(text));
         }
@@ -57,6 +66,7 @@ impl Clipboard {
     pub fn write(&mut self, content: &Content) -> Result<(), String> {
         let done = match content {
             Content::Text(text) => self.0.set_text(text.as_str()),
+            Content::Files(paths) => self.0.set().file_list(paths),
             Content::Image {
                 width,
                 height,
