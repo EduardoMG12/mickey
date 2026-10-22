@@ -138,6 +138,18 @@ fn run(command: Command) -> Result<(), String> {
         }
         Command::Target { listen } => target(listen),
         Command::Run => run_from_config(),
+        Command::Settings => {
+            // The window lives in mickey-ui, next to this program, so the
+            // long-running mickey never links the GUI (PRD 0003).
+            let ui = std::env::current_exe()
+                .map(|exe| exe.with_file_name(format!("mickey-ui{}", std::env::consts::EXE_SUFFIX)))
+                .map_err(|err| err.to_string())?;
+            std::process::Command::new(&ui)
+                .arg("settings")
+                .status()
+                .map_err(|err| format!("cannot start {}: {err}", ui.display()))?;
+            Ok(())
+        }
     }
 }
 

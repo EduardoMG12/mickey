@@ -14,6 +14,7 @@ usage:
   mickey go <name>                   send the keyboard and mouse to that PC
   mickey home                        bring them back to this PC
   mickey switcher                    show the switcher window
+  mickey settings                    open the settings window
   mickey id                          show this machine's fingerprint
   mickey forget <fingerprint>        stop trusting a paired machine
 ";
@@ -22,6 +23,7 @@ usage:
 pub enum Command {
     Help,
     Run,
+    Settings,
     Id,
     Status {
         waybar: bool,
@@ -46,6 +48,7 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
         [help] if help == "-h" || help == "--help" || help == "help" => Ok(Command::Help),
         [command] if command == "id" => Ok(Command::Id),
         [command] if command == "run" => Ok(Command::Run),
+        [command] if command == "settings" => Ok(Command::Settings),
         [command] if command == "home" || command == "switcher" => {
             Ok(Command::Order(command.clone()))
         }

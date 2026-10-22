@@ -6,6 +6,7 @@
 
 mod choice;
 mod place;
+mod settings;
 
 use choice::Choice;
 use eframe::egui;
@@ -15,7 +16,8 @@ use std::rc::Rc;
 
 /// The window's app id; Hyprland window rules match it (see the README).
 const APP_ID: &str = "mickey-ui";
-const CARD_SIZE: egui::Vec2 = egui::vec2(150.0, 90.0);
+const CARD_SIZE: egui::Vec2 = egui::vec2(104.0, 40.0);
+const CARD_MARGIN: f32 = 6.0;
 
 struct Switcher {
     choice: Choice,
@@ -46,12 +48,26 @@ impl eframe::App for Switcher {
                 self.needs_placing = false;
             }
         }
-        let (next, previous, enter, escape) = ctx.input(|input| {
+        const DIGITS: [egui::Key; 10] = [
+            egui::Key::Num0,
+            egui::Key::Num1,
+            egui::Key::Num2,
+            egui::Key::Num3,
+            egui::Key::Num4,
+            egui::Key::Num5,
+            egui::Key::Num6,
+            egui::Key::Num7,
+            egui::Key::Num8,
+            egui::Key::Num9,
+        ];
+        let (next, previous, enter, escape, digit) = ctx.input(|input| {
             (
                 input.key_pressed(egui::Key::ArrowRight) || input.key_pressed(egui::Key::Tab),
                 input.key_pressed(egui::Key::ArrowLeft),
                 input.key_pressed(egui::Key::Enter),
                 input.key_pressed(egui::Key::Escape),
+                // Card 0 is this PC, card 1 the first other PC, and so on.
+                DIGITS.iter().position(|&key| input.key_pressed(key)),
             )
         });
         if next {
@@ -62,12 +78,11 @@ impl eframe::App for Switcher {
         }
         let mut clicked = None;
         egui::CentralPanel::default().show(ui, |ui| {
-            ui.heading("Where should the keyboard and mouse go?");
-            ui.add_space(8.0);
             ui.horizontal(|ui| {
                 for (index, pc) in self.choice.pcs.iter().enumerate() {
                     if card(
                         ui,
+                        index,
                         pc,
                         index == self.choice.selected,
                         index == self.choice.focused,
@@ -76,12 +91,11 @@ impl eframe::App for Switcher {
                     }
                 }
             });
-            ui.add_space(8.0);
             // Plain ASCII: the built-in fonts have no arrow or bullet glyphs.
-            ui.weak("Left/Right: choose   Enter: go   Esc: cancel");
+            ui.small("number or arrows, Enter: go, Esc: cancel");
         });
 
-        let answer = match (clicked, enter) {
+        let answer = match (clicked.or(digit), enter) {
             (Some(index), _) => self.choice.pick(index),
             (None, true) => self.choice.pick(self.choice.selected),
             (None, false) => None,
@@ -94,7 +108,7 @@ impl eframe::App for Switcher {
 }
 
 /// One PC as a card. Returns whether it was clicked.
-fn card(ui: &mut egui::Ui, pc: &choice::Pc, selected: bool, focused: bool) -> bool {
+fn card(ui: &mut egui::Ui, number: usize, pc: &choice::Pc, selected: bool, focused: bool) -> bool {
     let visuals = ui.visuals();
     let fill = if selected {
         visuals.selection.bg_fill
@@ -103,21 +117,23 @@ fn card(ui: &mut egui::Ui, pc: &choice::Pc, selected: bool, focused: bool) -> bo
     };
     let response = egui::Frame::NONE
         .fill(fill)
-        .corner_radius(8.0)
-        .inner_margin(10.0)
+        .corner_radius(6.0)
+        .inner_margin(CARD_MARGIN)
         .show(ui, |ui| {
             ui.set_min_size(CARD_SIZE);
             ui.vertical(|ui| {
+                let title = format!("{number}  {}", pc.name);
+                let state = match (pc.online, focused) {
+                    (_, true) => "in use",
+                    (true, false) => "online",
+                    (false, false) => "offline",
+                };
                 if pc.online {
-                    ui.strong(&pc.name);
-                    ui.label("online");
+                    ui.strong(title);
                 } else {
-                    ui.weak(&pc.name);
-                    ui.weak("offline");
+                    ui.weak(title);
                 }
-                if focused {
-                    ui.label("(in use)");
-                }
+                ui.small(state);
             });
         })
         .response
@@ -127,6 +143,9 @@ fn card(ui: &mut egui::Ui, pc: &choice::Pc, selected: bool, focused: bool) -> bo
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().map(String::as_str) == Some("settings") {
+        return settings_window();
+    }
     let choice = match Choice::from_args(&args) {
         Ok(choice) => choice,
         Err(err) => {
@@ -134,12 +153,13 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
-    let width = choice.pcs.len() as f32 * (CARD_SIZE.x + 28.0) + 24.0;
+    let card = CARD_SIZE.x + 2.0 * CARD_MARGIN + 8.0;
+    let width = choice.pcs.len() as f32 * card + 16.0;
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("Mickey")
             .with_app_id(APP_ID)
-            .with_inner_size([width.max(360.0), 200.0])
+            .with_inner_size([width.max(220.0), 84.0])
             .with_resizable(false)
             .with_always_on_top(),
         ..Default::default()
@@ -168,5 +188,28 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         None => ExitCode::from(1),
+    }
+}
+
+/// `mickey-ui settings`: the settings window (`mickey settings` starts it).
+fn settings_window() -> ExitCode {
+    let options = eframe::NativeOptions {
+        viewport: egui::ViewportBuilder::default()
+            .with_title("Mickey settings")
+            .with_app_id("mickey-settings")
+            .with_inner_size([640.0, 420.0]),
+        ..Default::default()
+    };
+    let result = eframe::run_native(
+        "mickey-settings",
+        options,
+        Box::new(|_| Ok(Box::new(settings::Settings::load()))),
+    );
+    match result {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(err) => {
+            eprintln!("mickey-ui: cannot open a window: {err}");
+            ExitCode::from(2)
+        }
     }
 }
