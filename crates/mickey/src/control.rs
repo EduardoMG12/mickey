@@ -37,6 +37,8 @@ pub enum Order {
     Go(String),
     Home,
     Switcher,
+    /// Not a move: the answer is `mickey_config::peers::Peers` as text.
+    Peers,
 }
 
 /// An order for the source's main loop, and where to send its one-line
@@ -381,6 +383,7 @@ fn accept<T: From<Request>>(
                 let order = match other.split_once(' ') {
                     _ if other == "home" => Some(Order::Home),
                     _ if other == "switcher" => Some(Order::Switcher),
+                    _ if other == "peers" => Some(Order::Peers),
                     Some(("go", name)) => Some(Order::Go(name.to_string())),
                     _ => None,
                 };

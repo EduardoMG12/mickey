@@ -2,13 +2,7 @@
 //! the space the cursor moves in. Windows asks the system; Linux asks
 //! Hyprland over its IPC socket (other desktops come later).
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct Monitor {
-    pub x: i32,
-    pub y: i32,
-    pub width: i32,
-    pub height: i32,
-}
+pub use mickey_config::peers::Monitor;
 
 pub fn this_pc() -> Result<Vec<Monitor>, String> {
     #[cfg(windows)]
