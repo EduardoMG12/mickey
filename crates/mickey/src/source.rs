@@ -2,6 +2,7 @@
 //! machine, and send input to the focused peer.
 
 use crate::control::{self, Control, Order, Request, Status};
+use crate::edges;
 use crate::event::InputEvent;
 use crate::focus::{Action, Focus, Switcher};
 use crate::hotkey::Hotkey;
@@ -14,6 +15,7 @@ use crate::secure::Link;
 use crate::transport;
 use crate::trust::{self, TrustedPeers};
 use mickey_config as config;
+use mickey_config::Side;
 use mickey_config::peers::{PeerInfo, Peers};
 use std::net::SocketAddr;
 use std::process::Command;
@@ -84,6 +86,39 @@ fn obey(
     }
 }
 
+/// The peer whose edge the cursor is pushing against, if any: which one,
+/// the edge it is entered through, and how far along. Never while a mouse
+/// button is down: dragging a window to the edge must not throw it away.
+fn edge_crossed(
+    sides: &[Option<Side>],
+    online: &[bool],
+    this_pc: &[Monitor],
+    (dx, dy): (i32, i32),
+    input: &Input,
+) -> Option<(usize, Side, f32)> {
+    let pushing = |side| match side {
+        Side::Left => dx < 0,
+        Side::Right => dx > 0,
+        Side::Above => dy < 0,
+        Side::Below => dy > 0,
+    };
+    let mut candidates = sides
+        .iter()
+        .zip(online)
+        .enumerate()
+        .filter(|(_, (_, up))| **up)
+        .filter_map(|(index, (side, _))| Some((index, (*side)?)))
+        .filter(|&(_, side)| pushing(side))
+        .peekable();
+    // Most motion pushes toward no peer: then the cursor is not asked for.
+    candidates.peek()?;
+    let (x, y) = input.cursor()?;
+    let (index, side, fraction) = candidates.find_map(|(index, side)| {
+        edges::leaving(this_pc, side, x, y).map(|fraction| (index, side, fraction))
+    })?;
+    (!input.button_down()).then_some((index, edges::facing(side), fraction))
+}
+
 /// The answer to `mickey peers`.
 fn peers_text(this_pc: &[Monitor], peers: &[Peer], online: &[bool]) -> String {
     Peers {
@@ -143,6 +178,7 @@ pub fn run(
     // Connect at start, asking to pair where needed (devices are not grabbed
     // yet, so the terminal still gets the keyboard).
     let mut peers = Vec::new();
+    let sides: Vec<Option<Side>> = configured.iter().map(|peer| peer.side).collect();
     for (index, peer) in configured.into_iter().enumerate() {
         let link = match connect_and_pair(&identity, &mut trusted, &peer) {
             Ok(link) => {
@@ -303,8 +339,16 @@ pub fn run(
             }
         };
         let mut asked_for_peers = None;
+        let mut crossed = None;
         match wakes.recv_timeout(wait) {
-            Ok(Wake::Input(event)) => switcher.handle(event, &online, &mut act),
+            Ok(Wake::Input(event)) => {
+                switcher.handle(event, &online, &mut act);
+                if let InputEvent::Motion { dx, dy } = event
+                    && switcher.focus() == Focus::Local
+                {
+                    crossed = edge_crossed(&sides, &online, &this_pc, (dx, dy), &input);
+                }
+            }
             Ok(Wake::Pick(pick)) => {
                 switcher_open = false;
                 match pick {
@@ -328,6 +372,15 @@ pub fn run(
             Err(RecvTimeoutError::Disconnected) => break,
         }
         drop(act);
+        if let Some((index, side, fraction)) = crossed {
+            switcher.go_to(Some(index), &online);
+            let fraction = (fraction * f32::from(u16::MAX)).round() as u16;
+            if let Some(link) = &mut peers[index].link
+                && link.send(&Message::Enter { side, fraction }).is_err()
+            {
+                lost.push(index);
+            }
+        }
         if let Some(reply) = asked_for_peers {
             let _ = reply.send(peers_text(&this_pc, &peers, &online));
         }
