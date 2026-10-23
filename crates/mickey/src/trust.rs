@@ -56,6 +56,11 @@ impl TrustedPeers {
         Ok(TrustedPeers { path, peers })
     }
 
+    /// Whether no PC is trusted yet.
+    pub fn is_empty(&self) -> bool {
+        self.peers.is_empty()
+    }
+
     pub fn is_trusted(&self, key: &[u8; 32]) -> bool {
         self.peers.iter().any(|(trusted, _)| trusted == key)
     }
@@ -134,6 +139,28 @@ pub fn trust_or_ask(
     lock().add(*peer_key, &address.to_string())?;
     println!("mickey: paired; it will connect without asking from now on");
     Ok(true)
+}
+
+/// How long pairing stays open after the owner opens it (#181).
+pub const PAIRING_OPEN: std::time::Duration = std::time::Duration::from_secs(120);
+
+/// Until when a PC that was never paired may ask to pair.
+static OPEN_UNTIL: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
+
+/// Lets a new PC ask to pair for `PAIRING_OPEN`: from the settings, the
+/// command line, or a Connect the owner just clicked.
+pub fn open_pairing() {
+    *OPEN_UNTIL.lock().unwrap_or_else(|p| p.into_inner()) =
+        Some(std::time::Instant::now() + PAIRING_OPEN);
+}
+
+/// Whether a PC never paired may ask to pair now: while this PC trusts
+/// nobody yet (a fresh install pairs with no extra step), or while the
+/// owner has opened pairing. Anything else is refused without a window.
+pub fn pairing_open(trusted: &std::sync::Mutex<TrustedPeers>) -> bool {
+    let fresh = trusted.lock().unwrap_or_else(|p| p.into_inner()).is_empty();
+    let until = *OPEN_UNTIL.lock().unwrap_or_else(|p| p.into_inner());
+    fresh || until.is_some_and(|until| std::time::Instant::now() < until)
 }
 
 /// How long a PC whose request was refused must wait to ask again.
@@ -330,6 +357,24 @@ mod tests {
         assert!(!refused_recently(&mut refused, other, then));
         assert!(!refused_recently(&mut refused, ip, then + REFUSED_WAIT));
         assert!(refused.is_empty(), "old refusals are forgotten");
+    }
+
+    #[test]
+    fn pairing_is_open_on_a_fresh_install_and_when_opened() {
+        let dir = temp_dir("open");
+        let trusted = std::sync::Mutex::new(TrustedPeers::load(&dir).unwrap());
+        assert!(
+            pairing_open(&trusted),
+            "a fresh install pairs with no extra step"
+        );
+        trusted.lock().unwrap().add([1; 32], "").unwrap();
+        *OPEN_UNTIL.lock().unwrap() = None;
+        assert!(!pairing_open(&trusted), "closed once a PC is trusted");
+        open_pairing();
+        assert!(pairing_open(&trusted));
+        *OPEN_UNTIL.lock().unwrap() = Some(std::time::Instant::now());
+        assert!(!pairing_open(&trusted), "closed again when the time is up");
+        fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

@@ -15,6 +15,7 @@ usage:
   mickey home                        bring them back to this PC
   mickey switcher                    show the switcher window
   mickey quit                        end the running Mickey cleanly
+  mickey pairing                     let a new PC ask to pair with this one, for 2 minutes
   mickey record                      name the next keys pressed together, or a key
                                      tapped twice (the settings window uses it)
   mickey arranged                    after editing positions in config.toml: use them and
@@ -121,7 +122,8 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
                 || command == "switcher"
                 || command == "quit"
                 || command == "arranged"
-                || command == "record" =>
+                || command == "record"
+                || command == "pairing" =>
         {
             Ok(Command::Order(command.clone()))
         }
