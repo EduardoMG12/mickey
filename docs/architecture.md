@@ -157,15 +157,15 @@ sequenceDiagram
     autonumber
     participant Dev as Keyboard on PC A
     participant Cap as Capture thread, PC A
-    participant Loop as Source main loop, PC A
+    participant Main as Source main loop, PC A
     participant Link as secure.rs Link
     participant Serve as serve_source thread, PC B
     participant Emit as Emitter, PC B
     Dev->>Cap: evdev event, or a hook callback on Windows
-    Cap->>Loop: Wake Input, Key code 30 pressed
-    Loop->>Loop: Switcher handle, then Hotkey feed
-    Note over Loop: a key that could start a hotkey is held back here
-    Loop->>Link: send Message Input Key
+    Cap->>Main: Wake Input, Key code 30 pressed
+    Main->>Main: Switcher handle, then Hotkey feed
+    Note over Main: a key that could start a hotkey is held back here
+    Main->>Link: send Message Input Key
     Link->>Link: protocol encode, Noise seal, 16-byte tag
     Link->>Serve: 2-byte length and ciphertext over TCP
     Serve->>Serve: Noise open, protocol decode
