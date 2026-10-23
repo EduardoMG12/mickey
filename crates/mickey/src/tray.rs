@@ -100,6 +100,16 @@ impl ksni::Tray for Icon {
         menu.push(item("Quit Mickey".into(), true, Click::Quit));
         menu
     }
+
+    // No tray (yet): Mickey went on waiting for one (`assume_sni_available`).
+    fn watcher_offline(&self, _reason: ksni::OfflineReason) -> bool {
+        eprintln!("mickey: no tray yet; the icon shows when the desktop's tray starts");
+        true
+    }
+
+    fn watcher_online(&self) {
+        eprintln!("mickey: a tray started; the icon is in it");
+    }
 }
 
 /// The icon in the tray, while this lives.
@@ -108,11 +118,14 @@ pub struct Tray(ksni::blocking::Handle<Icon>);
 
 #[cfg(target_os = "linux")]
 impl Tray {
-    /// Shows the icon; picks in its menu arrive on `clicks`. Fails when the
-    /// desktop has no tray.
+    /// Shows the icon; picks in its menu arrive on `clicks`. A desktop
+    /// whose tray is not up yet (a panel that starts after Mickey at login,
+    /// or restarts) gets the icon when its tray appears (#225); only a
+    /// session with no D-Bus fails.
     pub fn start(status: Status, clicks: Sender<Click>) -> Result<Tray, String> {
         use ksni::blocking::TrayMethods;
         Icon { status, clicks }
+            .assume_sni_available(true)
             .spawn()
             .map(Tray)
             .map_err(|err| format!("no tray to show the icon in: {err}"))
