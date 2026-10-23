@@ -354,6 +354,16 @@ pub fn path() -> Result<PathBuf, String> {
         .ok_or_else(|| "cannot find the user's config directory".to_string())
 }
 
+/// Writes `text` to the config file at `path`, creating its folder first:
+/// on a fresh install `~/.config/mickey` does not exist yet, and the first
+/// PC connected must not fail on that.
+pub fn write(path: &std::path::Path, text: &str) -> Result<(), String> {
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|err| format!("{}: {err}", dir.display()))?;
+    }
+    std::fs::write(path, text).map_err(|err| format!("{}: {err}", path.display()))
+}
+
 pub fn parse(text: &str) -> Result<Config, String> {
     // toml's message already names the line and shows the bad text.
     let config: Config = toml::from_str(text).map_err(|err| err.to_string())?;
@@ -551,6 +561,17 @@ fn toml_string(text: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn write_creates_the_missing_folder() {
+        // A fresh install: neither the folder nor the file exists.
+        let base = std::env::temp_dir().join(format!("mickey-config-test-{}", std::process::id()));
+        let path = base.join("mickey").join(FILE_NAME);
+        let _ = std::fs::remove_dir_all(&base);
+        write(&path, "name = \"desk\"\n").unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "name = \"desk\"\n");
+        std::fs::remove_dir_all(&base).unwrap();
+    }
 
     #[test]
     fn a_double_tap_needs_a_key_nobody_types_alone_and_a_sane_window() {
