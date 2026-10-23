@@ -25,6 +25,9 @@ const EVERY: Duration = Duration::from_secs(3);
 /// A PC not heard from for this long has left the list.
 const FORGET_AFTER: Duration = Duration::from_secs(10);
 const MAX_NAME: usize = 64;
+/// PCs remembered at once: a LAN has a handful; a flood of made-up keys
+/// must not grow memory without bound (#186).
+const MAX_HEARD: usize = 64;
 
 /// What one PC says about itself.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -92,6 +95,20 @@ impl Table {
         };
         let mut table = self.0.lock().unwrap_or_else(|p| p.into_inner());
         table.insert(found.key, (found, at));
+        if table.len() > MAX_HEARD {
+            table.retain(|_, (_, heard)| at.duration_since(*heard) < FORGET_AFTER);
+        }
+        // Still full of fresh entries: the oldest goes.
+        while table.len() > MAX_HEARD {
+            let oldest = table
+                .iter()
+                .min_by_key(|(_, (_, heard))| *heard)
+                .map(|(key, _)| *key);
+            match oldest {
+                Some(key) => table.remove(&key),
+                None => break,
+            };
+        }
     }
 
     /// The name a PC announced, if it was heard.
@@ -131,9 +148,10 @@ pub fn start(me: Announce) -> Result<Table, String> {
     let heard = table.clone();
     thread::spawn(move || {
         let mut buf = [0u8; 128];
-        // When each PC was last answered, so two PCs answering each other
-        // send one packet every `EVERY`, not a storm.
-        let mut answered: HashMap<[u8; 32], Instant> = HashMap::new();
+        // When each address was last answered, so two PCs answering each
+        // other send one packet every `EVERY`, not a storm. By address, not
+        // by key: a made-up key per packet must not get an answer each (#186).
+        let mut answered: HashMap<IpAddr, Instant> = HashMap::new();
         loop {
             let Ok((len, from)) = listener.recv_from(&mut buf) else {
                 continue;
@@ -141,16 +159,18 @@ pub fn start(me: Announce) -> Result<Table, String> {
             let Some(announce) = Announce::decode(&buf[..len]) else {
                 continue;
             };
-            if announce.key == me.key {
+            // Our own packets, and anything from outside the local network.
+            if announce.key == me.key || !crate::group::is_local(from.ip()) {
                 continue;
             }
             let now = Instant::now();
             if answered
-                .get(&announce.key)
+                .get(&from.ip())
                 .is_none_or(|at| now.duration_since(*at) >= EVERY)
             {
                 let _ = listener.send_to(&answer, (from.ip(), PORT));
-                answered.insert(announce.key, now);
+                answered.insert(from.ip(), now);
+                answered.retain(|_, at| now.duration_since(*at) < EVERY);
             }
             heard.heard(from.ip(), announce, now);
         }
@@ -160,6 +180,27 @@ pub fn start(me: Announce) -> Result<Table, String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_flood_of_made_up_pcs_keeps_the_table_small() {
+        let table = Table::default();
+        let now = Instant::now();
+        for n in 0..1000u32 {
+            let mut key = [0; 32];
+            key[..4].copy_from_slice(&n.to_be_bytes());
+            let from: IpAddr = "192.0.2.9".parse().unwrap();
+            table.heard(
+                from,
+                Announce {
+                    name: format!("pc{n}"),
+                    port: 4242,
+                    key,
+                },
+                now,
+            );
+        }
+        assert_eq!(table.list(now).len(), MAX_HEARD);
+    }
+
     use super::*;
 
     fn laptop() -> Announce {
