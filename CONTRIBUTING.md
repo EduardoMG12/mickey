@@ -1,5 +1,8 @@
 # Contributing to Mickey
 
+By taking part you agree to the [code of conduct](CODE_OF_CONDUCT.md).
+Security problems go through [SECURITY.md](SECURITY.md), never a public issue.
+
 Mickey is a learning project. The rules below exist so that **every line
 in `main` has been read, understood and, when it matters, debugged by a human**.
 They apply equally to code written by people and by AI assistants.
