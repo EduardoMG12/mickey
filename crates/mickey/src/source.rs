@@ -523,6 +523,8 @@ pub fn run(
     let (wake, wakes) = mpsc::channel();
     input.start(wake.clone(), touchpad_speed)?;
     let mut switcher_open = false;
+    // Local motion between two questions about where the cursor is.
+    let mut edge_check = edges::Throttle::new();
     // The copy of a switcher shown on another PC, open on this one.
     let mut mirror: Option<std::process::Child> = None;
     // Whether switchers or copies are open anywhere for this PC.
@@ -833,7 +835,7 @@ pub fn run(
                 if let InputEvent::Motion { dx, dy } = event
                     && switcher.focus() == Focus::Local
                 {
-                    pushed = Some((dx, dy));
+                    pushed = edge_check.feed((dx, dy));
                 }
             }
             Ok(Wake::Controlled(here)) => in_control.peer_says(here),
