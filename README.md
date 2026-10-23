@@ -33,8 +33,8 @@ Download the latest release from the repository's **Releases** page:
 - **Windows:** run `Mickey-Setup-<version>.exe`. Mickey starts with Windows
   (no window), is allowed through the firewall on **private** networks only,
   and can be removed from *Settings → Apps*.
-- **Linux** (x86-64, glibc 2.39 or newer with systemd: Ubuntu 24.04, Linux
-  Mint 22, Fedora 40, Debian 13 or newer; tested on the first three):
+- **Linux** (x86-64, glibc 2.35 or newer with systemd: Ubuntu 22.04, Linux
+  Mint 21, Debian 12, Fedora 36 or newer; see the tested desktops in #171):
   unpack `mickey-linux-x86_64.tar.gz` and run `./install.sh`. It
   asks for your password once (input group and a udev rule for the virtual
   keyboard), installs to `~/.local/bin` and starts Mickey with your desktop
