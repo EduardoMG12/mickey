@@ -469,11 +469,13 @@ fn serve_clipboard(
                 };
                 match transport::accept_data(stream, &identity, is_trusted) {
                     Ok(link) => {
+                        let by = *link.peer_key();
                         // The group map and shared hotkeys from a paired PC go to the source.
                         let group = |kind: u8, text: &str| match kind {
                             group::KIND => match group::decode(text, from) {
                                 Ok(members) => {
-                                    let _ = controlled.send(source::TargetNews::Group { members });
+                                    let _ =
+                                        controlled.send(source::TargetNews::Group { members, by });
                                 }
                                 Err(err) => eprintln!("mickey: {err}"),
                             },

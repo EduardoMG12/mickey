@@ -69,14 +69,19 @@ impl TrustedPeers {
         self.save()
     }
 
-    /// Removes the peer with this fingerprint (dashes and case ignored).
-    /// Returns whether one was found.
+    /// Removes the peer with this fingerprint (dashes and case ignored),
+    /// and every PC it introduced through the group (noted `via <its
+    /// fingerprint>`, #184). Returns whether one was found.
     pub fn forget(&mut self, wanted: &str) -> Result<bool, String> {
         let normalize = |text: &str| text.replace('-', "").to_ascii_uppercase();
         let wanted = normalize(wanted);
         let before = self.peers.len();
+        let introduced = |note: &str| {
+            note.split_once(" via ")
+                .is_some_and(|(_, by)| normalize(by.trim()) == wanted)
+        };
         self.peers
-            .retain(|(key, _)| normalize(&fingerprint(key)) != wanted);
+            .retain(|(key, note)| normalize(&fingerprint(key)) != wanted && !introduced(note));
         let found = self.peers.len() != before;
         if found {
             self.save()?;
@@ -280,6 +285,25 @@ mod tests {
         let reloaded = TrustedPeers::load(&dir).unwrap();
         assert!(!reloaded.is_trusted(&[1; 32]));
         assert!(reloaded.is_trusted(&[2; 32]));
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn forgetting_a_pc_forgets_the_pcs_it_introduced() {
+        let dir = temp_dir("cascade");
+        let mut trusted = TrustedPeers::load(&dir).unwrap();
+        trusted.add([1; 32], "192.0.2.1:4242").unwrap();
+        let by_one = format!("192.0.2.2:4242 via {}", fingerprint(&[1; 32]));
+        trusted.add([2; 32], &by_one).unwrap();
+        trusted.add([3; 32], "192.0.2.3:4242").unwrap();
+        assert!(trusted.forget(&fingerprint(&[1; 32])).unwrap());
+        let reloaded = TrustedPeers::load(&dir).unwrap();
+        assert!(!reloaded.is_trusted(&[1; 32]));
+        assert!(
+            !reloaded.is_trusted(&[2; 32]),
+            "introduced by the forgotten PC"
+        );
+        assert!(reloaded.is_trusted(&[3; 32]));
         fs::remove_dir_all(&dir).unwrap();
     }
 
