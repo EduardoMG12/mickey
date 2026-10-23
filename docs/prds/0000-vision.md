@@ -1,6 +1,6 @@
 # 0000 — Mickey Vision
 
-> Status: **draft** · Owner: EduardoMG12 · Last updated: 2026-09-28
+> Status: **draft** · Owner: EduardoMG12 · Last updated: 2026-10-22
 >
 > This is the map. Milestone PRDs (`0001`, `0002`, …) are the territory.
 > When they disagree, the milestone PRD wins and this file gets updated.
@@ -55,8 +55,8 @@ Domain terms (peer, source, target, focus, switch, hotkey, layout) live in
 
 | Platform | Capture | Emit | Milestone |
 |---|---|---|---|
-| Linux, any compositor (fallback) | `evdev` read + `EVIOCGRAB`: **M0** | `uinput`: M1 | M0 / M1 |
-| Windows | low-level hooks / Raw Input: M2 | `SendInput`: **M0** | M0 / M2 |
+| Linux, any compositor (fallback) | `evdev` read + `EVIOCGRAB`: **M0** | `uinput`: **done** ([0008](0008-windows-drives-linux.md)) | M0 / M1 |
+| Windows | low-level hooks: **done** ([0008](0008-windows-drives-linux.md)) | `SendInput`: **M0** | M0 / M2 |
 | Hyprland (owner's desktop) | cursor position for edge detection: M1 | — | M1 |
 | Sway / other wlroots | layer-shell edge surface + pointer constraints | virtual-pointer/keyboard protocols | M2 |
 | GNOME 45+ / KDE 6.1+ | InputCapture portal + libei | RemoteDesktop portal + libei | M2 |
@@ -129,13 +129,15 @@ before/after numbers and how they were measured.
 
 A keyboard sent over the network is a keylogger unless it is protected.
 
-- M0 is **plaintext on a trusted LAN only**, and says so loudly at startup.
-  The receiver listens only on the address given on the command line.
+- M0 was **plaintext on a trusted LAN only**, and said so loudly at
+  startup. That ended with the secure link ([0002](0002-secure-link.md)):
+  every link is encrypted now.
 - From M1: encrypted transport and explicit pairing (trust on first use with a
   fingerprint the owner confirms on both screens, like SSH). An unpaired peer
   can connect but can inject nothing.
 - Never: listening on all interfaces by default, internet relays, or any
-  telemetry.
+  telemetry. *(The default listen address changed; see Discoveries,
+  2026-10-22.)*
 
 ## Roadmap
 
@@ -160,7 +162,7 @@ Order agreed with the owner on 2026-10-21: secure link, then steps 1–4.
 | M1a, first | Secure link | [0002](0002-secure-link.md) | Noise `XX` encryption and SSH-style pairing (fingerprints confirmed on both screens), brought forward from M1a so Mickey is safe before anything else |
 | Step 1–2 | Several PCs and the switcher | [0003](0003-several-pcs-and-switcher.md) | `config.toml` with several peers; the hotkey opens a "Win+Tab for computers" window (egui) when there are 3+ PCs |
 | Step 2b | Ways to switch | [0007](0007-ways-to-switch.md) | Control socket and commands (`mickey status`, `go`, `home`, `switcher`), a Waybar module, a corner indicator, configurable hotkeys including one per PC |
-| Step 3 | Setup window | 0006 (todo) | A GUI that adds and pairs PCs, changes settings (touchpad speed, hotkey) and places each PC and its monitors, editing the same `config.toml` |
+| Step 3 | Setup window | [0006](0006-setup-window.md) | A GUI that adds and pairs PCs, changes settings (touchpad speed, hotkey) and places each PC and its monitors, editing the same `config.toml` |
 | Step 4 | Screens have edges | [0005](0005-screen-edges.md) | The cursor crosses to the neighbor placed in step 3, and back; the hotkey stays the way home. On Wayland this needs a spike: apps cannot read the cursor position |
 | Both ways | Windows drives Linux | [0008](0008-windows-drives-linux.md) | Linux targets (`uinput`) and Windows as the source (low-level hooks), brought forward from M1/M2 at the owner's request: peers become symmetric |
 | Tray | Tray icon | [0009](0009-tray-icon.md) | An icon in the system tray of every PC, with a green or red dot for "the keyboard and mouse are here", and a menu of PCs |
@@ -170,10 +172,10 @@ Order agreed with the owner on 2026-10-21: secure link, then steps 1–4.
 
 ### Later (unordered, not committed)
 
-- Shared clipboard (text first, then images)
+- ~~Shared clipboard (text first, then images)~~ *(done: [0011](0011-shared-clipboard.md))*
 - File drag and drop between screens
-- Automatic peer discovery (mDNS)
-- Tray icon
+- ~~Automatic peer discovery (mDNS)~~ *(done without mDNS: a UDP broadcast, [0010](0010-easy-pairing.md))*
+- ~~Tray icon~~ *(done: [0009](0009-tray-icon.md))*
 - macOS backend
 - Packaging: AUR, Flatpak, `.deb`, Windows installer
 
@@ -233,4 +235,21 @@ Until a *Someday* item gets its own PRD:
 
 ## Discoveries
 
-*(Filled in during execution: things we learned that change this map.)*
+### Listening on all interfaces (2026-10-22)
+
+- **The default listen address is `0.0.0.0:4242`**, every interface of
+  the PC (`[this_pc] listen`, `crates/mickey-config/src/lib.rs`), and
+  discovery binds UDP `0.0.0.0:4243` (`crates/mickey/src/discovery.rs`).
+  This breaks the "never listening on all interfaces by default" line
+  above, on purpose: the other PCs on the LAN must be able to reach this
+  one, and asking the owner for this PC's own IP is what PRD 0010 set out
+  to remove (an IP also changes with DHCP and differs per adapter).
+- **What still protects it:** nothing reaches input without pairing. A
+  machine that is not paired can open the TCP port but can inject and
+  read nothing (PRD 0002), and discovery packets carry no secret and are
+  never trusted. On Windows the installer's firewall rule lets Mickey in
+  on **private** networks only (`packaging/windows/mickey.nsi`), so a
+  public Wi-Fi cannot reach it. The principle that remains: no internet
+  relay, no telemetry, LAN only.
+- **M0 is no longer plaintext.** Every link has been Noise-encrypted since
+  PRD 0002; the "not encrypted" startup warning is gone.
