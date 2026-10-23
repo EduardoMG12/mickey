@@ -832,7 +832,7 @@ pub fn run(
             })) => {
                 let entry = history.as_ref().and_then(|history| {
                     let history = history.lock().unwrap_or_else(|p| p.into_inner());
-                    history.get(id).map(|entry| entry.content.clone())
+                    history.get(id).and_then(|entry| entry.content())
                 });
                 let answer = match (entry, &keeper) {
                     (Some(content), Some(keeper)) => {
