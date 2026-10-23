@@ -38,6 +38,8 @@ const NAME_LEN: usize = 80;
 
 pub struct VirtualDevice {
     file: File,
+    /// Events queued since the last `sync`, as `struct input_event`s.
+    batch: Vec<u8>,
 }
 
 impl VirtualDevice {
@@ -45,7 +47,10 @@ impl VirtualDevice {
     /// may write to `/dev/uinput` (see the README's udev rule).
     pub fn create(name: &str) -> io::Result<VirtualDevice> {
         let file = OpenOptions::new().write(true).open(PATH)?;
-        let device = VirtualDevice { file };
+        let device = VirtualDevice {
+            file,
+            batch: Vec::with_capacity(4 * 24),
+        };
         for kind in [EV_SYN, EV_KEY, EV_REL] {
             device.set(UI_SET_EVBIT, kind)?;
         }
@@ -72,20 +77,26 @@ impl VirtualDevice {
         Ok(device)
     }
 
-    /// Queues one event; the compositor sees a batch at `sync`.
-    pub fn emit(&mut self, kind: u16, code: u16, value: i32) -> io::Result<()> {
+    /// Queues one event; it reaches the kernel with the rest of its batch,
+    /// at `sync`.
+    pub fn emit(&mut self, kind: u16, code: u16, value: i32) {
         // `struct input_event` on 64-bit Linux: a 16-byte timeval (zero:
         // the kernel stamps it), type, code, value.
         let mut event = [0u8; 24];
         event[16..18].copy_from_slice(&kind.to_ne_bytes());
         event[18..20].copy_from_slice(&code.to_ne_bytes());
         event[20..24].copy_from_slice(&value.to_ne_bytes());
-        self.file.write_all(&event)
+        self.batch.extend_from_slice(&event);
     }
 
-    /// Ends a batch of events (`SYN_REPORT`).
+    /// Ends a batch with `SYN_REPORT` and hands it to the kernel in one
+    /// write: one system call per key or motion instead of one per event
+    /// (#189). uinput takes any whole number of events per write.
     pub fn sync(&mut self) -> io::Result<()> {
-        self.emit(EV_SYN, SYN_REPORT, 0)
+        self.emit(EV_SYN, SYN_REPORT, 0);
+        let written = self.file.write_all(&self.batch);
+        self.batch.clear();
+        written
     }
 
     fn set(&self, request: u64, code: u16) -> io::Result<()> {
@@ -123,6 +134,32 @@ mod tests {
     use std::thread::sleep;
     use std::time::Duration;
 
+    /// Measurement for #189, run by hand:
+    /// `cargo test -- --ignored uinput_motions --nocapture`. Wiggles the
+    /// cursor one unit right and back, 2000 times (it ends where it
+    /// started), and counts the write calls (`syscw` in /proc/self/io).
+    #[test]
+    #[ignore = "creates a real input device; run by hand"]
+    fn uinput_motions() {
+        let mut device = VirtualDevice::create("Mickey measure").expect("needs /dev/uinput");
+        sleep(Duration::from_secs(1));
+        let writes = || {
+            let io = std::fs::read_to_string("/proc/self/io").unwrap();
+            let line = io.lines().find(|l| l.starts_with("syscw:")).unwrap();
+            line[6..].trim().parse::<u64>().unwrap()
+        };
+        let before = writes();
+        let start = std::time::Instant::now();
+        for n in 0..2000 {
+            let dx = if n % 2 == 0 { 1 } else { -1 };
+            device.emit(EV_REL, 0, dx); // REL_X
+            device.emit(EV_REL, 1, 0); // REL_Y, unchanged
+            device.sync().unwrap();
+        }
+        let elapsed = start.elapsed();
+        eprintln!("2000 motions: {} writes, {elapsed:?}", writes() - before);
+    }
+
     /// Spike #69, run by hand: `cargo test -- --ignored uinput_spike`.
     /// It types `a` into the focused window and moves the cursor 200 units
     /// right, so focus a harmless window first.
@@ -133,11 +170,11 @@ mod tests {
         // Give the compositor time to notice the new device.
         sleep(Duration::from_secs(1));
         for value in [1, 0] {
-            device.emit(EV_KEY, 30, value).unwrap(); // KEY_A
+            device.emit(EV_KEY, 30, value); // KEY_A
             device.sync().unwrap();
         }
         for _ in 0..20 {
-            device.emit(EV_REL, 0, 10).unwrap(); // REL_X
+            device.emit(EV_REL, 0, 10); // REL_X
             device.sync().unwrap();
             sleep(Duration::from_millis(10));
         }

@@ -155,11 +155,19 @@ impl Emitter {
         const NOTCH: i32 = 120;
         match event {
             InputEvent::Key { code, pressed } | InputEvent::Button { code, pressed } => {
-                self.device.emit(EV_KEY, code, i32::from(pressed))?;
+                self.device.emit(EV_KEY, code, i32::from(pressed));
             }
             InputEvent::Motion { dx, dy } => {
-                self.device.emit(EV_REL, REL_X, dx)?;
-                self.device.emit(EV_REL, REL_Y, dy)?;
+                // Only the axes that moved: a zero is an event for nothing.
+                if dx == 0 && dy == 0 {
+                    return Ok(());
+                }
+                if dx != 0 {
+                    self.device.emit(EV_REL, REL_X, dx);
+                }
+                if dy != 0 {
+                    self.device.emit(EV_REL, REL_Y, dy);
+                }
             }
             InputEvent::Scroll {
                 vertical,
@@ -170,11 +178,11 @@ impl Emitter {
                         continue;
                     }
                     let (low, high) = WHEELS[axis];
-                    self.device.emit(EV_REL, high, amount)?;
+                    self.device.emit(EV_REL, high, amount);
                     self.partial[axis] += amount;
                     let notches = self.partial[axis] / NOTCH;
                     if notches != 0 {
-                        self.device.emit(EV_REL, low, notches)?;
+                        self.device.emit(EV_REL, low, notches);
                         self.partial[axis] -= notches * NOTCH;
                     }
                 }
