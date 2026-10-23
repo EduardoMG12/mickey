@@ -192,6 +192,7 @@ fn run(command: Command) -> Result<(), String> {
                     address: to,
                     hotkey: None,
                     position: None,
+                    key: None,
                 }],
                 (None, Some(config)) if !config.peers.is_empty() => config.peers,
                 (None, _) => {
