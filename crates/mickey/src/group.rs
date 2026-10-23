@@ -20,8 +20,9 @@ pub const KIND: u8 = 16;
 /// lines of the PC where the owner saved them.
 pub const HOTKEYS: u8 = 17;
 
-/// The first byte of "show the switcher here": the focused card, then one
-/// card per line (`online:` or `offline:` and a name), the source first.
+/// The first byte of "show the switcher here": the focused card's id, then
+/// one card per line (`<id>=online:<name>` or `<id>=offline:<name>`), in
+/// the order to show them.
 pub const SWITCHER: u8 = 18;
 /// The same cards, to show only: a copy on the PCs not in use.
 pub const MIRROR: u8 = 19;
