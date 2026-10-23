@@ -10,4 +10,14 @@ rm -f "$units/mickey.service" "$HOME/.local/bin/mickey" "$HOME/.local/bin/mickey
 systemctl --user daemon-reload
 echo "Removing the udev rule (needs sudo); you stay in the input group."
 sudo rm -f /etc/udev/rules.d/99-mickey-uinput.rules
+# Closes what install.sh opened in the firewall, if it is on.
+if command -v firewall-cmd >/dev/null && sudo firewall-cmd --state >/dev/null 2>&1; then
+    for port in 4242/tcp 4243/udp; do
+        sudo firewall-cmd -q --permanent --remove-port=$port
+        sudo firewall-cmd -q --remove-port=$port
+    done
+elif command -v ufw >/dev/null && sudo ufw status 2>/dev/null | grep -q "Status: active"; then
+    sudo ufw delete allow 4242/tcp >/dev/null
+    sudo ufw delete allow 4243/udp >/dev/null
+fi
 echo "Mickey is uninstalled."
