@@ -2,6 +2,11 @@
 //! the running Mickey, which sees the physical keys (left from right,
 //! AltGr), to name the next keys pressed together, or a key tapped twice.
 //! While it records, those keys do not switch PCs.
+//!
+//! Any program of the user can ask for a recording, so it never names
+//! plain typing (Shift, or nothing, with a key that types text): asked
+//! again and again, it would otherwise spell out capitals and symbols
+//! as they are typed. Such a chord would make a poor hotkey anyway.
 
 use mickey_config::chord;
 use std::time::{Duration, Instant};
@@ -16,6 +21,28 @@ pub enum Heard {
     DoubleTap(String),
     /// Something that cannot be a hotkey, and why.
     Mistake(String),
+}
+
+/// The answer to plain typing: it names no key.
+const TYPING: &str =
+    "Shift with a key that types text is typing, not a hotkey; add Ctrl, Alt, AltGr or Super";
+
+/// Keys that type text: digits, letters, punctuation and space (Linux
+/// key codes, as the hotkeys use).
+fn types_text(code: u16) -> bool {
+    matches!(code, 2..=13 | 16..=27 | 30..=41 | 43..=53 | 57)
+}
+
+/// Shift (either) or no modifier at all with a key that types text: what
+/// typing a capital or a symbol looks like, never a hotkey.
+fn is_typing(keys: &[u16]) -> bool {
+    const SHIFTS: [u16; 2] = [42, 54];
+    let others: Vec<u16> = keys
+        .iter()
+        .copied()
+        .filter(|code| !SHIFTS.contains(code))
+        .collect();
+    matches!(others[..], [key] if types_text(key))
 }
 
 pub struct Recording {
@@ -72,6 +99,9 @@ impl Recording {
             }
             self.tapped = Some((alone, now));
             return Heard::Waiting;
+        }
+        if is_typing(&keys) {
+            return Heard::Mistake(TYPING.into());
         }
         match chord::name_keys(&keys) {
             Ok(text) => Heard::Chord(text),
@@ -136,5 +166,40 @@ mod tests {
         recording.key(31, true, late);
         recording.key(30, false, late);
         assert!(matches!(recording.key(31, false, late), Heard::Mistake(_)));
+    }
+
+    #[test]
+    fn typing_is_never_named() {
+        const LEFT_SHIFT: u16 = 42;
+        const A: u16 = 30;
+        const SLASH: u16 = 53;
+        const F5: u16 = 63;
+        const LEFT_CTRL: u16 = 29;
+        let now = Instant::now();
+        // A capital and a symbol: refused without naming the key.
+        for key in [A, SLASH] {
+            let mut recording = Recording::new(WINDOW);
+            recording.key(LEFT_SHIFT, true, now);
+            recording.key(key, true, now);
+            recording.key(key, false, now);
+            assert_eq!(
+                recording.key(LEFT_SHIFT, false, now),
+                Heard::Mistake(TYPING.into())
+            );
+        }
+        // Shift with a key that types nothing, and Ctrl with a letter: hotkeys.
+        for (modifier, key, name) in [
+            (LEFT_SHIFT, F5, "LeftShift+F5"),
+            (LEFT_CTRL, A, "LeftCtrl+A"),
+        ] {
+            let mut recording = Recording::new(WINDOW);
+            recording.key(modifier, true, now);
+            recording.key(key, true, now);
+            recording.key(key, false, now);
+            assert_eq!(
+                recording.key(modifier, false, now),
+                Heard::Chord(name.into())
+            );
+        }
     }
 }
