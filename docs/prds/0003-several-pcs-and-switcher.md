@@ -57,7 +57,8 @@ again.
 
 ### Switcher window
 - [ ] A small window in the middle of the source's screen with one **card**
-      per PC: *This PC* and every peer, with its name, its OS, whether it is
+      per PC *(now in a corner of the focused PC; see Discoveries,
+      2026-10-22)*: *This PC* and every peer, with its name, its OS, whether it is
       online and whether it has the focus. Win+Tab was the owner's visual
       reference, not something to reuse.
 - [ ] Arrow keys move the selection, Enter or a click switches, Esc closes
@@ -199,3 +200,28 @@ arrows/Enter/Esc/click, and a second thread sending a message every second.
 - **The built-in egui fonts have no arrows or bullets**; the labels are
   plain ASCII.
 
+### The switcher today (2026-10-22)
+
+- **It opens on the PC in use, with a copy on the others.** The hotkey
+  used to bring the focus home first and open the window on the source.
+  Now, with the focus on a peer, the source sends that peer the cards
+  and it shows the switcher on its own screen, where the owner is
+  looking; every other online PC, the source included, shows a
+  **view-only copy** (`--mirror`) that takes no keys or clicks and closes
+  when a pick is made, the hotkey is pressed again, or after 30 s. The
+  pick goes back to the source in a `Picked` message (PRD 0007).
+- **Cards in layout order.** The cards follow `[interface]
+  switcher_order` first, then the layout: left to right by position (top
+  to bottom when the switcher is a column), unplaced PCs last
+  (`Interface::switcher_sort`). So a card's place is no longer its id:
+  each card carries its id, 0 for this PC and `i + 1` for peer `i`.
+- **The command line grew** to
+  `mickey-ui switcher [--mirror] [--at <corner>] [--vertical] <focused-id> <id>=online:<name>|<id>=offline:<name>...`.
+  The switcher prints the picked card's id. A peer showing the cards uses
+  its own corner and direction, and the source's order.
+- **Corner placement.** `--at` is `center` or a corner
+  (`[interface] switcher_position`, `bottom-right` by default), 24 px from
+  the sides and 48 px from the top or bottom, leaving room for a bar.
+  Windows and X11 place the window themselves; on Hyprland Mickey adds a
+  window rule for the `mickey-ui` app id (`place.rs`); other Wayland
+  compositors place it where they like, usually the center.
