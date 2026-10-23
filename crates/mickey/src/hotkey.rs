@@ -14,9 +14,8 @@ use mickey_config::HotkeySet;
 use mickey_config::chord::{self, Chord};
 use std::time::{Duration, Instant};
 
-#[cfg(test)]
+/// Evdev codes of the two keys the escape uses.
 pub const KEY_RIGHTSHIFT: u16 = 54;
-#[cfg(test)]
 pub const KEY_RIGHTALT: u16 = 100;
 
 /// What a hotkey asks for.
@@ -55,6 +54,91 @@ pub struct Hotkey {
     attempt: Vec<Pressed>,
     /// Something else was pressed: this attempt can no longer fire.
     spoiled: bool,
+    /// The way home that no setting changes.
+    escape: Escape,
+}
+
+/// How long AltGr and Right Shift must be held together to come home.
+pub const ESCAPE_HOLD: Duration = Duration::from_secs(2);
+/// How long Right Shift alone must be held to come home: every keyboard has
+/// it, even one without AltGr.
+pub const ESCAPE_HOLD_ALONE: Duration = Duration::from_secs(3);
+
+/// The way home that no setting changes (CLAUDE.md rule 8, #182): hold
+/// Right Shift alone for `ESCAPE_HOLD_ALONE`, or with AltGr for
+/// `ESCAPE_HOLD`, press nothing else, and let go. Watched apart from the
+/// configured hotkeys, so a shared or broken setting cannot take it away;
+/// the default hotkeys use the same keys, so no other key is held back
+/// while away.
+#[derive(Debug, Default)]
+struct Escape {
+    altgr: bool,
+    right_shift: bool,
+    /// When Right Shift went down, or AltGr joined it.
+    since: Option<Instant>,
+    /// AltGr was held with Right Shift: the shorter hold counts.
+    with_altgr: bool,
+    /// Held long enough; fires once both keys are up.
+    held: bool,
+    /// Another key or a click while holding.
+    spoiled: bool,
+}
+
+impl Escape {
+    /// Whether `event` completes the escape.
+    fn feed(&mut self, event: InputEvent, now: Instant) -> bool {
+        match event {
+            InputEvent::Key {
+                code: KEY_RIGHTSHIFT,
+                pressed: true,
+            } => {
+                if !self.right_shift {
+                    self.since = Some(now);
+                    self.spoiled = false;
+                    self.with_altgr = self.altgr;
+                }
+                self.right_shift = true;
+            }
+            InputEvent::Key {
+                code: KEY_RIGHTALT,
+                pressed: true,
+            } => {
+                if self.right_shift && !self.altgr {
+                    self.since = Some(now);
+                    self.with_altgr = true;
+                }
+                self.altgr = true;
+            }
+            InputEvent::Key {
+                code: KEY_RIGHTALT,
+                pressed: false,
+            } => self.altgr = false,
+            InputEvent::Key {
+                code: KEY_RIGHTSHIFT,
+                pressed: false,
+            } => {
+                self.right_shift = false;
+                let need = if self.with_altgr {
+                    ESCAPE_HOLD
+                } else {
+                    ESCAPE_HOLD_ALONE
+                };
+                self.held = self
+                    .since
+                    .take()
+                    .is_some_and(|since| !self.spoiled && now.duration_since(since) >= need);
+            }
+            InputEvent::Key { pressed: true, .. } | InputEvent::Button { pressed: true, .. } => {
+                self.spoiled |= self.right_shift;
+            }
+            _ => {}
+        }
+        if self.held && !self.altgr && !self.right_shift {
+            self.held = false;
+            return true;
+        }
+        false
+    }
 }
 
 impl Hotkey {
@@ -72,6 +156,7 @@ impl Hotkey {
             last_tap: None,
             attempt: Vec::new(),
             spoiled: false,
+            escape: Escape::default(),
         }
     }
 
@@ -121,6 +206,25 @@ impl Hotkey {
 
     /// `feed` with the time given, so tests can control it.
     fn feed_at(
+        &mut self,
+        event: InputEvent,
+        now: Instant,
+        forward: impl FnMut(InputEvent),
+    ) -> Option<Trigger> {
+        let escape = self.escape.feed(event, now);
+        let fired = self.match_hotkeys(event, now, forward);
+        if escape {
+            // Instead of whatever the same keys would do as a hotkey, and
+            // the long press is no tap of a double tap.
+            self.attempt.clear();
+            self.spoiled = false;
+            self.last_tap = None;
+            return Some(Trigger::Home);
+        }
+        fired
+    }
+
+    fn match_hotkeys(
         &mut self,
         event: InputEvent,
         now: Instant,
@@ -315,6 +419,66 @@ mod tests {
             }
         }
         (forwarded, fired)
+    }
+
+    #[test]
+    fn holding_altgr_and_right_shift_comes_home_whatever_is_set() {
+        // Someone set the hotkeys away from these keys and turned home off.
+        let set = mickey_config::parse(
+            "[[peer]]\nname = \"A\"\naddress = \"192.0.2.10:1\"\n\n[hotkeys]\nnext = \"LeftCtrl+F12\"\nhome = \"LeftCtrl+F11\"\ndouble_tap = \"\"\n",
+        )
+        .unwrap()
+        .hotkeys()
+        .unwrap();
+        let start = Instant::now();
+        let at = |ms| start + Duration::from_millis(ms);
+        let press = |hotkey: &mut Hotkey, events: &[(InputEvent, u64)]| {
+            let mut fired = Vec::new();
+            for &(event, ms) in events {
+                fired.extend(hotkey.feed_at(event, at(ms), |_| {}));
+            }
+            fired
+        };
+        let hold = |ms| {
+            [
+                (key(ALT, true), 0),
+                (key(SHIFT, true), 10),
+                (key(SHIFT, false), ms),
+                (key(ALT, false), ms + 10),
+            ]
+        };
+        let mut hotkey = Hotkey::from_config(&set);
+        assert_eq!(
+            press(&mut hotkey, &hold(2100)),
+            [Trigger::Home],
+            "held 2 s: home"
+        );
+        assert_eq!(
+            press(&mut hotkey, &hold(500)),
+            [],
+            "a short press is not the escape"
+        );
+        // With the default hotkeys a short press is Next, a long one home.
+        let mut defaults = Hotkey::new();
+        assert_eq!(press(&mut defaults, &hold(500)), [Trigger::Next]);
+        assert_eq!(press(&mut defaults, &hold(2100)), [Trigger::Home]);
+        // Right Shift alone, for keyboards without AltGr: 3 s is home.
+        let alone = |ms| [(key(SHIFT, true), 0), (key(SHIFT, false), ms)];
+        assert_eq!(
+            press(&mut Hotkey::from_config(&set), &alone(3100)),
+            [Trigger::Home]
+        );
+        assert!(!press(&mut Hotkey::from_config(&set), &alone(2500)).contains(&Trigger::Home));
+        // Another key while holding spoils it.
+        let spoiled = [
+            (key(ALT, true), 0),
+            (key(SHIFT, true), 10),
+            (key(Q, true), 100),
+            (key(Q, false), 150),
+            (key(SHIFT, false), 2200),
+            (key(ALT, false), 2210),
+        ];
+        assert!(!press(&mut Hotkey::from_config(&set), &spoiled).contains(&Trigger::Home));
     }
 
     #[test]

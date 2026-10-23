@@ -611,6 +611,14 @@ impl eframe::App for Settings {
                 }
                 Tab::Hotkeys => {
                     ui.weak("Record, then press the keys together, or tap one key twice for the double tap. You can also type the names.");
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new(format!("{}  Always home:", crate::theme::icon::SHIELD)).strong());
+                        ui.weak("hold");
+                        crate::theme::keycaps(ui, "RightShift", false, false);
+                        ui.weak("alone 3 s, or with");
+                        crate::theme::keycaps(ui, "AltGr", false, false);
+                        ui.weak("2 s, and let go: works whatever is set here");
+                    });
                     ui.add_space(4.0);
                     // What the recording in progress gave, if it is done.
                     if let Some((row, answer)) = &self.recording

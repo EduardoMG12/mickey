@@ -485,6 +485,8 @@ pub fn run(
     let mut mirror: Option<std::process::Child> = None;
     // Whether switchers or copies are open anywhere for this PC.
     let mut copies_out = false;
+    // Hotkeys another PC shared while the focus was away, to take back home.
+    let mut pending_hotkeys: Option<String> = None;
     // The switcher open on this PC for picking, to close it on a second press.
     let shown_here = window::Slot::default();
     // The status for bars and commands; without a runtime directory Mickey
@@ -899,11 +901,20 @@ pub fn run(
             let _ = reply.send(answer);
         }
         if let Some(lines) = heard_hotkeys {
+            pending_hotkeys = Some(lines);
+        }
+        // Never while the keyboard is on another PC: new hotkeys could leave
+        // no way home from there (#182). They wait until it is back.
+        if switcher.focus() == Focus::Local
+            && let Some(lines) = pending_hotkeys.take()
+        {
             let taken = config::Hotkeys::from_lines(&lines).and_then(|hotkeys| {
                 let path = config::path()?;
                 let text = std::fs::read_to_string(&path).map_err(|err| err.to_string())?;
-                std::fs::write(&path, config::set_hotkeys(&text, &hotkeys)?)
-                    .map_err(|err| err.to_string())?;
+                let new = config::set_hotkeys(&text, &hotkeys)?;
+                // Checked as hotkeys before anything is written.
+                config::parse(&new)?.hotkeys()?;
+                std::fs::write(&path, new).map_err(|err| err.to_string())?;
                 config::Config::load()?.ok_or_else(|| "config.toml is gone".to_string())
             });
             match taken {
