@@ -606,6 +606,12 @@ fn serve_source(
     let lock = || trusted.lock().unwrap_or_else(|p| p.into_inner());
     // The list is not held while the person decides.
     if !lock().is_trusted(&peer_key) {
+        if !trust::pairing_open(trusted) {
+            println!(
+                "mickey: {peer} asked to pair while pairing is closed; refused (open it in the settings' PCs tab, or `mickey pairing`)"
+            );
+            return;
+        }
         let who = found
             .and_then(|table| table.name_of(&peer_key))
             .unwrap_or_else(|| peer.ip().to_string());

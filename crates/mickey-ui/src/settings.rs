@@ -557,6 +557,15 @@ impl eframe::App for Settings {
 
                     ui.add_space(12.0);
                     ui.label(egui::RichText::new(format!("{}  On this network", icon::SEARCH)).size(16.0).strong());
+                    ui.horizontal(|ui| {
+                        if ui.button(format!("{}  Let a new PC pair (2 min)", icon::LINK)).clicked() {
+                            self.message = match ask_mickey(&["pairing"]) {
+                                Ok(_) => "For 2 minutes, a new PC may ask to pair with this one. Check the code on both.".into(),
+                                Err(err) => format!("Could not open pairing: {err}"),
+                            };
+                        }
+                        ui.weak("Needed on this PC when the new PC is the one that connects.");
+                    });
                     let known: Vec<&str> = form.pcs.iter().map(|pc| pc.address.as_str()).collect();
                     let nearby: Vec<&Nearby> = self
                         .nearby
