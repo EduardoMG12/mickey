@@ -52,8 +52,8 @@ enum Wake {
     Tray(tray::Click),
     /// The peer at this address placed itself on this PC's desktop.
     Arranged(std::net::IpAddr, [i32; 2]),
-    /// A peer's group map (PRD 0010).
-    Group(Vec<group::Member>),
+    /// A peer's group map (PRD 0010), and who sent it.
+    Group(Vec<group::Member>, [u8; 32]),
     /// A peer's hotkeys, to take.
     Hotkeys(String),
 }
@@ -236,15 +236,30 @@ fn arrange(positions: &mut [Option<[i32; 2]>], peers: &mut [Peer]) -> String {
 /// this PC did not know it. Returns the new peer's index, to connect to.
 fn join(
     member: group::Member,
+    by: &[u8; 32],
     shared: &Shared,
     peers: &mut Vec<Peer>,
     positions: &mut Vec<Option<[i32; 2]>>,
 ) -> Option<usize> {
+    // Only PCs on a local network: a group map cannot make this PC call
+    // out to the internet, or to itself (#184).
+    if !group::is_local(member.address.ip()) {
+        eprintln!(
+            "mickey: {} from the group is not on a local network; ignored",
+            member.name
+        );
+        return None;
+    }
     {
         let mut trusted = shared.trusted.lock().unwrap_or_else(|p| p.into_inner());
+        // Noted with who introduced it, so forgetting that PC forgets it too.
+        let note = format!(
+            "{} via {}",
+            member.address,
+            crate::identity::fingerprint(by)
+        );
         if !trusted.is_trusted(&member.key)
-            && let Err(err) =
-                trusted.add(member.key, &format!("{} (via the group)", member.address))
+            && let Err(err) = trusted.add(member.key, &note)
         {
             eprintln!("mickey: {err}");
             return None;
@@ -392,8 +407,12 @@ pub enum TargetNews {
         from: std::net::IpAddr,
         position: [i32; 2],
     },
-    /// A peer's group map (PRD 0010), in its own coordinates.
-    Group { members: Vec<group::Member> },
+    /// A peer's group map (PRD 0010), in its own coordinates, and the key
+    /// of the peer that sent it.
+    Group {
+        members: Vec<group::Member>,
+        by: [u8; 32],
+    },
     /// A peer's `[hotkeys]` lines, saved there: the group shares hotkeys.
     Hotkeys(String),
 }
@@ -506,7 +525,7 @@ pub fn run(
                 let woken = match news {
                     TargetNews::Controlled(here) => Wake::Controlled(here),
                     TargetNews::Arranged { from, position } => Wake::Arranged(from, position),
-                    TargetNews::Group { members } => Wake::Group(members),
+                    TargetNews::Group { members, by } => Wake::Group(members, by),
                     TargetNews::Hotkeys(lines) => Wake::Hotkeys(lines),
                 };
                 if wake.send(woken).is_err() {
@@ -784,7 +803,7 @@ pub fn run(
             Ok(Wake::Controlled(here)) => in_control.peer_says(here),
             // Both handled below, once `act` no longer borrows the peers.
             Ok(Wake::Arranged(from, position)) => placed = Some((from, position)),
-            Ok(Wake::Group(members)) => heard_map = Some(members),
+            Ok(Wake::Group(members, by)) => heard_map = Some((members, by)),
             Ok(Wake::Hotkeys(lines)) => heard_hotkeys = Some(lines),
             Ok(Wake::Control(request)) if request.order == Order::Arranged => {
                 asked_to_arrange = Some(request.reply);
@@ -925,10 +944,10 @@ pub fn run(
                 Err(err) => eprintln!("mickey: cannot take another PC's hotkeys: {err}"),
             }
         }
-        if let Some(members) = heard_map {
+        if let Some((members, by)) = heard_map {
             let me = *shared.identity.public();
             for member in group::as_seen_by(&members, &me) {
-                if let Some(index) = join(member, &shared, &mut peers, &mut positions) {
+                if let Some(index) = join(member, &by, &shared, &mut peers, &mut positions) {
                     names.push(peers[index].name.clone());
                     reconnect(index, peers[index].address, &shared, &back_sender);
                 }
