@@ -1,4 +1,5 @@
-//! The control socket of `mickey source` (PRD 0007): a Unix socket that
+//! The control channel of `mickey source` (PRD 0007): a Unix socket on
+//! Linux, TCP on localhost with a token on Windows (see `endpoint`), that
 //! only this user can reach, where small commands ask for the status or
 //! follow every change. Nothing here listens on the network.
 //!
@@ -14,7 +15,8 @@
 //!
 //! The orders only move the focus; nothing on this socket can send input.
 //!
-//! A status line is tab-separated: the focused PC (0 is this PC), then one
+//! A status line is tab-separated: the focused PC (0 is this PC), `here`
+//! or `elsewhere` (whether this PC is the one controlled now), then one
 //! `online:<name>` or `offline:<name>` per peer.
 
 use std::fs;
