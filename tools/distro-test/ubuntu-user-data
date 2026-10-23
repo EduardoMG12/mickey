@@ -1,0 +1,18 @@
+#cloud-config
+autoinstall:
+  version: 1
+  interactive-sections: []
+  identity:
+    hostname: mickey-ubuntu
+    realname: Tester
+    username: tester
+    password: "@PASSWORD@"
+  ssh:
+    install-server: true
+    allow-pw: false
+    authorized-keys:
+      - "@KEY@"
+  late-commands:
+    - printf '[daemon]\nAutomaticLoginEnable=true\nAutomaticLogin=tester\n' > /target/etc/gdm3/custom.conf
+    - echo 'tester ALL=(ALL) NOPASSWD:ALL' > /target/etc/sudoers.d/tester
+  shutdown: poweroff
