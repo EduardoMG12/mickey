@@ -54,7 +54,8 @@ to move while remote.
 ```
 
 Each line is `{"text": "Windows · 1/1", "tooltip": "...", "class": "remote"}`;
-the `class` (`local`, `remote`, `offline`) lets the bar's CSS color it, so a
+the `class` (`local`, `remote`, `offline`; built as `off`, see
+Discoveries) lets the bar's CSS color it, so a
 glance tells you where you are typing.
 
 ### Settings (in `config.toml`, later also in the settings window)
@@ -94,8 +95,9 @@ PRD's review.
       shows an error.
 - [ ] `mickey-ui corner`: a small pinned window with the same text, for
       people without a bar. Hyprland rule documented like the switcher's.
+      *(Not built; see Discoveries.)*
 - [ ] `[interface] indicator` decides which ones `mickey source` starts or
-      announces.
+      announces. *(Not built; see Discoveries.)*
 
 ### Hotkeys
 - [ ] A hotkey is written as `Key+Key+…` with evdev key names for the
@@ -115,7 +117,9 @@ PRD's review.
 
 ## Non-Goals
 
-- A tray icon on Windows (Windows is not a source until M2).
+- ~~A tray icon on Windows (Windows is not a source until M2).~~
+  *(Outdated: Windows became a source in PRD 0008 and has a tray icon,
+  PRD 0009.)*
 - Controlling a *target* through the socket; only the source has one.
 
 ## Constraints
@@ -142,3 +146,43 @@ PRD's review.
 ## Discoveries
 
 *(Filled in during execution.)*
+- **A way home no setting can take away** (2026-10-22, #182). Hotkeys are
+  shared between PCs (#159), so a malicious or broken peer could set them to
+  keys the owner's keyboard lacks and keep the focus. Holding **Right Shift
+  alone for 3 seconds**, or **with AltGr for 2 seconds**, nothing else, and
+  letting go now always brings the focus home (Right Shift alone because
+  the owner's main PC's keyboard has no AltGr). It is watched apart from
+  the configured hotkeys (the owner chose it over a three-key chord with
+  Esc), uses only
+  keys the default hotkeys already hold back, so no other key is delayed,
+  and a short press of the same keys stays the Next hotkey. Hotkeys shared
+  while the focus is away wait until it is back, and are checked before
+  config.toml is written.
+
+### What was built, checked against the code (2026-10-22)
+
+- **No `[interface] indicator` and no `mickey-ui corner`.** `[interface]`
+  holds only the switcher's look (`switcher_position`,
+  `switcher_vertical`, `switcher_order`). The Waybar module is on for
+  whoever adds it to their bar, and the tray icon (PRD 0009) shows on
+  every PC, with or without Waybar, so a corner box was never needed.
+- **The Waybar classes are `local`, `remote` and `off`.** `off` is the
+  line printed while no Mickey is running ("Mickey off"); a peer being
+  offline only changes the count in the text.
+- **Default hotkeys** (`crates/mickey-config/src/lib.rs`; the one-hand
+  ones asked for by the owner): `next` stays
+  `AltGr+RightShift`; `home` is `next` + `0` (`AltGr+RightShift+0`);
+  `switcher` is `AltGr+Up`; one-hand `forward` and `back` are
+  `AltGr+Right` and `AltGr+Left`; a double tap of `RightShift` (within
+  400 ms) also goes to the next PC. Each PC also gets `next` + its number, 1, 2…
+  The `H` and `S` keys proposed above were not used.
+- **The status line has a here/elsewhere field**, right after the focus:
+  `<focus>\t<here|elsewhere>\t<online|offline>:<name>...`. It says whether
+  the keyboard and mouse in use control this PC now, which the tray needs
+  (PRD 0009); a PC can be driven by a peer while its own focus is local.
+- **Windows has a control channel too**, since Windows became a source.
+  Its standard library has no Unix sockets, so it is TCP on `127.0.0.1`
+  with a random port and a random token, both written to
+  `%LOCALAPPDATA%\mickey\control.txt`, inside the user's profile; a client
+  must send the token first. Nothing listens on the network either way.
+

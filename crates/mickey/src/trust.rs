@@ -56,6 +56,11 @@ impl TrustedPeers {
         Ok(TrustedPeers { path, peers })
     }
 
+    /// Whether no PC is trusted yet.
+    pub fn is_empty(&self) -> bool {
+        self.peers.is_empty()
+    }
+
     pub fn is_trusted(&self, key: &[u8; 32]) -> bool {
         self.peers.iter().any(|(trusted, _)| trusted == key)
     }
@@ -69,14 +74,19 @@ impl TrustedPeers {
         self.save()
     }
 
-    /// Removes the peer with this fingerprint (dashes and case ignored).
-    /// Returns whether one was found.
+    /// Removes the peer with this fingerprint (dashes and case ignored),
+    /// and every PC it introduced through the group (noted `via <its
+    /// fingerprint>`, #184). Returns whether one was found.
     pub fn forget(&mut self, wanted: &str) -> Result<bool, String> {
         let normalize = |text: &str| text.replace('-', "").to_ascii_uppercase();
         let wanted = normalize(wanted);
         let before = self.peers.len();
+        let introduced = |note: &str| {
+            note.split_once(" via ")
+                .is_some_and(|(_, by)| normalize(by.trim()) == wanted)
+        };
         self.peers
-            .retain(|(key, _)| normalize(&fingerprint(key)) != wanted);
+            .retain(|(key, note)| normalize(&fingerprint(key)) != wanted && !introduced(note));
         let found = self.peers.len() != before;
         if found {
             self.save()?;
@@ -123,7 +133,7 @@ pub fn trust_or_ask(
         return Ok(true);
     }
     // The list is not held while the person decides.
-    if !ask(peer_key, address, code, who)? {
+    if !ask_once(peer_key, address, code, who)? {
         return Ok(false);
     }
     lock().add(*peer_key, &address.to_string())?;
@@ -131,14 +141,90 @@ pub fn trust_or_ask(
     Ok(true)
 }
 
-/// Asks the person at this PC whether to pair with the PC whose key is
-/// `peer_key`: in a window, or on the terminal when there is no window.
-pub fn ask(
+/// How long pairing stays open after the owner opens it (#181).
+pub const PAIRING_OPEN: std::time::Duration = std::time::Duration::from_secs(120);
+
+/// Until when a PC that was never paired may ask to pair.
+static OPEN_UNTIL: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
+
+/// Lets a new PC ask to pair for `PAIRING_OPEN`: from the settings, the
+/// command line, or a Connect the owner just clicked.
+pub fn open_pairing() {
+    *OPEN_UNTIL.lock().unwrap_or_else(|p| p.into_inner()) =
+        Some(std::time::Instant::now() + PAIRING_OPEN);
+}
+
+/// Whether a PC never paired may ask to pair now: while this PC trusts
+/// nobody yet (a fresh install pairs with no extra step), or while the
+/// owner has opened pairing. Anything else is refused without a window.
+pub fn pairing_open(trusted: &std::sync::Mutex<TrustedPeers>) -> bool {
+    let fresh = trusted.lock().unwrap_or_else(|p| p.into_inner()).is_empty();
+    let until = *OPEN_UNTIL.lock().unwrap_or_else(|p| p.into_inner());
+    fresh || until.is_some_and(|until| std::time::Instant::now() < until)
+}
+
+/// How long a PC whose request was refused must wait to ask again.
+const REFUSED_WAIT: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// Whether a pairing question is on screen now: one at a time.
+static ASKING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// When each address was last refused.
+static REFUSED: std::sync::Mutex<Vec<(std::net::IpAddr, std::time::Instant)>> =
+    std::sync::Mutex::new(Vec::new());
+
+/// Whether `ip` was refused less than `REFUSED_WAIT` before `now`; older
+/// refusals are forgotten on the way.
+fn refused_recently(
+    refused: &mut Vec<(std::net::IpAddr, std::time::Instant)>,
+    ip: std::net::IpAddr,
+    now: std::time::Instant,
+) -> bool {
+    refused.retain(|(_, at)| now.duration_since(*at) < REFUSED_WAIT);
+    refused.iter().any(|(known, _)| *known == ip)
+}
+
+/// `ask`, guarded against a PC on the network that is not paired opening
+/// window after window (#181): one question at a time, the others refused
+/// at once; an address refused waits `REFUSED_WAIT`; the address shows
+/// beside the name, which anyone can announce.
+pub fn ask_once(
     peer_key: &[u8; 32],
     address: SocketAddr,
     code: &str,
     who: &str,
 ) -> Result<bool, String> {
+    use std::sync::atomic::Ordering;
+    let ip = address.ip();
+    {
+        let mut refused = REFUSED.lock().unwrap_or_else(|p| p.into_inner());
+        if refused_recently(&mut refused, ip, std::time::Instant::now()) {
+            return Ok(false);
+        }
+    }
+    if ASKING.swap(true, Ordering::SeqCst) {
+        println!("mickey: {address} asked to pair while another PC was asking; refused");
+        return Ok(false);
+    }
+    let shown = if who == ip.to_string() {
+        who.to_string()
+    } else {
+        format!("{who} ({ip})")
+    };
+    let answer = ask(peer_key, address, code, &shown);
+    ASKING.store(false, Ordering::SeqCst);
+    if answer != Ok(true) {
+        REFUSED
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .push((ip, std::time::Instant::now()));
+    }
+    answer
+}
+
+/// Asks the person at this PC whether to pair with the PC whose key is
+/// `peer_key`: in a window, or on the terminal when there is no window.
+fn ask(peer_key: &[u8; 32], address: SocketAddr, code: &str, who: &str) -> Result<bool, String> {
     println!("mickey: new PC at {address} ({})", fingerprint(peer_key));
     println!("mickey: pairing code: {code}");
     match ask_in_window(who, code) {
@@ -176,11 +262,11 @@ fn ask_in_terminal() -> Result<bool, String> {
     Ok(matches!(answer.trim(), "y" | "Y" | "yes"))
 }
 
-fn to_hex(bytes: &[u8]) -> String {
+pub fn to_hex(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
-fn from_hex(text: &str) -> Option<[u8; 32]> {
+pub fn from_hex(text: &str) -> Option<[u8; 32]> {
     if text.len() != 64 || !text.is_ascii() {
         return None;
     }
@@ -230,11 +316,64 @@ mod tests {
     }
 
     #[test]
+    fn forgetting_a_pc_forgets_the_pcs_it_introduced() {
+        let dir = temp_dir("cascade");
+        let mut trusted = TrustedPeers::load(&dir).unwrap();
+        trusted.add([1; 32], "192.0.2.1:4242").unwrap();
+        let by_one = format!("192.0.2.2:4242 via {}", fingerprint(&[1; 32]));
+        trusted.add([2; 32], &by_one).unwrap();
+        trusted.add([3; 32], "192.0.2.3:4242").unwrap();
+        assert!(trusted.forget(&fingerprint(&[1; 32])).unwrap());
+        let reloaded = TrustedPeers::load(&dir).unwrap();
+        assert!(!reloaded.is_trusted(&[1; 32]));
+        assert!(
+            !reloaded.is_trusted(&[2; 32]),
+            "introduced by the forgotten PC"
+        );
+        assert!(reloaded.is_trusted(&[3; 32]));
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
     fn a_damaged_line_is_an_error() {
         let dir = temp_dir("damaged");
         fs::write(dir.join(FILE_NAME), "not-a-key somewhere\n").unwrap();
         let err = TrustedPeers::load(&dir).err().unwrap();
         assert!(err.contains("line 1 is damaged"), "{err}");
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_refused_address_waits_then_may_ask_again() {
+        let ip: std::net::IpAddr = "192.0.2.9".parse().unwrap();
+        let other: std::net::IpAddr = "192.0.2.10".parse().unwrap();
+        let then = std::time::Instant::now();
+        let mut refused = vec![(ip, then)];
+        assert!(refused_recently(
+            &mut refused,
+            ip,
+            then + std::time::Duration::from_secs(5)
+        ));
+        assert!(!refused_recently(&mut refused, other, then));
+        assert!(!refused_recently(&mut refused, ip, then + REFUSED_WAIT));
+        assert!(refused.is_empty(), "old refusals are forgotten");
+    }
+
+    #[test]
+    fn pairing_is_open_on_a_fresh_install_and_when_opened() {
+        let dir = temp_dir("open");
+        let trusted = std::sync::Mutex::new(TrustedPeers::load(&dir).unwrap());
+        assert!(
+            pairing_open(&trusted),
+            "a fresh install pairs with no extra step"
+        );
+        trusted.lock().unwrap().add([1; 32], "").unwrap();
+        *OPEN_UNTIL.lock().unwrap() = None;
+        assert!(!pairing_open(&trusted), "closed once a PC is trusted");
+        open_pairing();
+        assert!(pairing_open(&trusted));
+        *OPEN_UNTIL.lock().unwrap() = Some(std::time::Instant::now());
+        assert!(!pairing_open(&trusted), "closed again when the time is up");
         fs::remove_dir_all(&dir).unwrap();
     }
 

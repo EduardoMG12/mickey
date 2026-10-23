@@ -1,5 +1,5 @@
-//! The source side (Linux): capture local input, run the focus state
-//! machine, and send input to the focused peer.
+//! The source side (Linux and Windows): capture local input, run the
+//! focus state machine, and send input to the focused peer.
 
 use crate::clip_sync::Mover;
 use crate::clipboard::Keeper;
@@ -52,8 +52,8 @@ enum Wake {
     Tray(tray::Click),
     /// The peer at this address placed itself on this PC's desktop.
     Arranged(std::net::IpAddr, [i32; 2]),
-    /// A peer's group map (PRD 0010).
-    Group(Vec<group::Member>),
+    /// A peer's group map (PRD 0010), and who sent it.
+    Group(Vec<group::Member>, [u8; 32]),
     /// A peer's hotkeys, to take.
     Hotkeys(String),
 }
@@ -104,6 +104,13 @@ fn obey(
         | Order::Arranged
         | Order::Record
         | Order::Connect { .. } => "error: not an order".into(),
+        Order::Pairing => {
+            trust::open_pairing();
+            format!(
+                "ok: a new PC may ask to pair for {} s",
+                trust::PAIRING_OPEN.as_secs()
+            )
+        }
         Order::Go(name) => {
             let Some(peer) = names.iter().position(|known| *known == name) else {
                 return format!("error: no PC named `{name}` in config.toml");
@@ -236,15 +243,30 @@ fn arrange(positions: &mut [Option<[i32; 2]>], peers: &mut [Peer]) -> String {
 /// this PC did not know it. Returns the new peer's index, to connect to.
 fn join(
     member: group::Member,
+    by: &[u8; 32],
     shared: &Shared,
     peers: &mut Vec<Peer>,
     positions: &mut Vec<Option<[i32; 2]>>,
 ) -> Option<usize> {
+    // Only PCs on a local network: a group map cannot make this PC call
+    // out to the internet, or to itself (#184).
+    if !group::is_local(member.address.ip()) {
+        eprintln!(
+            "mickey: {} from the group is not on a local network; ignored",
+            member.name
+        );
+        return None;
+    }
     {
         let mut trusted = shared.trusted.lock().unwrap_or_else(|p| p.into_inner());
+        // Noted with who introduced it, so forgetting that PC forgets it too.
+        let note = format!(
+            "{} via {}",
+            member.address,
+            crate::identity::fingerprint(by)
+        );
         if !trusted.is_trusted(&member.key)
-            && let Err(err) =
-                trusted.add(member.key, &format!("{} (via the group)", member.address))
+            && let Err(err) = trusted.add(member.key, &note)
         {
             eprintln!("mickey: {err}");
             return None;
@@ -271,6 +293,7 @@ fn join(
     ) {
         Ok(index) => {
             peers[index].key = Some(member.key);
+            save_key(&peers[index].name, &member.key);
             println!("mickey: {} joined through the group", peers[index].name);
             Some(index)
         }
@@ -307,6 +330,19 @@ fn add_peer(
     });
     positions.push(position);
     Ok(peers.len() - 1)
+}
+
+/// Writes `key` into the peer's block in config.toml, the first time it
+/// connects (#184).
+fn save_key(name: &str, key: &[u8; 32]) {
+    let saved = config::path().and_then(|path| {
+        let text = std::fs::read_to_string(&path).map_err(|err| err.to_string())?;
+        let text = config::set_key(&text, name, &trust::to_hex(key))?;
+        config::write(&path, &text)
+    });
+    if let Err(err) = saved {
+        eprintln!("mickey: cannot remember {name}'s key: {err}");
+    }
 }
 
 /// Writes where a peer placed itself into config.toml, so the settings
@@ -392,8 +428,12 @@ pub enum TargetNews {
         from: std::net::IpAddr,
         position: [i32; 2],
     },
-    /// A peer's group map (PRD 0010), in its own coordinates.
-    Group { members: Vec<group::Member> },
+    /// A peer's group map (PRD 0010), in its own coordinates, and the key
+    /// of the peer that sent it.
+    Group {
+        members: Vec<group::Member>,
+        by: [u8; 32],
+    },
     /// A peer's `[hotkeys]` lines, saved there: the group shares hotkeys.
     Hotkeys(String),
 }
@@ -450,9 +490,18 @@ pub fn run(
     let mut peers: Vec<Peer> = configured
         .into_iter()
         .map(|peer| Peer {
+            key: peer.key.as_deref().and_then(|hex| {
+                let key = trust::from_hex(hex);
+                if key.is_none() {
+                    eprintln!(
+                        "mickey: {}'s key in config.toml is not 64 hex digits; ignored",
+                        peer.name
+                    );
+                }
+                key
+            }),
             name: peer.name,
             address: peer.address,
-            key: None,
             link: None,
             heard: start,
             latency: Latency::new(),
@@ -481,10 +530,14 @@ pub fn run(
     let (wake, wakes) = mpsc::channel();
     input.start(wake.clone(), touchpad_speed)?;
     let mut switcher_open = false;
+    // Local motion between two questions about where the cursor is.
+    let mut edge_check = edges::Throttle::new();
     // The copy of a switcher shown on another PC, open on this one.
     let mut mirror: Option<std::process::Child> = None;
     // Whether switchers or copies are open anywhere for this PC.
     let mut copies_out = false;
+    // Hotkeys another PC shared while the focus was away, to take back home.
+    let mut pending_hotkeys: Option<String> = None;
     // The switcher open on this PC for picking, to close it on a second press.
     let shown_here = window::Slot::default();
     // The status for bars and commands; without a runtime directory Mickey
@@ -504,7 +557,7 @@ pub fn run(
                 let woken = match news {
                     TargetNews::Controlled(here) => Wake::Controlled(here),
                     TargetNews::Arranged { from, position } => Wake::Arranged(from, position),
-                    TargetNews::Group { members } => Wake::Group(members),
+                    TargetNews::Group { members, by } => Wake::Group(members, by),
                     TargetNews::Hotkeys(lines) => Wake::Hotkeys(lines),
                 };
                 if wake.send(woken).is_err() {
@@ -556,6 +609,19 @@ pub fn run(
     let mut online: Vec<bool> = Vec::with_capacity(peers.len());
     loop {
         for (index, link) in back.try_iter() {
+            // A peer is one PC, known by its key: another trusted PC that
+            // took over its address gets nothing meant for it (#184).
+            match peers[index].key {
+                Some(key) if key != *link.peer_key() => {
+                    println!(
+                        "mickey: {} answered with another PC's key; refused. If it was reinstalled, remove it in the settings and connect again",
+                        peers[index].name
+                    );
+                    continue;
+                }
+                Some(_) => {}
+                None => save_key(&peers[index].name, link.peer_key()),
+            }
             read_peer(index, &link, &pong_sender, start);
             if let Some(mover) = &mover {
                 open_data_link(index, peers[index].address, &shared, mover);
@@ -776,13 +842,13 @@ pub fn run(
                 if let InputEvent::Motion { dx, dy } = event
                     && switcher.focus() == Focus::Local
                 {
-                    pushed = Some((dx, dy));
+                    pushed = edge_check.feed((dx, dy));
                 }
             }
             Ok(Wake::Controlled(here)) => in_control.peer_says(here),
             // Both handled below, once `act` no longer borrows the peers.
             Ok(Wake::Arranged(from, position)) => placed = Some((from, position)),
-            Ok(Wake::Group(members)) => heard_map = Some(members),
+            Ok(Wake::Group(members, by)) => heard_map = Some((members, by)),
             Ok(Wake::Hotkeys(lines)) => heard_hotkeys = Some(lines),
             Ok(Wake::Control(request)) if request.order == Order::Arranged => {
                 asked_to_arrange = Some(request.reply);
@@ -830,7 +896,7 @@ pub fn run(
             })) => {
                 let entry = history.as_ref().and_then(|history| {
                     let history = history.lock().unwrap_or_else(|p| p.into_inner());
-                    history.get(id).map(|entry| entry.content.clone())
+                    history.get(id).and_then(|entry| entry.content())
                 });
                 let answer = match (entry, &keeper) {
                     (Some(content), Some(keeper)) => {
@@ -882,6 +948,8 @@ pub fn run(
             shared_with.clear();
         }
         if let Some((address, name, reply)) = connecting {
+            // The owner is connecting a PC now: it may answer back.
+            trust::open_pairing();
             let answer = if peers.iter().any(|peer| peer.address == address) {
                 format!("error: {address} is already one of this PC's PCs")
             } else {
@@ -899,10 +967,20 @@ pub fn run(
             let _ = reply.send(answer);
         }
         if let Some(lines) = heard_hotkeys {
+            pending_hotkeys = Some(lines);
+        }
+        // Never while the keyboard is on another PC: new hotkeys could leave
+        // no way home from there (#182). They wait until it is back.
+        if switcher.focus() == Focus::Local
+            && let Some(lines) = pending_hotkeys.take()
+        {
             let taken = config::Hotkeys::from_lines(&lines).and_then(|hotkeys| {
                 let path = config::path()?;
                 let text = std::fs::read_to_string(&path).map_err(|err| err.to_string())?;
-                config::write(&path, &config::set_hotkeys(&text, &hotkeys)?)?;
+                let new = config::set_hotkeys(&text, &hotkeys)?;
+                // Checked as hotkeys before anything is written.
+                config::parse(&new)?.hotkeys()?;
+                config::write(&path, &new)?;
                 config::Config::load()?.ok_or_else(|| "config.toml is gone".to_string())
             });
             match taken {
@@ -913,10 +991,10 @@ pub fn run(
                 Err(err) => eprintln!("mickey: cannot take another PC's hotkeys: {err}"),
             }
         }
-        if let Some(members) = heard_map {
+        if let Some((members, by)) = heard_map {
             let me = *shared.identity.public();
             for member in group::as_seen_by(&members, &me) {
-                if let Some(index) = join(member, &shared, &mut peers, &mut positions) {
+                if let Some(index) = join(member, &by, &shared, &mut peers, &mut positions) {
                     names.push(peers[index].name.clone());
                     reconnect(index, peers[index].address, &shared, &back_sender);
                 }
@@ -1040,8 +1118,6 @@ pub fn run(
     Err("every input device is gone".into())
 }
 
-/// Connects, asks to pair if the key is unknown, and waits for the peer to
-/// accept us.
 /// A peer's first connection, on its own thread: pairs if needed, then
 /// hands the link to the main loop; if it fails, retries like any peer.
 fn connect_first(
@@ -1065,6 +1141,8 @@ fn connect_first(
     );
 }
 
+/// Connects, asks to pair if the key is unknown, and waits for the peer to
+/// accept us.
 fn connect_and_pair(
     identity: &Identity,
     trusted: &trust::Shared,
@@ -1126,10 +1204,6 @@ fn reconnect(index: usize, to: SocketAddr, shared: &Arc<Shared>, back: &Sender<(
     });
 }
 
-/// Shows `mickey-ui switcher` (installed next to this program) on its own
-/// thread, and sends the owner's pick when the window closes: `Some(peer)`,
-/// `None` for this PC or Esc, or an error if the window could not run.
-/// The GUI is a separate program so this one stays small (PRD 0003).
 /// The switcher's cards: the focused card's id first, then one card per
 /// PC, as `id=online:name` or `id=offline:name`, in the order to show them
 /// (`Interface::switcher_sort`). Id 0 is this PC, `i + 1` is peer `i`.
@@ -1183,6 +1257,10 @@ fn open_mirror(cards: &[String], interface: &config::Interface) -> Option<std::p
         .ok()
 }
 
+/// Shows `mickey-ui switcher` (installed next to this program) on its own
+/// thread, and sends the owner's pick when the window closes: `Some(peer)`,
+/// `None` for this PC or Esc, or an error if the window could not run.
+/// The GUI is a separate program so this one stays small (PRD 0003).
 fn open_switcher(
     cards: &[String],
     interface: &config::Interface,
@@ -1205,7 +1283,6 @@ fn open_switcher(
     });
 }
 
-/// Pongs come back on their own thread, as round-trip times per peer.
 /// What a peer sends back on its link.
 enum News {
     /// A pong: the round-trip time in microseconds.
@@ -1219,7 +1296,8 @@ enum News {
     Picked(u8),
 }
 
-/// Reads what a peer sends on its own thread: pongs and its monitors.
+/// Reads what a peer sends, on its own thread, and passes it on as
+/// `News`: pongs as round-trip times, its monitors, and the rest.
 fn read_peer(index: usize, link: &Link, news: &Sender<(usize, News)>, start: Instant) {
     let (Ok(mut reader), news) = (link.try_clone(), news.clone()) else {
         return;

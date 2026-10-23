@@ -14,6 +14,8 @@ mkdir -p "$bin"
 install -m 755 "$here/mickey" "$here/mickey-ui" "$bin/"
 
 echo "Allowing the input group to read and create input devices (needs sudo)"
+echo "  Note: every program you run as a member of the input group can read"
+echo "  your keyboard, not only Mickey. Install Mickey only on your own PCs."
 sudo install -m 644 "$here/99-mickey-uinput.rules" /etc/udev/rules.d/99-mickey-uinput.rules
 sudo udevadm control --reload
 # uinput may be built into the kernel, where the rule only applies at boot.

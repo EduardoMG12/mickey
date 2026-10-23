@@ -192,6 +192,7 @@ fn run(command: Command) -> Result<(), String> {
                     address: to,
                     hotkey: None,
                     position: None,
+                    key: None,
                 }],
                 (None, Some(config)) if !config.peers.is_empty() => config.peers,
                 (None, _) => {
@@ -387,6 +388,7 @@ fn target(
     let data_dir = identity::data_dir()?;
     let identity = Arc::new(identity::Identity::load_or_create(&data_dir)?);
     let sources = Sources::default();
+    let grants = clip_sync::Grants::default();
     // One virtual keyboard and mouse for every source that connects.
     let emitter = Arc::new(Mutex::new(emit::Emitter::new()?));
     let listener = TcpListener::bind(listen).map_err(|err| match err.kind() {
@@ -396,7 +398,15 @@ fn target(
     })?;
     println!("mickey: listening on {listen}");
     if let Some(keeper) = keeper {
-        serve_clipboard(listen, &identity, &trusted, keeper, &controlled, &sources);
+        serve_clipboard(
+            listen,
+            &identity,
+            &trusted,
+            keeper,
+            &controlled,
+            &sources,
+            &grants,
+        );
     }
     loop {
         let (stream, peer) = match listener.accept() {
@@ -413,6 +423,7 @@ fn target(
             controlled: controlled.clone(),
             found: found.clone(),
             sources: sources.clone(),
+            grants: grants.clone(),
         };
         std::thread::spawn(move || {
             serve_source(stream, peer, &identity, &trusted, &emitter, &around);
@@ -429,6 +440,7 @@ fn serve_clipboard(
     keeper: clipboard::Keeper,
     controlled: &std::sync::mpsc::Sender<source::TargetNews>,
     sources: &Sources,
+    grants: &clip_sync::Grants,
 ) {
     let data = transport::data_address(listen);
     let listener = match std::net::TcpListener::bind(data) {
@@ -439,12 +451,13 @@ fn serve_clipboard(
         }
     };
     let (identity, trusted, controlled) = (identity.clone(), trusted.clone(), controlled.clone());
-    let sources = sources.clone();
+    let (sources, grants) = (sources.clone(), grants.clone());
     let shown = Shown::default();
     std::thread::spawn(move || {
         for stream in listener.incoming().flatten() {
             let (identity, trusted, keeper) = (identity.clone(), trusted.clone(), keeper.clone());
             let (controlled, sources, shown) = (controlled.clone(), sources.clone(), shown.clone());
+            let grants = grants.clone();
             let Ok(from) = stream.peer_addr().map(|address| address.ip()) else {
                 continue;
             };
@@ -457,11 +470,13 @@ fn serve_clipboard(
                 };
                 match transport::accept_data(stream, &identity, is_trusted) {
                     Ok(link) => {
+                        let by = *link.peer_key();
                         // The group map and shared hotkeys from a paired PC go to the source.
                         let group = |kind: u8, text: &str| match kind {
                             group::KIND => match group::decode(text, from) {
                                 Ok(members) => {
-                                    let _ = controlled.send(source::TargetNews::Group { members });
+                                    let _ =
+                                        controlled.send(source::TargetNews::Group { members, by });
                                 }
                                 Err(err) => eprintln!("mickey: {err}"),
                             },
@@ -485,6 +500,7 @@ fn serve_clipboard(
                         };
                         let _ = clip_sync::answer(
                             link,
+                            || clip_sync::may_read(&grants, from),
                             || keeper.read(),
                             |content| keeper.write(content),
                             group,
@@ -507,6 +523,8 @@ struct Around {
     controlled: std::sync::mpsc::Sender<source::TargetNews>,
     found: Option<discovery::Table>,
     sources: Sources,
+    /// When each source may read the clipboard (#185).
+    grants: clip_sync::Grants,
 }
 
 /// The switcher window open on this PC for a source, if any, so a later
@@ -574,6 +592,7 @@ fn serve_source(
         controlled,
         found,
         sources,
+        grants,
     } = around;
     let found = found.as_ref();
     let mut link = match transport::accept(stream, identity) {
@@ -587,10 +606,16 @@ fn serve_source(
     let lock = || trusted.lock().unwrap_or_else(|p| p.into_inner());
     // The list is not held while the person decides.
     if !lock().is_trusted(&peer_key) {
+        if !trust::pairing_open(trusted) {
+            println!(
+                "mickey: {peer} asked to pair while pairing is closed; refused (open it in the settings' PCs tab, or `mickey pairing`)"
+            );
+            return;
+        }
         let who = found
             .and_then(|table| table.name_of(&peer_key))
             .unwrap_or_else(|| peer.ip().to_string());
-        match trust::ask(&peer_key, peer, &link.pairing_code(), &who) {
+        match trust::ask_once(&peer_key, peer, &link.pairing_code(), &who) {
             Ok(true) => {
                 if let Err(err) = lock().add(peer_key, &peer.to_string()) {
                     eprintln!("mickey: {err}");
@@ -629,6 +654,7 @@ fn serve_source(
             transport::Effect::Place { x, y } => emitter.place(x, y),
             // Nobody listens when this PC only waits to be controlled.
             transport::Effect::Controlled(here) => {
+                clip_sync::focus_changed(grants, peer.ip(), here);
                 // The keyboard and mouse went elsewhere: the cursor too.
                 if here {
                     emit::unpark();

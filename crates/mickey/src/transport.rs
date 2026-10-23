@@ -146,6 +146,7 @@ pub fn serve(
 
     // The last Leave sent, so pushing against a wall sends it once.
     let mut left = None;
+    let mut edge_check = edges::Throttle::new();
     let mut refused_at = None;
     let mut keys = HeldSet::new();
     let mut buttons = HeldSet::new();
@@ -172,15 +173,22 @@ pub fn serve(
                         break Err(err);
                     }
                 }
-                if let InputEvent::Motion { dx, dy } = event {
-                    let off = cursor().and_then(|at| edges::beyond(monitors, at, (dx, dy)));
+                if let InputEvent::Motion { dx, dy } = event
+                    && let Some(delta) = edge_check.feed((dx, dy))
+                {
+                    let off = cursor().and_then(|at| edges::beyond(monitors, at, delta));
+                    // Never mid-drag: a button held would stay held over
+                    // there, and the drag would end on the wrong PC
+                    // (PRD 0005). Pushing on after letting go crosses.
+                    let free = buttons.is_empty();
                     if let Some((x, y)) = off
+                        && free
                         && left != off
                         && let Err(err) = link.send(&Message::Leave { x, y })
                     {
                         break Err(err);
                     }
-                    left = off;
+                    left = if free { off } else { None };
                 }
             }
             Message::ReleaseAll => release_all(&mut keys, &mut buttons, &mut act),
@@ -352,6 +360,9 @@ mod tests {
         link.send(&Message::Enter { x: 1535, y: 284 }).unwrap();
         let push = Message::Input(InputEvent::Motion { dx: 4, dy: 0 });
         link.send(&push).unwrap();
+        // Still pushing a moment later: edges are checked at most every
+        // EDGE_CHECK, with the motion summed in between.
+        thread::sleep(edges::EDGE_CHECK + std::time::Duration::from_millis(2));
         link.send(&push).unwrap();
         assert_eq!(link.recv().unwrap(), Message::Leave { x: 1536, y: 284 });
         // Only once: the next message is the pong, not a second Leave.
@@ -361,6 +372,50 @@ mod tests {
         let (result, placed) = target.join().unwrap();
         assert!(result.is_ok());
         assert_eq!(placed, [(1535, 284)]);
+    }
+
+    #[test]
+    fn no_leave_while_a_button_is_held() {
+        let (listener, addr) = listener();
+        let target = thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            let mut link = accept(stream, &Identity::generate().unwrap()).unwrap();
+            let laptop = [Monitor {
+                x: 0,
+                y: 0,
+                width: 1536,
+                height: 864,
+            }];
+            serve(&mut link, &laptop, |_| true, || Some((1535, 284)))
+        });
+        let mut link = source(addr);
+        let push = Message::Input(InputEvent::Motion { dx: 4, dy: 0 });
+        let left_button = |pressed| {
+            Message::Input(InputEvent::Button {
+                code: 0x110,
+                pressed,
+            })
+        };
+        let wait = || thread::sleep(edges::EDGE_CHECK + std::time::Duration::from_millis(2));
+        // Dragging against the edge: no Leave.
+        link.send(&left_button(true)).unwrap();
+        for _ in 0..3 {
+            wait();
+            link.send(&push).unwrap();
+        }
+        link.send(&Message::Ping { id: 1 }).unwrap();
+        assert_eq!(
+            link.recv().unwrap(),
+            Message::Pong { id: 1 },
+            "no Leave mid-drag"
+        );
+        // Let go and push on: now it leaves.
+        link.send(&left_button(false)).unwrap();
+        wait();
+        link.send(&push).unwrap();
+        assert_eq!(link.recv().unwrap(), Message::Leave { x: 1536, y: 284 });
+        drop(link);
+        assert!(target.join().unwrap().is_ok());
     }
 
     /// A data link from a source with `source` to a target that trusts the

@@ -42,6 +42,8 @@ ourselves to learn" loses to "use reviewed code".
 
 ### Pairing (trust on first use, like SSH)
 
+*(Replaced by a six-digit code in a window, PRD 0010; see Discoveries.)*
+
 When the other side's key is unknown, both screens show:
 
 ```text
@@ -74,6 +76,7 @@ impossible to brute-force.
 ### Trusted peers
 - [ ] Stored next to the identity in `trusted_peers`: one line per peer,
       fingerprint plus the address it was paired from (informational).
+      *(Stored as the full key in hex; see Discoveries.)*
 - [ ] A peer is trusted by its **key**, never by its IP address.
 - [ ] `mickey forget <fingerprint>` removes a peer.
 
@@ -177,3 +180,21 @@ impossible to brute-force.
 - **No answer means no.** A prompt with no terminal (stdin closed) reads
   nothing and refuses.
 
+### What changed after PRD 0010 (2026-10-22)
+
+- **`trusted_peers` holds the full public key, not the fingerprint.**
+  Each line is `<public key, 64 hex digits> <note>`, the note being
+  informational, e.g. the address the peer was paired from
+  (`crates/mickey/src/trust.rs`). A fingerprint is a hash and cannot be
+  turned back into the key, and the code needs the key itself: it is
+  compared with the key the Noise handshake proved, and discovery
+  (PRD 0010) announces and matches PCs by it. `mickey forget` still takes
+  the fingerprint that `mickey id` prints and hashes each stored key to
+  find it.
+- **Pairing is no longer `y/N` on two 32-character fingerprints.** Both
+  PCs show the same six-digit code, derived from the handshake hash, in a
+  `mickey-ui pair` window with *Pair* and *Refuse* (PRD 0010). The
+  terminal prompt ("type y to pair") is only the fallback when no window
+  can open. The fingerprint is still printed next to the new PC's
+  address in the log. This also answers the open question about the
+  prompt on the Windows target: it is a window now.

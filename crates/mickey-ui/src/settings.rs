@@ -15,6 +15,9 @@ pub struct PcRow {
     pub address: String,
     pub hotkey: String,
     pub position: Option<[i32; 2]>,
+    /// Its public key, written by Mickey when it first connects; kept
+    /// as it is, never shown or edited.
+    pub key: Option<String>,
 }
 
 /// Everything editable, as the text the fields show.
@@ -59,6 +62,7 @@ impl Form {
                     address: peer.address.to_string(),
                     hotkey: text(&peer.hotkey),
                     position: peer.position,
+                    key: peer.key.clone(),
                 })
                 .collect(),
             next: text(&config.hotkeys.next),
@@ -118,6 +122,12 @@ impl Form {
             }
             if let Some([x, y]) = pc.position {
                 out += &format!("position = [{x}, {y}]    # where it sits next to this PC\n");
+            }
+            if let Some(key) = &pc.key {
+                out += &format!(
+                    "key = {}    # this PC's identity, set by Mickey\n",
+                    quote(key)
+                );
             }
         }
         let hotkeys: Vec<(&str, &str)> = [
@@ -542,6 +552,15 @@ impl eframe::App for Settings {
 
                     ui.add_space(12.0);
                     ui.label(egui::RichText::new(format!("{}  On this network", icon::SEARCH)).size(16.0).strong());
+                    ui.horizontal(|ui| {
+                        if ui.button(format!("{}  Let a new PC pair (2 min)", icon::LINK)).clicked() {
+                            self.message = match ask_mickey(&["pairing"]) {
+                                Ok(_) => "For 2 minutes, a new PC may ask to pair with this one. Check the code on both.".into(),
+                                Err(err) => format!("Could not open pairing: {err}"),
+                            };
+                        }
+                        ui.weak("Needed on this PC when the new PC is the one that connects.");
+                    });
                     let known: Vec<&str> = form.pcs.iter().map(|pc| pc.address.as_str()).collect();
                     let nearby: Vec<&Nearby> = self
                         .nearby
@@ -579,6 +598,7 @@ impl eframe::App for Settings {
                                 address: format!("192.168.0.2:{}", config::DEFAULT_PORT),
                                 hotkey: String::new(),
                                 position: None,
+                                key: None,
                             });
                         }
                         ui.weak("Then edit its address in Your PCs, and Save.");
@@ -606,6 +626,27 @@ impl eframe::App for Settings {
                 }
                 Tab::Hotkeys => {
                     ui.weak("Record, then press the keys together, or tap one key twice for the double tap. You can also type the names.");
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new(format!("{}  Always home:", crate::theme::icon::SHIELD)).strong());
+                        ui.weak("hold");
+                        crate::theme::keycaps(ui, "RightShift", false, false);
+                        ui.weak("alone 3 s, or with");
+                        crate::theme::keycaps(ui, "AltGr", false, false);
+                        ui.weak("2 s, and let go: works whatever is set here");
+                    });
+                    let held = game_keys(form);
+                    if !held.is_empty() {
+                        ui.colored_label(
+                            crate::theme::palette::AWAY,
+                            format!(
+                                "{}  {} in a hotkey: while another PC has the keyboard, Mickey holds {} back until the next key, so games that use {} (crouch, walk, jump) may feel late there.",
+                                crate::theme::icon::SHIELD,
+                                held.join(", "),
+                                if held.len() == 1 { "it" } else { "them" },
+                                if held.len() == 1 { "it" } else { "them" },
+                            ),
+                        );
+                    }
                     ui.add_space(4.0);
                     // What the recording in progress gave, if it is done.
                     if let Some((row, answer)) = &self.recording
@@ -819,14 +860,51 @@ fn preview(ui: &mut egui::Ui, names: &[String], vertical: bool) {
         });
 }
 
+/// Keys games use all the time that appear in a hotkey (#188). A key that
+/// may start a hotkey is held back on the way to another PC until the
+/// next key shows whether the hotkey is meant, which games feel.
+fn game_keys(form: &Form) -> Vec<&'static str> {
+    const GAME_KEYS: [&str; 5] = ["LeftCtrl", "LeftShift", "LeftAlt", "Space", "Tab"];
+    let mut texts = vec![
+        &form.next,
+        &form.home,
+        &form.switcher,
+        &form.forward,
+        &form.back,
+        &form.double_tap,
+    ];
+    texts.extend(form.pcs.iter().map(|pc| &pc.hotkey));
+    GAME_KEYS
+        .into_iter()
+        .filter(|key| {
+            texts.iter().any(|text| {
+                text.split('+')
+                    .any(|part| part.trim().eq_ignore_ascii_case(key))
+            })
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn keys_games_use_are_found_in_hotkeys() {
+        let mut form = Form::from_config(&config::parse("").unwrap());
+        assert!(
+            game_keys(&form).is_empty(),
+            "the defaults hold back nothing games use"
+        );
+        form.double_tap = "LeftCtrl".into();
+        form.home = "LeftShift+AltGr+H".into();
+        assert_eq!(game_keys(&form), ["LeftCtrl", "LeftShift"]);
+    }
+
     use super::*;
 
     #[test]
     fn what_the_form_writes_parses_back_to_the_same_form() {
         let original = config::parse(
-            "[[peer]]\nname = \"Windows \\\"main\\\"\"\naddress = \"192.0.2.10:4242\"\nhotkey = \"AltGr+RightShift+1\"\nposition = [-1920, 0]\n\n[hotkeys]\nhome = \"AltGr+RightShift+H\"\n\n[interface]\nswitcher_position = \"top-left\"\n\n[this_pc]\ncontrolled = false\nname = \"Desk\"\n",
+            "[[peer]]\nname = \"Windows \\\"main\\\"\"\naddress = \"192.0.2.10:4242\"\nhotkey = \"AltGr+RightShift+1\"\nposition = [-1920, 0]\nkey = \"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"\n\n[hotkeys]\nhome = \"AltGr+RightShift+H\"\n\n[interface]\nswitcher_position = \"top-left\"\n\n[this_pc]\ncontrolled = false\nname = \"Desk\"\n",
         )
         .unwrap();
         let form = Form::from_config(&original);
@@ -869,6 +947,7 @@ mod tests {
             address: "nowhere".into(),
             hotkey: String::new(),
             position: None,
+            key: None,
         });
         assert!(config::parse(&form.to_toml()).is_err());
     }
