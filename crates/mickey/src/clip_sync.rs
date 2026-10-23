@@ -16,6 +16,7 @@ use std::time::Instant;
 /// the clipboard's: they go to `other`, with their kind.
 pub fn answer(
     mut link: Link,
+    may_read: impl Fn() -> bool,
     read: impl Fn() -> Option<Content>,
     write: impl Fn(Content),
     other: impl Fn(u8, &str),
@@ -31,7 +32,12 @@ pub fn answer(
         let message = clip_wire::decode(&bytes).map_err(io::Error::other)?;
         match message {
             Wire::Ask => {
-                let reply = read().map_or(Wire::Nothing, Wire::Content);
+                // Only right after the keyboard left this PC (#185).
+                let reply = if may_read() {
+                    read().map_or(Wire::Nothing, Wire::Content)
+                } else {
+                    Wire::Nothing
+                };
                 link.send_bulk(&encode_or_nothing(&reply))?;
             }
             Wire::Content(content) => write(content),
@@ -42,6 +48,63 @@ pub fn answer(
             }
             Wire::Nothing => {}
         }
+    }
+}
+
+/// How long after the keyboard leaves this PC its clipboard may be asked
+/// for, once: the source asks right after the switch.
+const ASK_WINDOW: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// When a source may read this PC's clipboard (#185): once, within
+/// `ASK_WINDOW` after its keyboard left this PC, never at any other time,
+/// so a paired PC cannot poll it for copied passwords.
+#[derive(Debug, Default)]
+pub struct ClipGrant {
+    /// The source's keyboard is on this PC.
+    here: bool,
+    /// Until when one ask is allowed.
+    until: Option<Instant>,
+}
+
+impl ClipGrant {
+    /// The source's keyboard came here (`true`) or left (`false`).
+    pub fn focus(&mut self, here: bool, now: Instant) {
+        if !here && self.here {
+            self.until = Some(now + ASK_WINDOW);
+        }
+        self.here = here;
+    }
+
+    /// Whether an ask is allowed now; it uses the permission up.
+    pub fn take(&mut self, now: Instant) -> bool {
+        self.until.take().is_some_and(|until| now <= until)
+    }
+}
+
+/// Each source's permission, by address.
+pub type Grants = std::sync::Arc<std::sync::Mutex<HashMap<std::net::IpAddr, ClipGrant>>>;
+
+/// Records a focus change from the source at `ip`.
+pub fn focus_changed(grants: &Grants, ip: std::net::IpAddr, here: bool) {
+    let mut grants = grants.lock().unwrap_or_else(|p| p.into_inner());
+    grants.entry(ip).or_default().focus(here, Instant::now());
+}
+
+/// Whether the source at `ip` may read the clipboard now. The ask and the
+/// focus change travel on different links, so the change may still be on
+/// its way: it is waited for, briefly.
+pub fn may_read(grants: &Grants, ip: std::net::IpAddr) -> bool {
+    let started = Instant::now();
+    loop {
+        let allowed = grants
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .get_mut(&ip)
+            .is_some_and(|grant| grant.take(Instant::now()));
+        if allowed || started.elapsed() > std::time::Duration::from_millis(500) {
+            return allowed;
+        }
+        thread::sleep(std::time::Duration::from_millis(25));
     }
 }
 
@@ -222,6 +285,26 @@ fn carry(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_clipboard_may_be_read_once_right_after_the_keyboard_leaves() {
+        let now = Instant::now();
+        let mut grant = ClipGrant::default();
+        assert!(!grant.take(now), "never without a focus change");
+        grant.focus(false, now);
+        assert!(!grant.take(now), "leaving a PC it never had gives nothing");
+        grant.focus(true, now);
+        assert!(!grant.take(now), "not while the keyboard is here");
+        grant.focus(false, now);
+        assert!(grant.take(now + std::time::Duration::from_secs(1)));
+        assert!(!grant.take(now + std::time::Duration::from_secs(1)), "once");
+        grant.focus(true, now);
+        grant.focus(false, now);
+        assert!(
+            !grant.take(now + ASK_WINDOW + std::time::Duration::from_millis(1)),
+            "too late"
+        );
+    }
+
     use super::*;
     use crate::identity::Identity;
     use std::net::{TcpListener, TcpStream};
@@ -240,6 +323,8 @@ mod tests {
             // The target's clipboard holds a text.
             let _ = answer(
                 link,
+                // The keyboard just left the target.
+                || true,
                 || Some(Content::Text("from the target".into())),
                 |content| target_written.lock().unwrap().push(content),
                 |_, _| {},
