@@ -14,12 +14,22 @@ permissions:
 
 jobs:
   linux:
-    runs-on: ubuntu-latest
+    # Pinned: the glibc this image has is the oldest the binaries need
+    # (2.39: Ubuntu 24.04, Mint 22, Fedora 40, Debian 13 or newer, #220).
+    # ubuntu-latest moving on would raise that minimum without anyone noticing.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - name: Install Rust
         run: rustup toolchain install stable --profile minimal && rustup default stable
       - run: cargo build --release --workspace
+      - name: Check the glibc they need
+        run: |
+          for bin in target/release/mickey target/release/mickey-ui; do
+            needs=$(objdump -T "$bin" | grep -oE 'GLIBC_[0-9.]+' | sort -V | tail -1)
+            echo "$bin needs $needs"
+            [ "$(printf '%s\nGLIBC_2.39\n' "$needs" | sort -V | tail -1)" = GLIBC_2.39 ] || { echo "newer than the README's minimum (2.39)"; exit 1; }
+          done
       - name: Pack
         run: |
           dir=mickey-linux-x86_64
@@ -64,6 +74,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # Checksums, so a download can be checked (sha256sum -c SHA256SUMS).
+          cp linux/mickey-linux-x86_64.tar.gz windows/Mickey-Setup-*.exe .
+          sha256sum mickey-linux-x86_64.tar.gz Mickey-Setup-*.exe > SHA256SUMS
           gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
             --title "Mickey $GITHUB_REF_NAME" --generate-notes \
-            linux/mickey-linux-x86_64.tar.gz windows/Mickey-Setup-*.exe
+            mickey-linux-x86_64.tar.gz Mickey-Setup-*.exe SHA256SUMS
