@@ -293,7 +293,7 @@ fn add_peer(
     let name = config::path().and_then(|path| {
         let text = std::fs::read_to_string(&path).unwrap_or_default();
         let (text, name) = config::add_peer(&text, name, address, position)?;
-        std::fs::write(&path, text).map_err(|err| err.to_string())?;
+        config::write(&path, &text)?;
         Ok(name)
     })?;
     peers.push(Peer {
@@ -315,7 +315,7 @@ fn save_position(name: &str, position: [i32; 2]) {
     let saved = config::path().and_then(|path| {
         let text = std::fs::read_to_string(&path).map_err(|err| err.to_string())?;
         let text = config::set_position(&text, name, position)?;
-        std::fs::write(&path, text).map_err(|err| err.to_string())
+        config::write(&path, &text)
     });
     match saved {
         Ok(()) => println!("mickey: {name} placed itself on this desktop at {position:?}"),
@@ -902,8 +902,7 @@ pub fn run(
             let taken = config::Hotkeys::from_lines(&lines).and_then(|hotkeys| {
                 let path = config::path()?;
                 let text = std::fs::read_to_string(&path).map_err(|err| err.to_string())?;
-                std::fs::write(&path, config::set_hotkeys(&text, &hotkeys)?)
-                    .map_err(|err| err.to_string())?;
+                config::write(&path, &config::set_hotkeys(&text, &hotkeys)?)?;
                 config::Config::load()?.ok_or_else(|| "config.toml is gone".to_string())
             });
             match taken {

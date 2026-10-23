@@ -324,12 +324,7 @@ impl Settings {
             self.message = format!("Not saved: {err}");
             return;
         }
-        let written = config::path().and_then(|path| {
-            if let Some(dir) = path.parent() {
-                std::fs::create_dir_all(dir).map_err(|err| err.to_string())?;
-            }
-            std::fs::write(&path, text).map_err(|err| format!("{}: {err}", path.display()))
-        });
+        let written = config::path().and_then(|path| config::write(&path, &text));
         self.message = match written {
             Ok(()) => {
                 self.saved = self.form.clone();
