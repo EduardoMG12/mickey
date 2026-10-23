@@ -1,4 +1,5 @@
-//! The control socket of `mickey source` (PRD 0007): a Unix socket that
+//! The control channel of `mickey source` (PRD 0007): a Unix socket on
+//! Linux, TCP on localhost with a token on Windows (see `endpoint`), that
 //! only this user can reach, where small commands ask for the status or
 //! follow every change. Nothing here listens on the network.
 //!
@@ -14,7 +15,8 @@
 //!
 //! The orders only move the focus; nothing on this socket can send input.
 //!
-//! A status line is tab-separated: the focused PC (0 is this PC), then one
+//! A status line is tab-separated: the focused PC (0 is this PC), `here`
+//! or `elsewhere` (whether this PC is the one controlled now), then one
 //! `online:<name>` or `offline:<name>` per peer.
 
 use std::fs;
@@ -53,6 +55,8 @@ pub enum Order {
     Arranged,
     /// Name the next keys pressed together, or a key tapped twice.
     Record,
+    /// Let a new PC ask to pair with this one, for a short while (#181).
+    Pairing,
     /// Add the PC at this address, found on the network, and pair with it.
     Connect {
         address: std::net::SocketAddr,
@@ -420,6 +424,7 @@ fn accept<T: From<Request>>(
                     _ if other == "quit" => Some(Order::Quit),
                     _ if other == "arranged" => Some(Order::Arranged),
                     _ if other == "record" => Some(Order::Record),
+                    _ if other == "pairing" => Some(Order::Pairing),
                     Some(("history", id)) => id
                         .strip_prefix("copy ")
                         .and_then(|id| id.parse().ok())

@@ -55,6 +55,7 @@ the reverse of `keymap.rs`.
       never hooked; hooks are removed on exit, panic and disconnect.
 - [ ] Our own `SendInput` events are marked (`dwExtraInfo`) and ignored by
       the hooks, so a PC that is both source and target never loops.
+      *(Done with the injected flags instead; see Discoveries.)*
 
 ### Tests and checks
 - [ ] Pure parts tested everywhere: reverse keymap, hook decision ("pass or
@@ -66,8 +67,9 @@ the reverse of `keymap.rs`.
 ## Non-Goals
 
 - Screen edges (PRD 0005).
-- A Windows service or start at login; Mickey runs from a terminal or the
-  tray later.
+- A Windows service. ~~Start at login; Mickey runs from a terminal or the
+  tray later.~~ *(Outdated: `mickey autostart` starts it at login, see
+  Discoveries.)*
 - Injecting into elevated windows or the secure desktop on Windows; a hook
   does not see the secure desktop either, which is the safe direction.
 
@@ -97,4 +99,19 @@ the reverse of `keymap.rs`.
 
 ## Discoveries
 
-*(Filled in during execution.)*
+### Checked against the code (2026-10-22)
+
+- **Injected events pass by Windows' own flag, not by `dwExtraInfo`.**
+  The hooks let through every event with `LLKHF_INJECTED` (keyboard) or
+  `LLMHF_INJECTED` (mouse) set (`platform/hooks.rs`), and Mickey's
+  `SendInput` leaves `dwExtraInfo` at 0. Windows sets the flag on every
+  synthetic event, so a PC that is both source and target never loops,
+  with no marker of our own to keep in sync. The cost: input injected by
+  other programs (on-screen keyboards, remote desktop tools) is never
+  sent to another PC either.
+- **Start at login exists**: `mickey autostart on|off|status`
+  (`crates/mickey/src/autostart.rs`), behind *Start Mickey when this PC
+  starts* in the settings window (PRD 0006). On Windows it is a logon
+  task that the installer also creates; on Linux a systemd user service.
+  It is still not a Windows service: it runs in the user's session, where
+  the hooks and `SendInput` work.

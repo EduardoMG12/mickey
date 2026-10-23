@@ -12,6 +12,44 @@ fn on_screen(monitors: &[Monitor], (x, y): (i32, i32)) -> bool {
 
 /// The pixel the cursor at `at` would step onto with a motion of `delta`,
 /// if that pixel is off every monitor of `here`: the cursor is pushing
+/// Asking where the cursor is costs a round trip to the compositor on
+/// Linux (Hyprland's socket), so motion is summed and the edge checked at
+/// most once per `EDGE_CHECK` instead of on every mouse report (#187): at
+/// 1000 Hz, 125 questions a second instead of 1000, a crossing at most
+/// 8 ms later.
+pub const EDGE_CHECK: std::time::Duration = std::time::Duration::from_millis(8);
+
+/// Motion summed between two edge checks.
+#[derive(Debug)]
+pub struct Throttle {
+    checked: std::time::Instant,
+    sum: (i32, i32),
+}
+
+impl Throttle {
+    pub fn new() -> Throttle {
+        Throttle {
+            checked: std::time::Instant::now(),
+            sum: (0, 0),
+        }
+    }
+
+    /// Adds a move; returns the motion summed since the last check when it
+    /// is time to check again (and there was motion), then starts over.
+    pub fn feed(&mut self, delta: (i32, i32)) -> Option<(i32, i32)> {
+        self.feed_at(delta, std::time::Instant::now())
+    }
+
+    fn feed_at(&mut self, (dx, dy): (i32, i32), now: std::time::Instant) -> Option<(i32, i32)> {
+        self.sum = (self.sum.0.saturating_add(dx), self.sum.1.saturating_add(dy));
+        if now.duration_since(self.checked) < EDGE_CHECK || self.sum == (0, 0) {
+            return None;
+        }
+        self.checked = now;
+        Some(std::mem::take(&mut self.sum))
+    }
+}
+
 /// against the edge of its desktop there.
 pub fn beyond(here: &[Monitor], at: (i32, i32), (dx, dy): (i32, i32)) -> Option<(i32, i32)> {
     if !on_screen(here, at) {
@@ -43,6 +81,32 @@ pub fn back(home: &[Monitor], [x, y]: [i32; 2], point: (i32, i32)) -> Option<(i3
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn motion_is_summed_and_checked_at_most_every_8_ms() {
+        let start = std::time::Instant::now();
+        let mut throttle = Throttle {
+            checked: start,
+            sum: (0, 0),
+        };
+        let ms = |n| start + std::time::Duration::from_millis(n);
+        // A 1000 Hz mouse moving right: no question for the first 7 reports.
+        for n in 1..8 {
+            assert_eq!(throttle.feed_at((1, 0), ms(n)), None);
+        }
+        assert_eq!(
+            throttle.feed_at((1, 0), ms(8)),
+            Some((8, 0)),
+            "summed, then asked"
+        );
+        assert_eq!(throttle.feed_at((0, 2), ms(9)), None);
+        assert_eq!(throttle.feed_at((0, 0), ms(20)), Some((0, 2)));
+        assert_eq!(
+            throttle.feed_at((0, 0), ms(40)),
+            None,
+            "no motion, no question"
+        );
+    }
+
     use super::*;
 
     const LAPTOP: [Monitor; 1] = [Monitor {

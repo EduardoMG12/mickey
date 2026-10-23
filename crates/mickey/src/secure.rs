@@ -234,9 +234,20 @@ fn builder(identity: &Identity) -> io::Result<snow::Builder<'_>> {
         .map_err(noise_error)
 }
 
-fn write_noise(stream: &mut TcpStream, message: &[u8]) -> io::Result<()> {
+/// Messages up to this size (every input event) go out as one write.
+const ONE_WRITE: usize = 1024;
+
+fn write_noise(stream: &mut impl Write, message: &[u8]) -> io::Result<()> {
     // At most 65 535 bytes (a bulk chunk with its tag): fits in two bytes.
     let len = (message.len() as u16).to_be_bytes();
+    if message.len() <= ONE_WRITE {
+        // Length and message in one write: with TCP_NODELAY two writes are
+        // two packets, and the peer wakes twice per key press.
+        let mut framed = [0u8; 2 + ONE_WRITE];
+        framed[..2].copy_from_slice(&len);
+        framed[2..2 + message.len()].copy_from_slice(message);
+        return stream.write_all(&framed[..2 + message.len()]);
+    }
     stream.write_all(&len)?;
     stream.write_all(message)
 }
@@ -267,6 +278,29 @@ fn invalid(message: String) -> io::Error {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn an_input_message_is_one_write_and_reads_back() {
+        /// Counts `write` calls, as the socket would see them.
+        struct Counting(Vec<u8>, usize);
+        impl Write for Counting {
+            fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+                self.1 += 1;
+                self.0.extend_from_slice(buf);
+                Ok(buf.len())
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                Ok(())
+            }
+        }
+        let mut out = Counting(Vec::new(), 0);
+        write_noise(&mut out, &[7; 27]).unwrap();
+        assert_eq!(out.1, 1, "was 2 before: length, then message");
+        assert_eq!(&out.0[..2], &27u16.to_be_bytes());
+        let mut big = Counting(Vec::new(), 0);
+        write_noise(&mut big, &vec![1; 4000]).unwrap();
+        assert_eq!(big.0.len(), 4002);
+    }
+
     use super::*;
     use crate::event::InputEvent;
     use std::net::{SocketAddr, TcpListener};

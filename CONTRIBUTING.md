@@ -1,5 +1,8 @@
 # Contributing to Mickey
 
+By taking part you agree to the [code of conduct](CODE_OF_CONDUCT.md).
+Security problems go through [SECURITY.md](SECURITY.md), never a public issue.
+
 Mickey is a learning project. The rules below exist so that **every line
 in `main` has been read, understood and, when it matters, debugged by a human**.
 They apply equally to code written by people and by AI assistants.
@@ -98,8 +101,13 @@ interesting → answer the challenge → approve → merge.*
 
 - Unit tests next to the code (`#[cfg(test)] mod tests`) for pure logic
   (protocol encoding, layout, hotkey state machine).
-- Integration tests in `tests/` drive two Mickey instances on localhost with
-  a fake capture and a fake emitter, so CI never needs real input devices.
+- Link tests, also inside the crates (e.g. `transport.rs`, `secure.rs`),
+  run both ends of a link in one process over a real localhost socket:
+  the test sends the events a capture would, and a fake emitter (a
+  closure) records what arrives, so CI never needs real input devices.
+- Not there yet: integration tests in `tests/` that drive two whole
+  Mickey instances on localhost with a fake capture and a fake emitter.
+  That is the aim once a change needs more than the link tests cover.
 - Manual verification steps for real input (on the real Linux and Windows
   machines) go in the PR description.
 - CI runs on every PR and must be green before merge:

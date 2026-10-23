@@ -1,0 +1,22 @@
+name: Feature or new platform
+description: Suggest something new, or support for another system or desktop.
+labels: [needs-triage]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What do you want to do that Mickey does not let you do today?
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: The idea
+      description: How you imagine it. If it is a new system or desktop, which one and its version.
+  - type: checkboxes
+    id: help
+    attributes:
+      label: Helping
+      options:
+        - label: I could open a PR for this (see CONTRIBUTING.md first)
