@@ -30,12 +30,12 @@ crosses, with no terminal and no restart.
    since the other PCs show it.
 2. **Discovery**: every Mickey sends a small UDP broadcast on the LAN
    every few seconds (name, port, key fingerprint) and listens for the
-   others'. No mDNS crate: one packet type, one port. It says nothing
+   others'. *(Built with the full public key instead; see Discoveries.)* No mDNS crate: one packet type, one port. It says nothing
    secret; trust still comes from pairing.
 3. **The code**: both sides derive six digits from the two public keys of
    the secure link (sorted, hashed). A machine in the middle would have
    its own key on each side, so the two screens would show different
-   codes.
+   codes. *(Built from the handshake hash instead; see Discoveries.)*
 4. **No terminal**: the PC asked to pair shows a small `mickey-ui` dialog
    (code, *Accept*, *Refuse*) instead of reading the terminal; the asking
    PC shows the code in its settings window while it waits.
@@ -62,4 +62,28 @@ crosses, with no terminal and no restart.
 
 ## Discoveries
 
-*(Filled in during execution.)*
+### The code and the discovery packet as built (2026-10-22)
+
+- **The pairing code comes from the Noise handshake hash**, not from the
+  two public keys. `code_from` in `crates/mickey/src/secure.rs` takes the
+  first four bytes of the hash both sides hold when the `XX` handshake
+  ends, as a big-endian `u32`, modulo 1 000 000, shown as `"042 917"`.
+  That hash covers both static keys **and both ephemeral keys**, so it
+  still catches a machine in the middle (it would run two handshakes and
+  each PC would see a different hash), and it comes for free from `snow`
+  with no sorting or extra hashing of our own.
+- **So the code changes on every connection.** Two PCs that pair, drop the
+  link and try again see a new code the second time. That is fine: the
+  code is only compared while both screens show it, never written down.
+  The leftover bias of `% 1_000_000` on 32 bits is under 0.03 %.
+- **Discovery sends the full 32-byte public key**, not a fingerprint
+  (`crates/mickey/src/discovery.rs`, packet
+  `"MKY1" | port: u16 | public key: 32 bytes | name length: u8 | name`).
+  The table of PCs heard and the trusted peers file are both keyed by the
+  full key, so a PC heard on the LAN is matched against them directly,
+  and the name of a PC asking to pair is looked up by the key the
+  handshake proved. A public key is no more secret than its fingerprint,
+  and the packet is still not trusted: trust comes from pairing.
+- **The terminal is still a fallback.** When `mickey-ui pair` cannot open a
+  window (exit code 2, no display), `trust.rs` asks "type y to pair" on
+  the terminal, with the same code printed above it.
