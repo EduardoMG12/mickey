@@ -33,10 +33,15 @@ Download the latest release from the repository's **Releases** page:
 - **Windows:** run `Mickey-Setup-<version>.exe`. Mickey starts with Windows
   (no window), is allowed through the firewall on **private** networks only,
   and can be removed from *Settings → Apps*.
-- **Linux:** unpack `mickey-linux-x86_64.tar.gz` and run `./install.sh`. It
+- **Linux** (x86-64, glibc 2.39 or newer with systemd: Ubuntu 24.04, Linux
+  Mint 22, Fedora 40, Debian 13 or newer; tested on the first three):
+  unpack `mickey-linux-x86_64.tar.gz` and run `./install.sh`. It
   asks for your password once (input group and a udev rule for the virtual
   keyboard), installs to `~/.local/bin` and starts Mickey with your desktop
   session (`systemctl --user status mickey`). `./uninstall.sh` removes it.
+
+Each release also has `SHA256SUMS`: `sha256sum -c SHA256SUMS --ignore-missing`
+in the download folder checks what you got.
 
 Then open **Mickey settings** (from the applications or Start menu, or
 `mickey settings`) to add your other PCs, choose what this PC does and where
