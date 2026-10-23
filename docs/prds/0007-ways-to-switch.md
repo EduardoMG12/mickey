@@ -142,3 +142,15 @@ PRD's review.
 ## Discoveries
 
 *(Filled in during execution.)*
+- **A way home no setting can take away** (2026-10-22, #182). Hotkeys are
+  shared between PCs (#159), so a malicious or broken peer could set them to
+  keys the owner's keyboard lacks and keep the focus. Holding **Right Shift
+  alone for 3 seconds**, or **with AltGr for 2 seconds**, nothing else, and
+  letting go now always brings the focus home (Right Shift alone because
+  the owner's main PC's keyboard has no AltGr). It is watched apart from
+  the configured hotkeys (the owner chose it over a three-key chord with
+  Esc), uses only
+  keys the default hotkeys already hold back, so no other key is delayed,
+  and a short press of the same keys stays the Next hotkey. Hotkeys shared
+  while the focus is away wait until it is back, and are checked before
+  config.toml is written.
