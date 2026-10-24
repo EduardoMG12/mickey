@@ -140,9 +140,12 @@ pub fn spawn_readers<T: From<InputEvent> + Send + 'static>(
             (found.kind == Kind::Touchpad).then(|| Touchpad::new(found.resolution, touchpad_speed));
         let mut translator = Translator::new(found.hi_res_wheel, touchpad);
         thread::spawn(move || {
-            while let Ok(raw) = device.read_event() {
+            let mut batch = Vec::with_capacity(64);
+            while device.read_events(&mut batch).is_ok() {
                 let mut closed = false;
-                translator.feed(raw, |event| closed |= events.send(T::from(event)).is_err());
+                for &raw in &batch {
+                    translator.feed(raw, |event| closed |= events.send(T::from(event)).is_err());
+                }
                 if closed {
                     return;
                 }

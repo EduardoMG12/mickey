@@ -48,16 +48,24 @@ impl Device {
         })
     }
 
-    /// Blocks until the device has an event.
-    pub fn read_event(&self) -> io::Result<RawEvent> {
-        let mut buf = [0u8; EVENT_SIZE];
+    /// Blocks until the device has events, then puts all it has (up to
+    /// 64) in `into`: one system call for a whole batch, such as a move's
+    /// X, Y and SYN_REPORT, instead of one per event (#189).
+    pub fn read_events(&self, into: &mut Vec<RawEvent>) -> io::Result<()> {
+        let mut buf = [0u8; EVENT_SIZE * 64];
         // The kernel only hands out whole events, never part of one.
-        (&self.file).read_exact(&mut buf)?;
-        Ok(RawEvent {
-            kind: u16::from_ne_bytes([buf[16], buf[17]]),
-            code: u16::from_ne_bytes([buf[18], buf[19]]),
-            value: i32::from_ne_bytes([buf[20], buf[21], buf[22], buf[23]]),
-        })
+        let read = (&self.file).read(&mut buf)?;
+        if read == 0 {
+            return Err(io::ErrorKind::UnexpectedEof.into());
+        }
+        into.clear();
+        let (events, _) = buf[..read].as_chunks::<EVENT_SIZE>();
+        into.extend(events.iter().map(|e| RawEvent {
+            kind: u16::from_ne_bytes([e[16], e[17]]),
+            code: u16::from_ne_bytes([e[18], e[19]]),
+            value: i32::from_ne_bytes([e[20], e[21], e[22], e[23]]),
+        }));
+        Ok(())
     }
 
     pub fn any_key_down(&self) -> io::Result<bool> {
