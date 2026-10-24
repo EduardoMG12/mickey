@@ -61,6 +61,8 @@ enum Wake {
     Group(Vec<group::Member>, [u8; 32]),
     /// A peer's hotkeys, to take.
     Hotkeys(String),
+    /// The person here accepted a PC the group introduced (#184).
+    Accepted(group::Member, [u8; 32]),
 }
 
 impl From<InputEvent> for Wake {
@@ -247,6 +249,33 @@ fn arrange(positions: &mut [Option<[i32; 2]>], peers: &mut [Peer]) -> String {
 /// because a trusted member vouches for it (the owner's choice, PRD 0010);
 /// its place taken if it has one; added to config.toml and to `peers` if
 /// this PC did not know it. Returns the new peer's index, to connect to.
+/// Asks, on its own thread (the main loop must keep moving keys), whether
+/// to let `member` join, as `introducer` (who sent the map) says it is in
+/// the group. A yes comes back as `Wake::Accepted`; anything else leaves
+/// it out.
+fn ask_to_join(member: group::Member, by: [u8; 32], introducer: String, wake: &Sender<Wake>) {
+    let wake = wake.clone();
+    thread::spawn(move || {
+        let ui = std::env::current_exe()
+            .map(|exe| exe.with_file_name(format!("mickey-ui{}", std::env::consts::EXE_SUFFIX)));
+        let answer = ui.and_then(|ui| {
+            Command::new(ui)
+                .args(["join", &member.name, &introducer])
+                .status()
+        });
+        match answer.map(|status| status.code()) {
+            Ok(Some(0)) => {
+                let _ = wake.send(Wake::Accepted(member, by));
+            }
+            Ok(Some(1)) => println!("mickey: {} was not let in", member.name),
+            _ => eprintln!(
+                "mickey: cannot ask whether to let {} in; it stays out",
+                member.name
+            ),
+        }
+    });
+}
+
 fn join(
     member: group::Member,
     by: &[u8; 32],
@@ -607,6 +636,9 @@ pub fn run(
     let bench = std::env::var_os("MICKEY_BENCH").is_some();
     // Names never change; which peers are online is refreshed every turn.
     let mut names: Vec<String> = peers.iter().map(|peer| peer.name.clone()).collect();
+    // PCs the group introduced that the person here was asked about, so
+    // nobody is asked twice in a run, whatever the answer (#184).
+    let mut asked: std::collections::HashSet<[u8; 32]> = std::collections::HashSet::new();
     // Which peers were online when the group map was last shared.
     let mut shared_with: Vec<bool> = Vec::new();
     let this_pc = monitors::this_pc().unwrap_or_else(|err| {
@@ -824,6 +856,7 @@ pub fn run(
         let mut quit = false;
         let mut placed = None;
         let mut heard_map = None;
+        let mut accepted = None;
         let mut heard_hotkeys = None;
         // A PC to connect to from the settings: handled below, like `join`.
         let mut connecting = None;
@@ -868,6 +901,7 @@ pub fn run(
             // Both handled below, once `act` no longer borrows the peers.
             Ok(Wake::Arranged(from, position)) => placed = Some((from, position)),
             Ok(Wake::Group(members, by)) => heard_map = Some((members, by)),
+            Ok(Wake::Accepted(member, by)) => accepted = Some((member, by)),
             Ok(Wake::Hotkeys(lines)) => heard_hotkeys = Some(lines),
             Ok(Wake::Control(request)) if request.order == Order::Arranged => {
                 asked_to_arrange = Some(request.reply);
@@ -1030,9 +1064,33 @@ pub fn run(
                 Err(err) => eprintln!("mickey: cannot take another PC's hotkeys: {err}"),
             }
         }
+        if let Some((member, by)) = accepted
+            && let Some(index) = join(member, &by, &shared, &mut peers, &mut positions)
+        {
+            names.push(peers[index].name.clone());
+            reconnect(index, peers[index].address, &shared, &back_sender);
+        }
         if let Some((members, by)) = heard_map {
             let me = *shared.identity.public();
             for member in group::as_seen_by(&members, &me) {
+                let trusted = shared
+                    .trusted
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .is_trusted(&member.key);
+                // A PC this one never paired with joins only once the
+                // person here says so (#184), asked once per run.
+                if !trusted {
+                    if group::is_local(member.address.ip()) && asked.insert(member.key) {
+                        let introducer =
+                            peers.iter().find(|peer| peer.key == Some(by)).map_or_else(
+                                || crate::identity::fingerprint(&by),
+                                |peer| peer.name.clone(),
+                            );
+                        ask_to_join(member, by, introducer, &wake);
+                    }
+                    continue;
+                }
                 if let Some(index) = join(member, &by, &shared, &mut peers, &mut positions) {
                     names.push(peers[index].name.clone());
                     reconnect(index, peers[index].address, &shared, &back_sender);
