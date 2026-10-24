@@ -198,3 +198,21 @@ impossible to brute-force.
   can open. The fingerprint is still printed next to the new PC's
   address in the log. This also answers the open question about the
   prompt on the Windows target: it is a window now.
+- **As administrator on Windows, the trusted list lives where only
+  administrators can change it.** The logon task runs Mickey as
+  administrator (to drive administrator windows) only when it is
+  installed inside Program Files and nobody else can change its folder
+  (#247). A list in `%APPDATA%` could then be edited by any program of
+  the user, adding its own key: the administrator Mickey would type what
+  that key sends into administrator windows, getting round UAC. So that
+  Mickey keeps the list in `state` next to `mickey.exe` instead, which
+  only administrators can change, and every Mickey on that PC reads it
+  there. It starts empty (the old list may already have been changed):
+  PCs pair again once. `mickey forget` without administrator rights asks
+  the running Mickey to forget, over the control channel; forgetting
+  only takes trust away, so any program asking is harmless. The pairing
+  window, opened by the administrator Mickey, runs as administrator too,
+  so a program without those rights cannot click *Pair* in it (UIPI).
+  Mickey found running as administrator from a folder others can change
+  (a task made before #247) makes its task again without administrator
+  rights, starts it, and ends.

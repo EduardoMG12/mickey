@@ -108,6 +108,7 @@ fn obey(
         | Order::Quit
         | Order::Arranged
         | Order::Record
+        | Order::Forget(_)
         | Order::Connect { .. } => "error: not an order".into(),
         Order::Pairing => {
             trust::open_pairing();
@@ -870,6 +871,23 @@ pub fn run(
             Ok(Wake::Control(request)) if request.order == Order::Quit => {
                 let _ = request.reply.send("ok: Mickey is quitting".into());
                 quit = true;
+            }
+            Ok(Wake::Control(control::Request {
+                order: Order::Forget(fingerprint),
+                reply,
+            })) => {
+                let forgot = shared
+                    .trusted
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .forget(&fingerprint);
+                let _ = reply.send(match forgot {
+                    Ok(true) => format!("ok: forgot {fingerprint}; it must pair again to connect"),
+                    Ok(false) => {
+                        format!("error: no trusted peer has the fingerprint {fingerprint}")
+                    }
+                    Err(err) => format!("error: {err}"),
+                });
             }
             Ok(Wake::Tray(tray::Click::Settings)) => open_window("settings"),
             Ok(Wake::Tray(tray::Click::History)) => open_window("history"),

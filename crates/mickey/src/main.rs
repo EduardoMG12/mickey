@@ -165,7 +165,21 @@ fn run(command: Command) -> Result<(), String> {
             Ok(())
         }
         Command::Forget { fingerprint } => {
-            let mut trusted = trust::TrustedPeers::load(&identity::data_dir()?)?;
+            // The list only administrators can change: the running Mickey
+            // changes it.
+            if !trust::can_change() {
+                let answer = control::request(&format!("forget {fingerprint}"))?
+                    .next()
+                    .ok_or("Mickey did not answer")?
+                    .map_err(|err| err.to_string())?;
+                println!("{answer}");
+                return if answer.starts_with("ok") {
+                    Ok(())
+                } else {
+                    Err(answer)
+                };
+            }
+            let mut trusted = trust::TrustedPeers::load(&trust::dir()?)?;
             if trusted.forget(&fingerprint)? {
                 println!("mickey: forgot {fingerprint}; it must pair again to connect");
                 Ok(())
@@ -222,7 +236,7 @@ fn run(command: Command) -> Result<(), String> {
                 touchpad_speed,
                 interface,
                 source::Services {
-                    trusted: trust::shared(&identity::data_dir()?)?,
+                    trusted: trust::shared(&trust::dir()?)?,
                     name: config::parse("")
                         .map(|empty| empty.this_pc.name())
                         .unwrap_or_default(),
@@ -236,7 +250,7 @@ fn run(command: Command) -> Result<(), String> {
         }
         Command::Target { listen } => target(
             listen,
-            trust::shared(&identity::data_dir()?)?,
+            trust::shared(&trust::dir()?)?,
             std::sync::mpsc::channel().0,
             None,
             clipboard::Keeper::start().ok(),
@@ -266,6 +280,13 @@ fn run(command: Command) -> Result<(), String> {
 /// `mickey run`: the roles `[this_pc]` asks for, in one process. The target
 /// waits for peers on its own thread; the source runs here.
 fn run_from_config() -> Result<(), String> {
+    // As administrator only where nobody else can change this Mickey: else
+    // a program could have changed what it runs or trusts (#247).
+    #[cfg(windows)]
+    if platform::acl::elevated() && !autostart::install_is_safe() {
+        autostart::step_down()?;
+        return Err("Mickey ran as administrator from a folder other users can change; it starts again without administrator rights".into());
+    }
     // Right after installing there is no config yet: with no peers, this PC
     // just waits to be controlled until some are added.
     let config = match config::Config::load()? {
@@ -294,7 +315,7 @@ fn run_from_config() -> Result<(), String> {
     // the status and the tray (PRD 0009).
     let (controlled_sender, controlled) = std::sync::mpsc::channel();
     // One list of trusted PCs for the source and the target.
-    let trusted = trust::shared(&identity::data_dir()?)?;
+    let trusted = trust::shared(&trust::dir()?)?;
     // One clipboard for the whole process (PRD 0011).
     let keeper = clipboard::Keeper::start()
         .inspect_err(|err| eprintln!("mickey: {err}; the clipboard will not be shared"))

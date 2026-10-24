@@ -81,6 +81,51 @@ unsafe extern "system" {
 #[link(name = "kernel32")]
 unsafe extern "system" {
     fn LocalFree(memory: *mut c_void) -> *mut c_void;
+    fn GetCurrentProcess() -> *mut c_void;
+    fn CloseHandle(handle: *mut c_void) -> i32;
+}
+
+#[link(name = "advapi32")]
+unsafe extern "system" {
+    fn OpenProcessToken(process: *mut c_void, access: u32, token: *mut *mut c_void) -> i32;
+    fn GetTokenInformation(
+        token: *mut c_void,
+        class: u32,
+        info: *mut c_void,
+        length: u32,
+        returned: *mut u32,
+    ) -> i32;
+}
+
+const TOKEN_QUERY: u32 = 0x0008;
+/// TOKEN_INFORMATION_CLASS's TokenElevation: a u32, non-zero if elevated.
+const TOKEN_ELEVATION: u32 = 20;
+
+/// Whether this process runs as administrator (elevated by UAC, or by a
+/// task's highest run level).
+pub fn elevated() -> bool {
+    let mut token = std::ptr::null_mut();
+    // SAFETY: GetCurrentProcess returns a pseudo-handle that needs no
+    // closing; `token` is a valid out-pointer.
+    if unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) } == 0 {
+        return false;
+    }
+    let mut elevation = 0u32;
+    let mut returned = 0u32;
+    // SAFETY: `token` was just opened with TOKEN_QUERY; `elevation` is a
+    // u32, the size TokenElevation writes, and its length is given.
+    let ok = unsafe {
+        GetTokenInformation(
+            token,
+            TOKEN_ELEVATION,
+            (&raw mut elevation).cast(),
+            size_of::<u32>() as u32,
+            &mut returned,
+        )
+    } != 0;
+    // SAFETY: `token` was opened above and is closed once.
+    unsafe { CloseHandle(token) };
+    ok && elevation != 0
 }
 
 #[repr(C)]
