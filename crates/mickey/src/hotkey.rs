@@ -3,11 +3,12 @@
 //! `AltGr+RightShift+0` (home). A hotkey fires when all its keys are
 //! released and nothing else was pressed in between.
 //!
-//! While the focus is remote, a press that may belong to a hotkey is held
-//! back until it is clear what it is part of. If something else is pressed
-//! first, the held keys are sent after all, so AltGr+Q, Shift+A or Shift+1
-//! still type on the target; if a hotkey completes, the target sees none of
-//! it.
+//! While the focus is remote, modifiers (and the double-tap key) reach the
+//! target at once, so a game holding Ctrl or Shift gets it when pressed
+//! (#188). Only a chord's last key (the `1` of `AltGr+RightShift+1`) is held
+//! back until it is clear what it is part of: if the hotkey completes, the
+//! target never sees that key; if something else comes first, it is sent
+//! after all, so AltGr+Q and Shift+1 still type.
 
 use crate::event::InputEvent;
 use mickey_config::HotkeySet;
@@ -243,11 +244,16 @@ impl Hotkey {
                     return None;
                 }
                 if !self.spoiled && self.may_continue(code) {
+                    // Modifiers go on at once; a last key waits.
+                    let sent = self.is_modifier(code);
                     self.attempt.push(Pressed {
                         code,
                         down: true,
-                        sent: false,
+                        sent,
                     });
+                    if sent {
+                        forward(event);
+                    }
                     return None;
                 }
                 if self.attempt.iter().any(|key| key.down) {
@@ -322,6 +328,16 @@ impl Hotkey {
         })
     }
 
+    /// A key some chord holds while pressing its last key, or the
+    /// double-tap key: the target gets it at once.
+    fn is_modifier(&self, code: u16) -> bool {
+        Some(code) == self.double_tap
+            || self
+                .chords
+                .iter()
+                .any(|(chord, _)| chord.modifiers.contains(&code))
+    }
+
     fn is_hotkey_key(&self, code: u16) -> bool {
         self.chords
             .iter()
@@ -341,14 +357,14 @@ impl Hotkey {
     }
 
     /// Every key is up: fire the hotkey these keys make, or give the target
-    /// the presses it never saw (a lone Shift tap, say).
+    /// the last key it never saw.
     fn finish(&mut self, now: Instant, forward: &mut impl FnMut(InputEvent)) -> Option<Trigger> {
         let mut keys: Vec<u16> = self.attempt.iter().map(|key| key.code).collect();
         keys.sort_unstable();
         let lone_tap = !self.spoiled && keys.len() == 1 && Some(keys[0]) == self.double_tap;
         if lone_tap && self.last_tap.is_some_and(|last| now - last < self.window) {
-            // The second tap: the target got the first one as a plain tap,
-            // which is harmless for a modifier, and never sees this one.
+            // The second tap: the target got both as plain taps, which is
+            // harmless for a modifier.
             self.last_tap = None;
             self.attempt.clear();
             return Some(Trigger::Forward);
@@ -492,9 +508,11 @@ mod tests {
                 key(first, false),
                 key(last, false),
             ];
+            // The modifiers reach the target as they happen (#188); the
+            // hotkey still fires on release.
             assert_eq!(
                 run(&mut Hotkey::new(), &events),
-                (vec![], vec![Trigger::Next])
+                (events.to_vec(), vec![Trigger::Next])
             );
         }
     }
@@ -509,7 +527,12 @@ mod tests {
             key(SHIFT, false),
             key(ALT, false),
         ];
-        assert_eq!(run(&mut all(), &events), (vec![], vec![Trigger::Go(0)]));
+        // The target sees AltGr and Right Shift, never the 1.
+        let modifiers = [events[0], events[1], events[4], events[5]];
+        assert_eq!(
+            run(&mut all(), &events),
+            (modifiers.to_vec(), vec![Trigger::Go(0)])
+        );
         let events = [
             key(SHIFT, true),
             key(ALT, true),
@@ -518,7 +541,11 @@ mod tests {
             key(ZERO, false),
             key(SHIFT, false),
         ];
-        assert_eq!(run(&mut all(), &events), (vec![], vec![Trigger::Home]));
+        let modifiers = [events[0], events[1], events[3], events[5]];
+        assert_eq!(
+            run(&mut all(), &events),
+            (modifiers.to_vec(), vec![Trigger::Home])
+        );
     }
 
     #[test]
@@ -557,9 +584,13 @@ mod tests {
             &mut all(),
             &[key(SHIFT, true), key(SHIFT, true), key(SHIFT, false)],
         );
+        // The target saw the press, so it gets the auto-repeat too.
         assert_eq!(
             (forwarded, fired),
-            (vec![key(SHIFT, true), key(SHIFT, false)], vec![])
+            (
+                vec![key(SHIFT, true), key(SHIFT, true), key(SHIFT, false)],
+                vec![]
+            )
         );
     }
 
@@ -571,7 +602,24 @@ mod tests {
         };
         let motion = InputEvent::Motion { dx: 1, dy: 0 };
         let (forwarded, _) = run(&mut all(), &[key(SHIFT, true), motion, click]);
-        assert_eq!(forwarded, [motion, key(SHIFT, true), click]);
+        assert_eq!(forwarded, [key(SHIFT, true), motion, click]);
+    }
+
+    #[test]
+    fn a_modifier_used_for_a_double_tap_reaches_a_game_at_once() {
+        // Left Ctrl as the double-tap key (crouch in a game, #188): the
+        // press goes on before the mouse moves, not when Ctrl is let go.
+        const LEFT_CTRL: u16 = 29;
+        let set = mickey_config::parse(
+            "[hotkeys]\ndouble_tap = \"LeftCtrl\"\n\n[[peer]]\nname = \"A\"\naddress = \"192.0.2.10:1\"\n",
+        )
+        .unwrap()
+        .hotkeys()
+        .unwrap();
+        let motion = InputEvent::Motion { dx: 3, dy: 0 };
+        let events = [key(LEFT_CTRL, true), motion, key(LEFT_CTRL, false)];
+        let (forwarded, fired) = run(&mut Hotkey::from_config(&set), &events);
+        assert_eq!((forwarded, fired), (events.to_vec(), vec![]));
     }
 
     const LEFT: u16 = 105;
@@ -585,14 +633,23 @@ mod tests {
             key(RIGHT, false),
             key(ALT, false),
         ];
-        assert_eq!(run(&mut all(), &events), (vec![], vec![Trigger::Forward]));
+        assert_eq!(
+            run(&mut all(), &events),
+            (
+                vec![key(ALT, true), key(ALT, false)],
+                vec![Trigger::Forward]
+            )
+        );
         let events = [
             key(ALT, true),
             key(LEFT, true),
             key(LEFT, false),
             key(ALT, false),
         ];
-        assert_eq!(run(&mut all(), &events), (vec![], vec![Trigger::Back]));
+        assert_eq!(
+            run(&mut all(), &events),
+            (vec![key(ALT, true), key(ALT, false)], vec![Trigger::Back])
+        );
     }
 
     #[test]
@@ -608,12 +665,19 @@ mod tests {
             }
             (out, fired)
         };
-        // First tap: forwarded whole; second, 200 ms later: fires, not sent.
+        // Both taps reach the target as plain taps; the second, 200 ms
+        // later, also fires.
         assert_eq!(
             tap(&mut hotkey, 0),
             (vec![key(SHIFT, true), key(SHIFT, false)], None)
         );
-        assert_eq!(tap(&mut hotkey, 200), (vec![], Some(Trigger::Forward)));
+        assert_eq!(
+            tap(&mut hotkey, 200),
+            (
+                vec![key(SHIFT, true), key(SHIFT, false)],
+                Some(Trigger::Forward)
+            )
+        );
         // Too slow: two plain taps.
         assert_eq!(tap(&mut hotkey, 1000).1, None);
         assert_eq!(tap(&mut hotkey, 1600).1, None);

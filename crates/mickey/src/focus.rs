@@ -259,10 +259,16 @@ mod tests {
         switcher.handle(key(A, true), &[true], |action| actions.push(action));
         hotkey(&mut switcher, &[true], &mut actions);
         assert_eq!(switcher.focus(), Focus::Local);
+        // The hotkey's modifiers reach the peer as pressed and released
+        // (#188); A is let go there since it was still held.
         assert_eq!(
             actions,
             [
                 Action::Send(0, key(A, true)),
+                Action::Send(0, key(KEY_RIGHTALT, true)),
+                Action::Send(0, key(KEY_RIGHTSHIFT, true)),
+                Action::Send(0, key(KEY_RIGHTSHIFT, false)),
+                Action::Send(0, key(KEY_RIGHTALT, false)),
                 Action::Send(0, key(A, false)), // still held when focus left
                 Action::Ungrab,
             ]
@@ -297,7 +303,17 @@ mod tests {
         // focus stays until a card is picked.
         hotkey(&mut switcher, &online, &mut actions);
         assert_eq!(switcher.focus(), Focus::Remote(1));
-        assert_eq!(actions, [Action::OpenSwitcherOn(1)]);
+        // The modifiers reached peer 1 as they were pressed (#188).
+        assert_eq!(
+            actions,
+            [
+                Action::Send(1, key(KEY_RIGHTALT, true)),
+                Action::Send(1, key(KEY_RIGHTSHIFT, true)),
+                Action::Send(1, key(KEY_RIGHTSHIFT, false)),
+                Action::Send(1, key(KEY_RIGHTALT, false)),
+                Action::OpenSwitcherOn(1),
+            ]
+        );
     }
 
     #[test]

@@ -185,4 +185,9 @@ PRD's review.
   with a random port and a random token, both written to
   `%LOCALAPPDATA%\mickey\control.txt`, inside the user's profile; a client
   must send the token first. Nothing listens on the network either way.
-
+- **Modifiers reach the target at once** (2026-10-24, #188). Holding back
+  every key that might start a hotkey delayed games: a double tap on Left
+  Ctrl (crouch) reached the game only when Ctrl was let go. Now modifiers
+  and the double-tap key are forwarded when pressed, and only a chord's
+  last key waits; the target sees a hotkey's modifiers go down and up,
+  which is harmless, but never its last key.
