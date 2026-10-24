@@ -1,53 +1,95 @@
 # Mickey
 
 **One keyboard and mouse for all your computers, written in Rust.**
-Move the cursor off the edge of one screen and it appears on the next
-computer, whatever its distro, desktop or operating system.
-Inspired by Synergy, Deskflow/Input Leap and lan-mouse, built from scratch to
-be understood line by line.
+Push the cursor off the edge of one screen and it appears on the next PC;
+copy on one and paste on another. Linux and Windows, and any of them can be
+the one whose keyboard you use. Inspired by Synergy, Deskflow/Input Leap and
+lan-mouse, built from scratch to be understood line by line.
 
-> **Status: pre-alpha.** Milestone M0 works: a Linux laptop's keyboard and
-> touchpad drive a Windows 10 PC, switched with a hotkey, over an encrypted
-> link between paired machines (see [Security](#security)). The plan lives in [`docs/prds/`](docs/prds/).
+> **Status: alpha.** Used every day between an Arch Linux laptop (Hyprland)
+> and a Windows PC, and tested on eight more Linux distros (below). Expect
+> rough edges, and read the [known limits](#known-limits).
 
 ---
 
-## What it will be
+## What it does
 
-- **One binary, every machine.** The same `mickey` runs on each computer. You
-  tell it where the other screens are (left, right, above, below).
-- **Works on any desktop.** X11, GNOME, KDE, Hyprland, Sway: on Linux the
-  hard part is the compositor, not the distro, and Mickey has a backend
-  for each, plus a kernel-level fallback (`evdev`/`uinput`) that works
-  everywhere. Windows too, from the first milestone.
-- **Feels local.** Moving the mouse on a remote screen should add no latency
-  you can notice. Hard budgets, measured.
-- **Safe on a shared network.** Everything you type crosses the network, so
-  traffic is encrypted and machines must be paired before they can talk
-  (from M1a on).
+- **Move between PCs** across the screen edges (on Windows and Hyprland so
+  far), with a hotkey, or with the **switcher**: one card per PC, shown on
+  the screen you are looking at.
+- **Any PC drives any other.** Every PC runs the same `mickey`; the one
+  whose keyboard and mouse you touch is the one in charge.
+- **A shared clipboard that follows the keyboard.** Copy on one PC, move to
+  another, paste: text, images and files (up to 60 MiB). The recent copies
+  are kept in a searchable history, in memory only.
+- **Finds your PCs and pairs them with a code.** PCs running Mickey on the
+  network show up in the settings: press **Connect**, check that both
+  screens show the same six-digit code, press **Pair**. A PC paired with one
+  of yours is trusted by the rest of the group.
+- **Encrypted.** Everything crosses the network inside a Noise channel, and
+  only between paired PCs.
+- **A way home that always works.** Hold **Right Shift** for 3 seconds (or
+  **AltGr + Right Shift** for 2) and let go: the keyboard and mouse come
+  back to this PC, whatever the settings say.
+- **A tray icon** that shows where the keyboard is (a green dot: here; red:
+  on another PC) with a menu to move it; a settings window for the rest;
+  it starts with your session.
 
 ## Install
 
 Download the latest release from the repository's **Releases** page:
 
-- **Windows:** run `Mickey-Setup-<version>.exe`. Mickey starts with Windows
-  (no window), is allowed through the firewall on **private** networks only,
-  and can be removed from *Settings → Apps*.
-- **Linux** (x86-64, glibc 2.35 or newer with systemd: Ubuntu 22.04, Linux
-  Mint 21, Debian 12, Fedora 36 or newer; see the tested desktops in #171):
-  unpack `mickey-linux-x86_64.tar.gz` and run `./install.sh`. It
-  asks for your password once (input group and a udev rule for the virtual
-  keyboard), installs to `~/.local/bin` and starts Mickey with your desktop
-  session (`systemctl --user status mickey`). `./uninstall.sh` removes it.
+- **Windows:** run `Mickey-Setup-<version>.exe`. It installs to Program
+  Files, starts Mickey at logon (as administrator, so it can also drive
+  administrator windows), allows it through the firewall on **private**
+  networks only and adds **Mickey settings** to the Start menu. Remove it
+  from *Settings → Apps*.
+- **Linux** (x86-64, glibc 2.35 or newer, systemd): unpack
+  `mickey-linux-x86_64.tar.gz` and run `./install.sh`. It asks for your
+  password once: the `input` group and a udev rule let Mickey read your
+  keyboard and create its virtual one, and if firewalld or ufw is on it
+  opens TCP 4242 and UDP 4243. Mickey goes to `~/.local/bin` and starts
+  with your desktop session. If it had to add you to the `input` group,
+  restart the PC once. `./uninstall.sh` removes everything.
 
 Each release also has `SHA256SUMS`: `sha256sum -c SHA256SUMS --ignore-missing`
 in the download folder checks what you got.
 
-Then open **Mickey settings** (from the applications or Start menu, or
-`mickey settings`) to add your other PCs, choose what this PC does and where
-the switcher appears; it writes `config.toml` for you. Pair new PCs: the first
-time two PCs meet, run Mickey in a terminal on both (on Windows: Start menu
-→ *Mickey (terminal, for pairing)*) and confirm the fingerprints.
+### Tested on
+
+| System | Desktop | Notes |
+|---|---|---|
+| Arch Linux | Hyprland (Wayland) | the owner's laptop; screen edges work |
+| Windows 10 | | screen edges work |
+| Ubuntu 24.04 | GNOME (Wayland) | |
+| Ubuntu 22.04 | GNOME | the oldest supported (glibc 2.35); install, start and discovery checked |
+| Linux Mint 22.3 | Cinnamon (X11) | |
+| Fedora 44 | KDE Plasma (Wayland) | |
+| Debian 13 | GNOME (Wayland) | no tray icon without an extension ([why](#known-limits)) |
+| Pop!_OS 24.04 | COSMIC (Wayland) | |
+| Xubuntu 24.04 | XFCE (X11) | |
+| openSUSE Tumbleweed | KDE Plasma (Wayland) | install, start, firewall and discovery checked |
+
+On the other Linux distros: the installer, starting at login, the windows,
+the tray, pairing, keys both ways and the clipboard both ways, in test
+virtual machines ([`tools/distro-test/`](tools/distro-test/), results in #171).
+Screen edges need Windows or Hyprland for now.
+
+## First steps
+
+1. **Install Mickey on every PC.**
+2. On one of them, open **Mickey settings** (from the applications or Start
+   menu, the tray, or `mickey settings`) and go to the **PCs** tab. The
+   other PCs appear under **On this network**: press **Connect**.
+3. Both PCs show a window with the **same six-digit code**. If it matches,
+   press **Pair** on both. (A code that differs means something is in
+   between: press **Refuse**.)
+4. In the **Layout** tab, drag the new PC to where its screens sit next to
+   this one's, and **Save**. Every PC learns the layout.
+5. Push the cursor off that edge, or press **AltGr + Right Shift**.
+
+A PC on another network does not show up in the list: use **Add by
+address…**, and on that PC press **Let a new PC pair (2 min)**.
 
 ## Try it from source
 
