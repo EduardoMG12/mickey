@@ -70,6 +70,46 @@ unsafe extern "system" {
     fn GetClipboardSequenceNumber() -> u32;
 }
 
+#[link(name = "advapi32")]
+unsafe extern "system" {
+    fn RegGetValueW(
+        key: isize,
+        subkey: *const u16,
+        value: *const u16,
+        flags: u32,
+        kind: *mut u32,
+        data: *mut std::ffi::c_void,
+        length: *mut u32,
+    ) -> i32;
+}
+
+/// HKEY_CURRENT_USER, a predefined key: 0x80000001 sign-extended.
+const HKEY_CURRENT_USER: isize = 0x8000_0001_u32 as i32 as isize;
+const RRF_RT_REG_DWORD: u32 = 0x0000_0010;
+
+/// Whether Windows keeps its own clipboard history (Win+V) for this user.
+pub fn clipboard_history_on() -> bool {
+    let wide = |text: &str| text.encode_utf16().chain([0]).collect::<Vec<u16>>();
+    let subkey = wide("Software\\Microsoft\\Clipboard");
+    let value = wide("EnableClipboardHistory");
+    let mut data = 0u32;
+    let mut length = size_of::<u32>() as u32;
+    // SAFETY: both names are NUL-terminated UTF-16 that outlive the call;
+    // `data` is a u32, `length` says so, and only a DWORD is accepted.
+    let error = unsafe {
+        RegGetValueW(
+            HKEY_CURRENT_USER,
+            subkey.as_ptr(),
+            value.as_ptr(),
+            RRF_RT_REG_DWORD,
+            std::ptr::null_mut(),
+            (&raw mut data).cast(),
+            &mut length,
+        )
+    };
+    error == 0 && data != 0
+}
+
 /// A number Windows bumps on every clipboard change (PRD 0011).
 pub fn clipboard_sequence() -> u32 {
     // SAFETY: no arguments; only reads a counter.

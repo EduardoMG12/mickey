@@ -41,8 +41,9 @@ pub struct Form {
     pub position: String,
     /// The switcher as a column.
     pub vertical: bool,
-    /// Keep a clipboard history here (off: another manager keeps it).
-    pub history: bool,
+    /// Keep a clipboard history here: always, never (another manager keeps
+    /// it), or `None`, only when no other manager runs.
+    pub history: Option<bool>,
     /// The switcher's custom order, by name; empty: as the layout goes.
     pub order: Vec<String>,
     pub speed: i32,
@@ -166,9 +167,14 @@ impl Form {
             let names: Vec<String> = self.order.iter().map(|name| quote(name)).collect();
             out += &format!("switcher_order = [{}]\n", names.join(", "));
         }
-        if !self.history {
-            out += "\n[clipboard]\n";
-            out += "history = false    # another clipboard manager keeps the history\n";
+        match self.history {
+            None => {}
+            Some(true) => {
+                out += "\n[clipboard]\nhistory = true    # even with another clipboard manager\n"
+            }
+            Some(false) => {
+                out += "\n[clipboard]\nhistory = false    # another clipboard manager keeps the history\n"
+            }
         }
         out += "\n[touchpad]\n";
         out += &format!("speed = {}    # higher is faster\n", self.speed);
@@ -792,8 +798,15 @@ impl eframe::App for Settings {
                     ui.add_space(8.0);
                     switcher_order(ui, form);
                     ui.add_space(12.0);
-                    ui.checkbox(&mut form.history, "Keep a history of copies on this PC");
-                    ui.weak("Off: the clipboard is still shared, and another manager (cliphist, CopyQ, Klipper) keeps the history. Applies after a restart.");
+                    ui.label("History of copies on this PC");
+                    for (choice, text) in [
+                        (None, "Automatic: only when no other clipboard manager runs"),
+                        (Some(true), "Always keep one"),
+                        (Some(false), "Never: another manager keeps it"),
+                    ] {
+                        ui.radio_value(&mut form.history, choice, text);
+                    }
+                    ui.weak("Other managers: cliphist, CopyQ, Klipper, GPaste, Windows' Win+V. The clipboard is shared either way. Applies after a restart.");
                 }
             }
             });
@@ -977,7 +990,7 @@ mod tests {
         let reread = config::parse(&form.to_toml()).unwrap();
         assert_eq!(Form::from_config(&reread), form);
         assert!(
-            !reread.clipboard.history,
+            reread.clipboard.history == Some(false),
             "the history setting survives a save"
         );
     }

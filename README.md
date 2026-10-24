@@ -124,9 +124,11 @@ land in a fresh folder under Mickey's cache (`~/.cache/mickey/received`,
 `%LOCALAPPDATA%\mickey\received`). **Clipboard history** (tray menu, or
 `mickey history`) lists the last 50 copies, searchable; pick one to copy it
 again. It lives in memory only and is gone when Mickey stops. Already
-using cliphist, CopyQ or Klipper? Turn the history off in the settings
-(**General**) or with `[clipboard] history = false`: the clipboard is still
-shared, and those managers see everything Mickey writes.
+using a clipboard manager (cliphist, CopyQ, Klipper, GPaste, Windows' own
+Win+V history)? Mickey notices when it starts and leaves the history to
+it: the clipboard is still shared, and the manager sees everything Mickey
+writes. To choose yourself, pick *Always* or *Never* in the settings
+(**General**), or set `[clipboard] history = true` or `false`.
 
 ### The tray, commands and Waybar
 
