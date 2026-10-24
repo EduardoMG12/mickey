@@ -36,6 +36,8 @@ wayland-protocols-wlr = { version = "0.3", features = ["client"] }
 # libpulse, which PulseAudio and PipeWire both answer and every desktop
 # has. Talking its protocol by hand would be far longer.
 libpulse-binding = "2"
+# Its blocking record and playback API (the same system library).
+libpulse-simple-binding = "2"
 # Reading the clipboard through GPaste on GNOME Wayland (#258), over the
 # session D-Bus. Already in the tree through ksni; this adds only its
 # blocking API.
