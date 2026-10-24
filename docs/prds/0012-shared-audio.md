@@ -89,4 +89,33 @@ speakers stay silent the whole time.
 
 ## Discoveries
 
-None yet.
+- **Windows: loopback capture ignores the output's mute and volume**
+  (#265, spike on the owner's Windows 10 22H2). A quiet 440 Hz tone
+  captured through WASAPI loopback of the default output gave the same RMS
+  with the output normal (0.0354), muted (0.0352) and at volume 0
+  (0.0353). So *Send only* just mutes the default output
+  (`IAudioEndpointVolume::SetMute`) and keeps capturing; no virtual device
+  and no driver. The capture is also independent of that PC's volume
+  slider, so loudness is set in the listener's mixer. Mickey must unmute
+  on stop, on panic, and on the next start if it died while muted.
+- **Linux: the null sink works as planned, on PipeWire through its
+  PulseAudio protocol** (#265, Ubuntu 24.04 VM, PipeWire 1.0.5). With a
+  stand-in speaker sink as the default and a tone playing, loading
+  `module-null-sink sink_name=mickey` and making it the default **moved
+  the playing stream at once**: the Mickey sink's monitor read RMS 0.21,
+  the speakers 0.0. Setting the speakers back as default brought the tone
+  back to them.
+- **A null sink can outlive its unload.** After an earlier run, a `mickey`
+  sink was still there although `pactl unload-module <id>` had returned 0;
+  only unloading the module listed under that name removed it. Mickey
+  therefore removes every module that made a `mickey` sink when it starts,
+  and sets the real default back, whatever happened before (like the
+  input grab: never leave the owner without sound).
+- **No command-line tools to rely on.** Ubuntu's desktop ships neither
+  `pactl` nor `parec`; `libpulse` itself is on every desktop. The Linux
+  backend talks to it directly. (A PipeWire VM with no sound card has only
+  `auto_null`, which disappears once any other sink exists: tests need a
+  stand-in speaker sink.)
+- **Record with a small buffer.** `parec`'s default buffer held a second
+  of audio back; `--latency-msec=20` was needed for timely data. The
+  backend asks for small fragments (5 ms) for the same reason.
