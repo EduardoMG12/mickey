@@ -443,6 +443,7 @@ fn target(
             &grants,
         );
     }
+    let input_slots = std::sync::Arc::default();
     loop {
         let (stream, peer) = match listener.accept() {
             Ok(connection) => connection,
@@ -460,9 +461,49 @@ fn target(
             sources: sources.clone(),
             grants: grants.clone(),
         };
-        std::thread::spawn(move || {
+        let Some(slot) = Slot::take(&input_slots) else {
+            continue;
+        };
+        on_its_thread(move || {
+            let _slot = slot;
             serve_source(stream, peer, &identity, &trusted, &emitter, &around);
         });
+    }
+}
+
+/// At most this many connections on a port at once, paired or not: a few
+/// PCs need a few. Without a cap, anyone on the network could open
+/// connections until no thread could be made.
+const MAX_CONNECTIONS: usize = 32;
+
+/// One of a port's connections, given back when dropped.
+struct Slot(std::sync::Arc<std::sync::atomic::AtomicUsize>);
+
+impl Slot {
+    /// `None` when the port already has `MAX_CONNECTIONS`: the caller
+    /// drops the stream, which closes it.
+    fn take(count: &std::sync::Arc<std::sync::atomic::AtomicUsize>) -> Option<Slot> {
+        use std::sync::atomic::Ordering;
+        count
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |n| {
+                (n < MAX_CONNECTIONS).then_some(n + 1)
+            })
+            .ok()
+            .map(|_| Slot(count.clone()))
+    }
+}
+
+impl Drop for Slot {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, std::sync::atomic::Ordering::AcqRel);
+    }
+}
+
+/// Runs `work` on a new thread; when none can be made, says so instead
+/// of panicking (`thread::spawn` would end the accept loop).
+fn on_its_thread(work: impl FnOnce() + Send + 'static) {
+    if let Err(err) = std::thread::Builder::new().spawn(work) {
+        eprintln!("mickey: cannot start a thread for a connection: {err}");
     }
 }
 
@@ -489,14 +530,19 @@ fn serve_clipboard(
     let (sources, grants) = (sources.clone(), grants.clone());
     let shown = Shown::default();
     std::thread::spawn(move || {
+        let slots = std::sync::Arc::default();
         for stream in listener.incoming().flatten() {
+            let Some(slot) = Slot::take(&slots) else {
+                continue;
+            };
             let (identity, trusted, keeper) = (identity.clone(), trusted.clone(), keeper.clone());
             let (controlled, sources, shown) = (controlled.clone(), sources.clone(), shown.clone());
             let grants = grants.clone();
             let Ok(from) = stream.peer_addr().map(|address| address.ip()) else {
                 continue;
             };
-            std::thread::spawn(move || {
+            on_its_thread(move || {
+                let _slot = slot;
                 let is_trusted = |key: &[u8; 32]| {
                     trusted
                         .lock()

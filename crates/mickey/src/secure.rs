@@ -20,7 +20,7 @@ use snow::{HandshakeState, TransportState};
 use std::io::{self, Read, Write};
 use std::net::TcpStream;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// Noise adds a 16-byte authentication tag to every encrypted message.
 const TAG_LEN: usize = 16;
@@ -185,7 +185,9 @@ impl Link {
         mut handshake: HandshakeState,
         writes: &[bool],
     ) -> io::Result<Link> {
-        stream.set_read_timeout(Some(HANDSHAKE_TIMEOUT))?;
+        // The whole handshake, not each read: a peer trickling one byte
+        // just under a per-read timeout would hold the link for minutes.
+        let until = Instant::now() + HANDSHAKE_TIMEOUT;
         let mut message = [0u8; MAX_NOISE_MESSAGE];
         let mut payload = [0u8; MAX_NOISE_MESSAGE];
         for &write in writes {
@@ -195,7 +197,13 @@ impl Link {
                     .map_err(noise_error)?;
                 write_noise(&mut stream, &message[..len])?;
             } else {
-                let len = read_noise(&mut stream, &mut message)?;
+                let len = read_noise(
+                    &mut Before {
+                        stream: &stream,
+                        until,
+                    },
+                    &mut message,
+                )?;
                 handshake
                     .read_message(&message[..len], &mut payload)
                     .map_err(noise_error)?;
@@ -254,7 +262,28 @@ fn write_noise(stream: &mut impl Write, message: &[u8]) -> io::Result<()> {
 
 /// Reads one Noise message into `buf`; longer than `buf` is an error, so
 /// the input link keeps refusing anything over `MAX_NOISE_MESSAGE`.
-fn read_noise(stream: &mut TcpStream, buf: &mut [u8]) -> io::Result<usize> {
+/// Reads `stream` until `until`, however slowly the bytes come: each read
+/// waits only for the time left.
+struct Before<'a> {
+    stream: &'a TcpStream,
+    until: Instant,
+}
+
+impl Read for Before<'_> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let left = self.until.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "the handshake took too long",
+            ));
+        }
+        self.stream.set_read_timeout(Some(left))?;
+        (&mut &*self.stream).read(buf)
+    }
+}
+
+fn read_noise(stream: &mut impl Read, buf: &mut [u8]) -> io::Result<usize> {
     let mut len = [0u8; 2];
     stream.read_exact(&mut len)?;
     let len = usize::from(u16::from_be_bytes(len));
@@ -278,6 +307,33 @@ fn invalid(message: String) -> io::Error {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_handshake_trickled_byte_by_byte_still_ends_in_time() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        // Says a 200-byte message is coming, then sends a byte a second:
+        // each read is quick, the whole would take minutes.
+        std::thread::spawn(move || {
+            let mut stream = TcpStream::connect(address).unwrap();
+            let _ = stream.write_all(&200u16.to_be_bytes());
+            for _ in 0..200 {
+                if stream.write_all(&[0]).is_err() {
+                    return;
+                }
+                std::thread::sleep(Duration::from_secs(1));
+            }
+        });
+        let (stream, _) = listener.accept().unwrap();
+        let identity = crate::identity::Identity::generate().unwrap();
+        let started = Instant::now();
+        assert!(Link::respond(stream, &identity).is_err());
+        let took = started.elapsed();
+        assert!(
+            took < HANDSHAKE_TIMEOUT + Duration::from_secs(2),
+            "{took:?}"
+        );
+    }
+
     #[test]
     fn an_input_message_is_one_write_and_reads_back() {
         /// Counts `write` calls, as the socket would see them.
