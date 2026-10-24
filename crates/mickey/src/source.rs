@@ -33,6 +33,11 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 const PING_EVERY: Duration = Duration::from_secs(1);
+/// With `MICKEY_BENCH` set, while the keyboard is on another PC: a ping
+/// every 10 ms, so the latency report (on coming home) holds enough samples
+/// for a p99 while input is flowing (#191). Off by default: one a second is
+/// plenty to notice a PC gone silent.
+const BENCH_PING_EVERY: Duration = Duration::from_millis(10);
 const KEYS_UP_POLL: Duration = Duration::from_millis(10);
 const RETRY_EVERY: Duration = Duration::from_secs(5);
 /// A peer that has answered nothing (no pong) for this long is treated as
@@ -598,6 +603,7 @@ pub fn run(
     // including `?` and panics.
     let mut grabbed = None;
     let mut next_ping = start;
+    let bench = std::env::var_os("MICKEY_BENCH").is_some();
     // Names never change; which peers are online is refreshed every turn.
     let mut names: Vec<String> = peers.iter().map(|peer| peer.name.clone()).collect();
     // Which peers were online when the group map was last shared.
@@ -753,7 +759,8 @@ pub fn run(
                     lost.push(index);
                 }
             }
-            next_ping = now + PING_EVERY;
+            let remote = matches!(switcher.focus(), Focus::Remote(_));
+            next_ping = now + if bench && remote { BENCH_PING_EVERY } else { PING_EVERY };
         }
 
         // Sleep until something wakes us or the next ping is due; poll often
