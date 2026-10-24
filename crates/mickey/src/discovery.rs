@@ -64,7 +64,7 @@ impl Announce {
             return None;
         }
         let name = std::str::from_utf8(name).ok()?;
-        if name.is_empty() || name.contains(['\t', '\n']) {
+        if !plain_name(name) {
             return None;
         }
         Some(Announce {
@@ -260,8 +260,35 @@ fn broadcasts(table: &str) -> Vec<Ipv4Addr> {
     found
 }
 
+/// Whether a PC name from the network can be shown as it is: not empty,
+/// and no control characters (an escape sequence in a terminal, a tab in
+/// the group map) nor the invisible ones that reorder or hide text. In the
+/// pairing window, "\u{202E}..." would make an attacker's name read like
+/// one of the owner's PCs.
+pub fn plain_name(name: &str) -> bool {
+    !name.is_empty()
+        && !name.chars().any(|c| {
+            c.is_control()
+                || matches!(c,
+                    '\u{061C}' | '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}'
+                    | '\u{2060}'..='\u{2069}' | '\u{FEFF}')
+        })
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn names_that_hide_or_reorder_text_are_refused() {
+        use super::plain_name;
+        assert!(plain_name("Desk PC"));
+        assert!(plain_name("Escritório"));
+        assert!(!plain_name(""));
+        assert!(!plain_name("evil\u{202E}CP kseD"));
+        assert!(!plain_name("Desk\u{200B}PC"));
+        assert!(!plain_name("Desk\u{1b}[2J"));
+        assert!(!plain_name("a\tb"));
+    }
+
     #[test]
     fn a_flood_of_made_up_pcs_keeps_the_table_small() {
         let table = Table::default();

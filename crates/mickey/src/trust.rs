@@ -150,10 +150,16 @@ impl TrustedPeers {
             use std::os::unix::fs::OpenOptionsExt;
             options.mode(0o600);
         }
-        options
-            .open(&self.path)
-            .and_then(|mut file| file.write_all(text.as_bytes()))
-            .map_err(error)
+        let file = options.open(&self.path).map_err(error)?;
+        // A list made before with wider rights keeps them unless narrowed:
+        // `mode` above only applies to a new file.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            file.set_permissions(fs::Permissions::from_mode(0o600))
+                .map_err(error)?;
+        }
+        (&file).write_all(text.as_bytes()).map_err(error)
     }
 }
 
@@ -353,6 +359,20 @@ mod tests {
         assert!(reloaded.is_trusted(&[1; 32]));
         assert!(!reloaded.is_trusted(&[2; 32]));
         fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn saving_narrows_a_list_others_could_read() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = temp_dir("narrow");
+        let path = dir.join(FILE_NAME);
+        fs::write(&path, "").unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+        let mut trusted = TrustedPeers::load(&dir).unwrap();
+        trusted.add([7; 32], "test").unwrap();
+        let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
     }
 
     #[test]

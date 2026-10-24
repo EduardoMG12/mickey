@@ -74,6 +74,14 @@ fn save_in(base: &Path, files: Vec<(String, Vec<u8>)>) -> Result<Vec<PathBuf>, S
     let folder = base.join(stamp.to_string());
     std::fs::create_dir_all(&folder)
         .map_err(|err| format!("cannot create {}: {err}", folder.display()))?;
+    // Copies from another PC are this user's alone, not every account's on
+    // this one (on Windows, %LOCALAPPDATA% already is).
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(base, std::fs::Permissions::from_mode(0o700))
+            .map_err(|err| format!("cannot protect {}: {err}", base.display()))?;
+    }
     let mut paths = Vec::new();
     for (name, bytes) in files {
         let name = safe_name(&name)
