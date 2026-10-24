@@ -33,11 +33,14 @@ usage:
   mickey clipboard [test]            say what kind of thing is copied (never what);
                                      test copies a short test text
   mickey forget <fingerprint>        stop trusting a paired machine
+  mickey --version                   show which Mickey this is
 ";
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Command {
     Help,
+    /// `mickey --version`: which Mickey this is, for bug reports.
+    Version,
     Run,
     Monitors,
     /// Ask the running source for the PCs and their monitors.
@@ -80,6 +83,9 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
     match args {
         [] => Ok(Command::Help),
         [help] if help == "-h" || help == "--help" || help == "help" => Ok(Command::Help),
+        [version] if version == "-V" || version == "--version" || version == "version" => {
+            Ok(Command::Version)
+        }
         [command] if command == "id" => Ok(Command::Id),
         [command] if command == "run" => Ok(Command::Run),
         [command] if command == "monitors" => Ok(Command::Monitors),
@@ -166,6 +172,7 @@ mod tests {
     fn no_arguments_shows_help() {
         assert_eq!(parse(&[]), Ok(Command::Help));
         assert_eq!(parse(&args("--help")), Ok(Command::Help));
+        assert_eq!(parse(&args("--version")), Ok(Command::Version));
         assert_eq!(parse(&args("id")), Ok(Command::Id));
         assert_eq!(parse(&args("run")), Ok(Command::Run));
         assert_eq!(parse(&args("home")), Ok(Command::Order("home".into())));
