@@ -18,8 +18,12 @@ you can notice. Decided with the owner on 2026-10-24:
     sends, and come back as they were when it stops;
   - **Send and keep**: it plays on its own speakers as well;
   - **Keep only**: it does not send.
-- **A volume per PC**, on the listener: a mixer window, opened from the
-  tray, with one slider (and mute) for each PC that sends, remembered.
+- **A volume per PC**, on the listener: one slider (and mute) next to
+  each PC in the settings' **PCs** tab, remembered.
+- **Where the settings live** (the owner, 2026-10-24): spread over the
+  tabs that already exist, not a tab of their own. **This PC**: "Listen
+  here" and this PC's mode; **PCs**: each PC's volume. The tray gets
+  "Listen here" too.
 - **Delay is automatic**: as low as the network allows (about 20 ms on a
   cable, 40 ms on Wi-Fi), growing a little only when the network jitters,
   so sound never crackles; video and sound stay in sync to the eye.
