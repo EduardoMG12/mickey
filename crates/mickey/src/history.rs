@@ -169,8 +169,91 @@ pub fn lines(history: &History, now: SystemTime) -> String {
     out.join("\n")
 }
 
+/// Another clipboard manager keeping a history on this PC, by name, if
+/// one runs: then Mickey leaves the history to it (#257). Read once, when
+/// Mickey starts.
+pub fn another_manager() -> Option<String> {
+    imp::another_manager()
+}
+
+/// Programs that keep a clipboard history, by a word of their command line
+/// (`wl-paste --watch cliphist store` names cliphist).
+#[cfg(target_os = "linux")]
+const MANAGERS: [&str; 10] = [
+    "cliphist",
+    "copyq",
+    "gpaste-daemon",
+    "clipman",
+    "xfce4-clipman",
+    "diodon",
+    "parcellite",
+    "clipit",
+    "greenclip",
+    "clipmenud",
+];
+
+#[cfg(target_os = "linux")]
+mod imp {
+    /// One of `MANAGERS` among the running programs, or Klipper, which
+    /// Plasma runs inside its shell, on by default.
+    pub fn another_manager() -> Option<String> {
+        let running = std::fs::read_dir("/proc")
+            .ok()?
+            .flatten()
+            .filter_map(|entry| {
+                let line = std::fs::read(entry.path().join("cmdline")).ok()?;
+                Some(String::from_utf8_lossy(&line).replace('\0', " "))
+            });
+        let words: Vec<String> = running.collect();
+        if let Some(found) = super::MANAGERS
+            .iter()
+            .find(|name| words.iter().any(|line| mentions(line, name)))
+        {
+            return Some(found.to_string());
+        }
+        let desktop = std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default();
+        desktop
+            .split(':')
+            .any(|part| part == "KDE")
+            .then(|| "Klipper".to_string())
+    }
+
+    /// Whether `name` is one of the words of `line`, or the file name of
+    /// one (`/usr/bin/copyq`), not part of a longer word.
+    pub fn mentions(line: &str, name: &str) -> bool {
+        line.split_whitespace()
+            .any(|word| word.rsplit('/').next() == Some(name))
+    }
+}
+
+#[cfg(windows)]
+mod imp {
+    /// Windows' own history (Win+V), when it is switched on.
+    pub fn another_manager() -> Option<String> {
+        crate::platform::windows::clipboard_history_on()
+            .then(|| "Windows' clipboard history (Win+V)".to_string())
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    /// Run by hand: says which clipboard manager this PC runs, if any.
+    #[test]
+    #[ignore = "depends on the programs running here"]
+    fn which_manager_runs_here() {
+        println!("manager: {:?}", super::another_manager());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_manager_is_found_by_a_whole_word_of_its_command_line() {
+        use super::imp::mentions;
+        assert!(mentions("wl-paste --watch cliphist store", "cliphist"));
+        assert!(mentions("/usr/bin/copyq --start-server", "copyq"));
+        assert!(!mentions("vim notes-about-copyq.txt", "copyq"));
+        assert!(!mentions("mickey run", "cliphist"));
+    }
+
     use super::*;
 
     fn text(text: &str) -> Content {

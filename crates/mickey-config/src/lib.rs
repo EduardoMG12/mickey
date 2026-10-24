@@ -177,21 +177,18 @@ pub const SWITCHER_POSITIONS: [&str; 5] = [
 ];
 
 /// `[clipboard]`.
-#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Clipboard {
     /// Keep a history of the copies on this PC. `false` leaves it to
-    /// another clipboard manager (cliphist, CopyQ, Klipper): the clipboard
-    /// is still shared, and what Mickey puts in it reaches that manager.
-    #[serde(default = "yes")]
-    pub history: bool,
+    /// another clipboard manager (cliphist, CopyQ, Klipper, Windows'
+    /// Win+V): the clipboard is still shared, and what Mickey puts in it
+    /// reaches that manager. Not set: Mickey keeps one only when no other
+    /// manager runs (#257).
+    #[serde(default)]
+    pub history: Option<bool>,
 }
 
-impl Default for Clipboard {
-    fn default() -> Clipboard {
-        Clipboard { history: true }
-    }
-}
 
 fn default_switcher_position() -> String {
     "bottom-right".into()
@@ -778,13 +775,19 @@ mod tests {
                 this_pc: ThisPc::default(),
             }
         );
-        assert!(parse("").unwrap().clipboard.history, "on unless turned off");
+        assert_eq!(
+            parse("").unwrap().clipboard.history,
+            None,
+            "automatic unless set"
+        );
     }
 
     #[test]
     fn the_history_can_be_left_to_another_manager() {
         let config = parse("[clipboard]\nhistory = false\n").unwrap();
-        assert!(!config.clipboard.history);
+        assert_eq!(config.clipboard.history, Some(false));
+        let config = parse("[clipboard]\nhistory = true\n").unwrap();
+        assert_eq!(config.clipboard.history, Some(true));
         assert!(
             parse("[clipboard]\nhistroy = false\n").is_err(),
             "a typo is an error"

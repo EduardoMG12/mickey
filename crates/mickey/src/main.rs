@@ -289,6 +289,20 @@ fn run(command: Command) -> Result<(), String> {
     }
 }
 
+/// Whether Mickey keeps the clipboard history: as `[clipboard] history`
+/// says, or, not set, only when no other manager keeps one (#257).
+fn keep_history(setting: Option<bool>) -> bool {
+    setting.unwrap_or_else(|| match history::another_manager() {
+        Some(manager) => {
+            println!(
+                "mickey: {manager} keeps the clipboard history; Mickey only shares the clipboard"
+            );
+            false
+        }
+        None => true,
+    })
+}
+
 /// `mickey run`: the roles `[this_pc]` asks for, in one process. The target
 /// waits for peers on its own thread; the source runs here.
 fn run_from_config() -> Result<(), String> {
@@ -355,7 +369,7 @@ fn run_from_config() -> Result<(), String> {
                 // Off: another clipboard manager keeps the history.
                 history: keeper
                     .clone()
-                    .filter(|_| config.clipboard.history)
+                    .filter(|_| keep_history(config.clipboard.history))
                     .map(history::record),
                 keeper,
             },
