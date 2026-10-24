@@ -196,7 +196,7 @@ fn keep_in_sight() {
         std::thread::sleep(std::time::Duration::from_secs(5));
         use std::os::windows::process::CommandExt;
         // CREATE_NO_WINDOW: no console flashing up.
-        let _ = std::process::Command::new("powershell")
+        let _ = std::process::Command::new(crate::autostart::system_tool("powershell.exe"))
             .args(["-NoProfile", "-Command", SCRIPT])
             .env("MICKEY_EXE", &exe)
             .creation_flags(0x0800_0000)
