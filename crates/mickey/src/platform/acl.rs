@@ -7,6 +7,7 @@ use std::ffi::c_void;
 use std::io;
 use std::os::windows::ffi::{OsStrExt, OsStringExt};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 const SE_FILE_OBJECT: u32 = 1;
 const OWNER_SECURITY_INFORMATION: u32 = 0x1;
@@ -95,6 +96,48 @@ unsafe extern "system" {
         length: u32,
         returned: *mut u32,
     ) -> i32;
+}
+
+#[link(name = "kernel32")]
+unsafe extern "system" {
+    fn SetProcessMitigationPolicy(policy: u32, buffer: *const c_void, length: usize) -> i32;
+}
+
+/// PROCESS_MITIGATION_POLICY's ProcessRedirectionTrustPolicy.
+const REDIRECTION_TRUST_POLICY: u32 = 16;
+/// Its EnforceRedirectionTrust flag.
+const ENFORCE_REDIRECTION_TRUST: u32 = 0x1;
+
+/// From now on this process does not follow junctions made by users
+/// without administrator rights: opening a path through one fails. Mickey
+/// run as administrator writes into the user's folders (its control file,
+/// received files, config.toml); without this, a program of the user
+/// could turn one of those folders into a junction to a system folder and
+/// have Mickey overwrite system files. An error where Windows is too old
+/// to know the policy.
+pub fn refuse_user_junctions() -> io::Result<()> {
+    let flags = ENFORCE_REDIRECTION_TRUST;
+    // SAFETY: the policy's buffer is one u32 of flags, and its size is
+    // given; Windows only reads it during the call.
+    let ok = unsafe {
+        SetProcessMitigationPolicy(
+            REDIRECTION_TRUST_POLICY,
+            (&raw const flags).cast(),
+            size_of::<u32>(),
+        )
+    };
+    if ok == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    JUNCTIONS_REFUSED.store(true, Ordering::Relaxed);
+    Ok(())
+}
+
+static JUNCTIONS_REFUSED: AtomicBool = AtomicBool::new(false);
+
+/// Whether `refuse_user_junctions` worked in this process.
+pub fn user_junctions_refused() -> bool {
+    JUNCTIONS_REFUSED.load(Ordering::Relaxed)
 }
 
 const TOKEN_QUERY: u32 = 0x0008;
@@ -302,6 +345,17 @@ mod tests {
                 super::admin_only(std::path::Path::new(path))
             );
         }
+    }
+
+    /// Run by hand on Windows, as administrator: `MICKEY_JUNCTION_FILE` is
+    /// a file path through a junction a user without administrator rights
+    /// made. Writing it must fail once the policy is on.
+    #[test]
+    #[ignore = "needs a junction made by a standard user; run by hand on Windows"]
+    fn a_user_junction_is_not_followed() {
+        let through = std::env::var("MICKEY_JUNCTION_FILE").unwrap();
+        println!("policy: {:?}", super::refuse_user_junctions());
+        println!("write: {:?}", std::fs::write(&through, "x"));
     }
 
     #[test]

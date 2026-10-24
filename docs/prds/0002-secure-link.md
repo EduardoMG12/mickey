@@ -216,3 +216,15 @@ impossible to brute-force.
   Mickey found running as administrator from a folder others can change
   (a task made before #247) makes its task again without administrator
   rights, starts it, and ends.
+- **As administrator, Mickey does not follow users' junctions.** It still
+  writes into the user's folders (`control.txt`, received files,
+  `config.toml`). A program without administrator rights can turn one of
+  those folders into a junction to a system folder (and, with an object
+  manager link, aim at a single file), and an administrator writing
+  through it overwrites system files. Every `mickey` running as
+  administrator turns on Windows' *redirection trust* policy first
+  (`SetProcessMitigationPolicy`), so opening a path through a junction a
+  standard user made fails. Checked on Windows 10 22H2 (build 19045):
+  without the policy an administrator wrote through such a junction;
+  with it, error 448. Where Windows cannot turn it on, the logon task is
+  made without administrator rights.

@@ -42,6 +42,14 @@ use mickey_config as config;
 use std::net::SocketAddr;
 
 fn main() {
+    // Before anything is written: as administrator, never through a
+    // junction a user made (see `refuse_user_junctions`).
+    #[cfg(windows)]
+    if platform::acl::elevated()
+        && let Err(err) = platform::acl::refuse_user_junctions()
+    {
+        eprintln!("mickey: cannot refuse users' junctions: {err}");
+    }
     let result = std::env::args_os()
         .skip(1)
         .map(|arg| {
@@ -283,9 +291,11 @@ fn run_from_config() -> Result<(), String> {
     // As administrator only where nobody else can change this Mickey: else
     // a program could have changed what it runs or trusts (#247).
     #[cfg(windows)]
-    if platform::acl::elevated() && !autostart::install_is_safe() {
+    if platform::acl::elevated()
+        && (!autostart::install_is_safe() || !platform::acl::user_junctions_refused())
+    {
         autostart::step_down()?;
-        return Err("Mickey ran as administrator from a folder other users can change; it starts again without administrator rights".into());
+        return Err("Mickey ran as administrator from a folder other users can change, or on a Windows too old to refuse their junctions; it starts again without administrator rights".into());
     }
     // Right after installing there is no config yet: with no peers, this PC
     // just waits to be controlled until some are added.
