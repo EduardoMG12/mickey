@@ -30,6 +30,21 @@ apps="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
 mkdir -p "$apps"
 sed "s|^Exec=mickey-ui|Exec=$bin/mickey-ui|" "$here/mickey-settings.desktop" > "$apps/mickey-settings.desktop"
 
+# Other PCs connect to this one on TCP 4242 and find it on UDP 4243. A
+# firewall that is on (firewalld on openSUSE and Fedora, ufw on Ubuntu
+# when enabled) would refuse them; Windows' installer opens the same two.
+if command -v firewall-cmd >/dev/null && sudo firewall-cmd --state >/dev/null 2>&1; then
+    echo "Letting other PCs reach Mickey through firewalld (TCP 4242, UDP 4243)"
+    for port in 4242/tcp 4243/udp; do
+        sudo firewall-cmd -q --permanent --add-port=$port
+        sudo firewall-cmd -q --add-port=$port
+    done
+elif command -v ufw >/dev/null && sudo ufw status 2>/dev/null | grep -q "Status: active"; then
+    echo "Letting other PCs reach Mickey through ufw (TCP 4242, UDP 4243)"
+    sudo ufw allow 4242/tcp comment Mickey >/dev/null
+    sudo ufw allow 4243/udp comment Mickey >/dev/null
+fi
+
 echo "Starting Mickey with your graphical session"
 mkdir -p "$units"
 install -m 644 "$here/mickey.service" "$units/mickey.service"
