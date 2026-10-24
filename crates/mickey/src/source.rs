@@ -784,7 +784,7 @@ pub fn run(
             Action::Ungrab => {
                 grabbed = None;
                 if let Focus::Remote(index) = left {
-                    report_latency(&mut peers[index]);
+                    report_latency(&peers[index]);
                 }
             }
         };
@@ -1321,10 +1321,10 @@ fn read_peer(index: usize, link: &Link, news: &Sender<(usize, News)>, start: Ins
     });
 }
 
-fn report_latency(peer: &mut Peer) {
+fn report_latency(peer: &Peer) {
     if let Some((p50, p99)) = peer.latency.percentiles() {
         println!(
-            "mickey: one-way latency to {} over {} pings: p50 {p50} µs, p99 {p99} µs",
+            "mickey: one-way latency to {} over the last {} pings: p50 {p50} µs, p99 {p99} µs",
             peer.name,
             peer.latency.len()
         );
