@@ -95,6 +95,25 @@ mod imp {
 
 /// A Windows tool by its full path, never one dropped next to
 /// `mickey.exe` (Windows looks in the program's folder first).
+/// Whether only administrators can change this Mickey (Windows; see
+/// `imp::install_is_safe`), so it may run as administrator.
+#[cfg(windows)]
+pub fn install_is_safe() -> bool {
+    imp::install_is_safe()
+}
+
+/// Mickey runs as administrator from a folder others can change (a logon
+/// task made before #247): its logon task is made again without
+/// administrator rights and started, for this one to end.
+#[cfg(windows)]
+pub fn step_down() -> Result<(), String> {
+    if !is_on() {
+        return Err("Mickey runs as administrator from a folder other users can change; run it without administrator rights, or install it with the installer".into());
+    }
+    imp::set(true)?;
+    run(system_tool("schtasks.exe"), &["/run", "/tn", "Mickey"])
+}
+
 #[cfg(windows)]
 pub fn system_tool(tool: &str) -> std::path::PathBuf {
     let root = std::env::var_os("SystemRoot").unwrap_or_else(|| "C:\\Windows".into());
@@ -159,17 +178,8 @@ mod imp {
             )
             .map_err(|err| format!("cannot write {}: {err}", script.display()))?;
         }
-        let ui = exe.with_file_name("mickey-ui.exe");
         let dir = exe.parent().ok_or("mickey.exe has no folder")?;
-        // Read from Windows directly: a program that runs PowerShell to
-        // read permissions, then makes an elevated logon task, looks like
-        // malware to Windows Defender, which flagged it.
-        let safe = in_program_files(dir)
-            && [dir, exe.as_path(), script.as_path(), ui.as_path()]
-                .iter()
-                .filter(|path| path.exists())
-                .all(|path| crate::platform::acl::admin_only(path).unwrap_or(false));
-        let level = if safe {
+        let level = if install_is_safe() {
             "highest"
         } else {
             eprintln!(
@@ -193,6 +203,27 @@ mod imp {
             system("powershell.exe"),
             &["-NoProfile", "-Command", ON_BATTERY],
         )
+    }
+
+    /// Whether only administrators can change this Mickey: its folder is
+    /// inside Program Files, and the folder and the files the logon task
+    /// runs are theirs alone. Read from Windows directly: a program that
+    /// runs PowerShell to read permissions, then makes an elevated logon
+    /// task, looks like malware to Windows Defender, which flagged it.
+    pub fn install_is_safe() -> bool {
+        let Ok(exe) = std::env::current_exe() else {
+            return false;
+        };
+        let Some(dir) = exe.parent() else {
+            return false;
+        };
+        let script = exe.with_file_name("start-hidden.vbs");
+        let ui = exe.with_file_name("mickey-ui.exe");
+        in_program_files(dir)
+            && [dir, exe.as_path(), script.as_path(), ui.as_path()]
+                .iter()
+                .filter(|path| path.exists())
+                .all(|path| crate::platform::acl::admin_only(path).unwrap_or(false))
     }
 
     /// Whether `dir` is inside Program Files, both with links and junctions

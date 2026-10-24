@@ -20,6 +20,46 @@ const FILE_NAME: &str = "trusted_peers";
 /// other sees at once.
 pub type Shared = std::sync::Arc<std::sync::Mutex<TrustedPeers>>;
 
+/// Where the list lives: the user's data folder, except on Windows when
+/// this Mickey may run as administrator (installed where only
+/// administrators can change it). Then it is `state` next to mickey.exe,
+/// which only administrators can change: in %APPDATA% any program of the
+/// user could add its own key, and the administrator Mickey would type
+/// what it sends into administrator windows. That list starts empty: one
+/// in %APPDATA% may already have been changed, so PCs pair again.
+pub fn dir() -> Result<PathBuf, String> {
+    #[cfg(windows)]
+    if let Some(state) = admin_state_dir() {
+        return Ok(state);
+    }
+    crate::identity::data_dir()
+}
+
+/// Whether this process may change the list itself; if not, the running
+/// Mickey does (`forget` through the control channel).
+pub fn can_change() -> bool {
+    #[cfg(windows)]
+    if admin_state_dir().is_some() && !crate::platform::acl::elevated() {
+        return false;
+    }
+    true
+}
+
+/// `state` next to mickey.exe, made by Mickey running as administrator,
+/// when only administrators can change this Mickey and that folder.
+#[cfg(windows)]
+fn admin_state_dir() -> Option<PathBuf> {
+    if !crate::autostart::install_is_safe() {
+        return None;
+    }
+    let state = std::env::current_exe().ok()?.with_file_name("state");
+    if crate::platform::acl::elevated() {
+        fs::create_dir_all(&state).ok()?;
+    }
+    let safe = crate::platform::acl::admin_only(&state).unwrap_or(false);
+    (state.is_dir() && safe).then_some(state)
+}
+
 /// Loads the list once, to share.
 pub fn shared(dir: &Path) -> Result<Shared, String> {
     Ok(std::sync::Arc::new(std::sync::Mutex::new(
@@ -279,6 +319,21 @@ pub fn from_hex(text: &str) -> Option<[u8; 32]> {
 
 #[cfg(test)]
 mod tests {
+    /// Run by hand on Windows, from a copy inside Program Files and from
+    /// one outside it, elevated and not: prints where the list lives.
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "depends on where the test runs from; run by hand on Windows"]
+    fn where_the_list_lives() {
+        println!(
+            "elevated {} | safe {} | dir {} | can change {}",
+            crate::platform::acl::elevated(),
+            crate::autostart::install_is_safe(),
+            super::dir().unwrap().display(),
+            super::can_change()
+        );
+    }
+
     use super::*;
 
     fn temp_dir(name: &str) -> PathBuf {

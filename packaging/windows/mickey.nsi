@@ -73,6 +73,8 @@ Section "Uninstall"
   Delete "$INSTDIR\mickey-ui.exe"
   Delete "$INSTDIR\start-hidden.vbs"
   Delete "$INSTDIR\uninstall.exe"
+  ; The trusted PCs of Mickey run as administrator (PRD 0002 Discoveries).
+  RMDir /r "$INSTDIR\state"
   RMDir "$INSTDIR"
   RMDir /r "$SMPROGRAMS\Mickey"
   DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Mickey"

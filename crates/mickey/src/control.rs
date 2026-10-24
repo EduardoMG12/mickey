@@ -57,6 +57,9 @@ pub enum Order {
     Record,
     /// Let a new PC ask to pair with this one, for a short while (#181).
     Pairing,
+    /// Stop trusting the PC with this fingerprint (`mickey forget`, when
+    /// only the running Mickey may change the list).
+    Forget(String),
     /// Add the PC at this address, found on the network, and pair with it.
     Connect {
         address: std::net::SocketAddr,
@@ -430,6 +433,9 @@ fn accept<T: From<Request>>(
                         .and_then(|id| id.parse().ok())
                         .map(Order::HistoryCopy),
                     Some(("go", name)) => Some(Order::Go(name.to_string())),
+                    Some(("forget", fingerprint)) => {
+                        Some(Order::Forget(fingerprint.trim().to_string()))
+                    }
                     Some(("connect", rest)) => rest.split_once(' ').and_then(|(address, name)| {
                         Some(Order::Connect {
                             address: address.parse().ok()?,
