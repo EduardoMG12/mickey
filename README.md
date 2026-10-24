@@ -278,4 +278,6 @@ Details: [CONTRIBUTING.md](CONTRIBUTING.md). Rules for AI assistants:
 
 ## License
 
-[GPL-3.0-or-later](LICENSE).
+[GPL-3.0-or-later](LICENSE). The releases also carry `THIRD-PARTY-LICENSES.txt`,
+the licenses of the crates built into Mickey
+([`tools/licenses`](tools/licenses/third_party_licenses.py) makes it).
