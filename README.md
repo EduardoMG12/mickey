@@ -253,8 +253,10 @@ open source by [SignPath.io](https://about.signpath.io), certificate by
 
 ## Build from source
 
-Needs [Rust](https://rustup.rs). On Linux you can build both; the Windows
-programs are cross-compiled:
+Needs [Rust](https://rustup.rs), and on Linux PulseAudio's headers for
+shared audio (`libpulse-dev` on Debian and Ubuntu, `pulseaudio-libs-devel`
+on Fedora; Arch's `libpulse` has them). On Linux you can build both; the
+Windows programs are cross-compiled:
 
 ```sh
 cargo build --release                                   # Linux: target/release/mickey and mickey-ui
