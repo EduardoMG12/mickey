@@ -214,6 +214,31 @@ Everything you type crosses the network, so:
 
 Found a problem? See [SECURITY.md](SECURITY.md).
 
+## Privacy
+
+Mickey sends nothing to the internet and has no telemetry, accounts or
+update checks. It talks only to the other PCs on your network that run
+Mickey: it announces this PC's name and key so they can find it, and,
+once you pair them, sends them your keyboard and mouse while they have
+the focus and your clipboard when it moves there, all encrypted. Typed
+keys are never logged or written to disk. Clipboard history and received
+files stay on your PCs.
+
+## Code signing policy
+
+The Windows releases are meant to be signed (free code signing for
+open source by [SignPath.io](https://about.signpath.io), certificate by
+[SignPath Foundation](https://signpath.org)); until then they are not.
+
+- **Who builds:** only the release workflow
+  ([`.github/workflows/release.yml`](.github/workflows/release.yml)),
+  from a version tag on `main`, with `Cargo.lock`.
+- **Who reviews:** every change reaches `main` through a pull request;
+  pull requests from contributors are reviewed by the maintainer.
+- **Who approves a release:** the maintainer,
+  [@EduardoMG12](https://github.com/EduardoMG12), who also approves each
+  signing request.
+
 ## Build from source
 
 Needs [Rust](https://rustup.rs). On Linux you can build both; the Windows
