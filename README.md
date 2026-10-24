@@ -182,6 +182,13 @@ windowrulev2 = pin, class:^(mickey-ui)$
   Windows to the same layout as your keyboard (e.g. ABNT2).
 - If something goes wrong while your keyboard is on Windows, the hotkey
   still works; if Mickey itself dies, Linux gets the keyboard back at once.
+- **No tray icon on stock GNOME** (Debian, Fedora Workstation): GNOME has
+  no area for status icons of its own. Ubuntu ships the *AppIndicator and
+  KStatusNotifierItem Support* extension switched on; elsewhere install
+  `gnome-shell-extension-appindicator` (Debian and Fedora name it the same),
+  turn it on in *Extensions* and log in again. Mickey works without it:
+  `mickey status` says where the keyboard is, and `mickey settings` opens
+  the settings window.
 
 ## Security
 
