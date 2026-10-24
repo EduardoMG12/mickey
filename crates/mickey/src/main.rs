@@ -1,5 +1,8 @@
 //! Mickey: one keyboard and mouse shared across computers on the LAN.
 
+// Not used yet: the audio streams use it from Audio 6 (#270) on.
+#[allow(dead_code)]
+mod audio_wire;
 mod autostart;
 #[cfg(target_os = "linux")]
 mod capture;
