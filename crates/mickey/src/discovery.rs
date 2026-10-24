@@ -9,6 +9,11 @@
 //! adapter first in line, found on the owner's Windows PC), and then only
 //! one side would hear the other.
 //!
+//! Each announcement goes to every local network's own broadcast address
+//! as well as to 255.255.255.255: Linux sends that one only through the
+//! default route's network, so a PC on two networks (Ethernet and Wi-Fi,
+//! or a VM bridge) was heard on one only (#217).
+//!
 //! ```text
 //! "MKY1" | port: u16 | public key: 32 bytes | name length: u8 | name
 //! ```
@@ -140,8 +145,11 @@ pub fn start(me: Announce) -> Result<Table, String> {
     let answer = packet.clone();
     thread::spawn(move || {
         loop {
-            // A network that is down now may be up in a moment: keep trying.
-            let _ = sender.send_to(&packet, (Ipv4Addr::BROADCAST, PORT));
+            // A network that is down now may be up in a moment: keep
+            // trying, and look at the networks again every time.
+            for to in targets() {
+                let _ = sender.send_to(&packet, (to, PORT));
+            }
             thread::sleep(EVERY);
         }
     });
@@ -176,6 +184,57 @@ pub fn start(me: Announce) -> Result<Table, String> {
         }
     });
     Ok(table)
+}
+
+/// Where to announce: each local network's broadcast address, then the
+/// limited broadcast as before.
+fn targets() -> Vec<Ipv4Addr> {
+    let mut all = networks();
+    all.push(Ipv4Addr::BROADCAST);
+    all
+}
+
+#[cfg(target_os = "linux")]
+fn networks() -> Vec<Ipv4Addr> {
+    std::fs::read_to_string("/proc/net/route")
+        .map(|table| broadcasts(&table))
+        .unwrap_or_default()
+}
+
+/// Windows: the limited broadcast only, for now (not yet checked there).
+#[cfg(not(target_os = "linux"))]
+fn networks() -> Vec<Ipv4Addr> {
+    Vec::new()
+}
+
+/// The broadcast address of each network this PC sits on, from the text
+/// of `/proc/net/route`: every route that is up and reaches a network
+/// directly, leaving out the default route (mask 0), routes to a single
+/// host (mask all ones) and routes through a gateway (another network,
+/// whose routers drop broadcasts anyway).
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn broadcasts(table: &str) -> Vec<Ipv4Addr> {
+    const UP: u32 = 0x1;
+    const GATEWAY: u32 = 0x2;
+    let mut found = Vec::new();
+    for line in table.lines().skip(1) {
+        let fields: Vec<&str> = line.split_whitespace().collect();
+        let hex = |at: usize| fields.get(at).and_then(|f| u32::from_str_radix(f, 16).ok());
+        let (Some(network), Some(flags), Some(mask)) = (hex(1), hex(3), hex(7)) else {
+            continue;
+        };
+        if flags & UP == 0 || flags & GATEWAY != 0 || mask == 0 || mask == u32::MAX {
+            continue;
+        }
+        // The kernel prints an address as its four bytes read as one
+        // number in this machine's byte order; `|` and `!` work byte by
+        // byte, so the bytes come out right on any machine.
+        let broadcast = Ipv4Addr::from((network | !mask).to_ne_bytes());
+        if !broadcast.is_loopback() && !found.contains(&broadcast) {
+            found.push(broadcast);
+        }
+    }
+    found
 }
 
 #[cfg(test)]
@@ -236,6 +295,46 @@ mod tests {
             ..laptop()
         };
         assert_eq!(Announce::decode(&tab.encode()), None);
+    }
+
+    /// A `/proc/net/route` line, the way the kernel writes it.
+    fn route(iface: &str, network: [u8; 4], flags: u32, mask: [u8; 4]) -> String {
+        let hex = |bytes: [u8; 4]| format!("{:08X}", u32::from_ne_bytes(bytes));
+        format!(
+            "{iface}\t{}\t00000000\t{flags:04X}\t0\t0\t100\t{}\t0\t0\t0",
+            hex(network),
+            hex(mask)
+        )
+    }
+
+    #[test]
+    fn every_network_gets_its_own_broadcast() {
+        let table = [
+            "Iface\tDestination\tGateway\tFlags\tRefCnt\tUse\tMetric\tMask\tMTU\tWindow\tIRTT"
+                .to_string(),
+            // The default route, through a NAT network: left out.
+            route("enp0s2", [0, 0, 0, 0], 0x3, [0, 0, 0, 0]),
+            route("enp0s2", [10, 0, 2, 0], 0x1, [255, 255, 255, 0]),
+            // The shared LAN, not the default route: the one #217 missed.
+            route("enp0s1", [192, 0, 2, 0], 0x1, [255, 255, 255, 0]),
+            route("br0", [198, 51, 100, 0], 0x1, [255, 255, 254, 0]),
+            // A host route, a route through a gateway and one that is down.
+            route("enp0s1", [192, 0, 2, 9], 0x1, [255, 255, 255, 255]),
+            route("tun0", [203, 0, 113, 0], 0x3, [255, 255, 255, 0]),
+            route("enp0s3", [172, 16, 0, 0], 0x0, [255, 255, 0, 0]),
+            // The same network twice, and a line that is not one.
+            route("enp0s1", [192, 0, 2, 0], 0x1, [255, 255, 255, 0]),
+            "garbage".to_string(),
+        ]
+        .join("\n");
+        assert_eq!(
+            broadcasts(&table),
+            [
+                Ipv4Addr::new(10, 0, 2, 255),
+                Ipv4Addr::new(192, 0, 2, 255),
+                Ipv4Addr::new(198, 51, 101, 255),
+            ]
+        );
     }
 
     #[test]
