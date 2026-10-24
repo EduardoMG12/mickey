@@ -29,6 +29,14 @@ echo "Adding 'Mickey settings' to your applications menu"
 apps="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
 mkdir -p "$apps"
 sed "s|^Exec=mickey-ui|Exec=$bin/mickey-ui|" "$here/mickey-settings.desktop" > "$apps/mickey-settings.desktop"
+# Ratão as the icon. On Wayland a taskbar finds a window's icon through a
+# .desktop file named after the window's app id: one per window, hidden
+# from the menu, so the switcher, history and pairing windows show it too.
+install -D -m 644 "$here/mickey.png" "${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor/256x256/apps/mickey.png"
+for window in mickey-ui:switcher mickey-history:history mickey-pair:pairing; do
+    printf '[Desktop Entry]\nType=Application\nName=Mickey %s\nExec=%s/mickey-ui\nIcon=mickey\nNoDisplay=true\n' \
+        "${window#*:}" "$bin" > "$apps/${window%%:*}.desktop"
+done
 
 # Other PCs connect to this one on TCP 4242 and find it on UDP 4243. A
 # firewall that is on (firewalld on openSUSE and Fedora, ufw on Ubuntu
