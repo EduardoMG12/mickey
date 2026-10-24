@@ -35,6 +35,10 @@ mod protocol;
 mod received;
 mod record;
 mod secure;
+// Not used yet: the audio streams use it from Audio 6 (#270) on.
+#[cfg(target_os = "linux")]
+#[allow(dead_code)]
+mod sound;
 mod source;
 #[cfg(target_os = "linux")]
 mod speakers;
