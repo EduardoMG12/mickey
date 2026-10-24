@@ -6,6 +6,10 @@ units="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 systemctl --user disable --now mickey.service 2>/dev/null || true
 rm -f "$units/mickey.service" "$HOME/.local/bin/mickey" "$HOME/.local/bin/mickey-ui" \
     "${XDG_DATA_HOME:-$HOME/.local/share}/applications/mickey-settings.desktop" \
+    "${XDG_DATA_HOME:-$HOME/.local/share}/applications/mickey-ui.desktop" \
+    "${XDG_DATA_HOME:-$HOME/.local/share}/applications/mickey-history.desktop" \
+    "${XDG_DATA_HOME:-$HOME/.local/share}/applications/mickey-pair.desktop" \
+    "${XDG_DATA_HOME:-$HOME/.local/share}/icons/hicolor/256x256/apps/mickey.png" \
     "${XDG_CONFIG_HOME:-$HOME/.config}/autostart/mickey.desktop"
 systemctl --user daemon-reload
 echo "Removing the udev rule (needs sudo); you stay in the input group."
