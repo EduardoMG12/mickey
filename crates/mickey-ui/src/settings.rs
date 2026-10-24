@@ -181,6 +181,9 @@ pub struct Settings {
     /// What the running Mickey said about the PCs; `Err` says why not.
     peers: Result<Peers, String>,
     asked: Instant,
+    /// The PC being paired from the Connect button, and since when: once it
+    /// is online, the Layout tab opens to place it (#119).
+    pairing: Option<(String, Instant)>,
     drag: layout::Drag,
     tab: Tab,
     message: String,
@@ -283,6 +286,7 @@ impl Settings {
             fingerprint: ask_mickey(&["id"]).unwrap_or_else(|_| "(run `mickey id`)".into()),
             peers: load_peers(),
             asked: Instant::now(),
+            pairing: None,
             drag: layout::Drag::default(),
             tab: Tab::ThisPc,
             mascot: None,
@@ -320,10 +324,35 @@ impl Settings {
                 self.message = "config.toml changed elsewhere; Save would replace it.".into();
             }
         }
-        if self.asked.elapsed() > Duration::from_secs(5) {
+        // Every second while a pairing is on, so the Layout tab opens soon
+        // after the owner accepts; every 5 s otherwise.
+        let every = if self.pairing.is_some() { 1 } else { 5 };
+        if self.asked.elapsed() > Duration::from_secs(every) {
             self.peers = load_peers();
             self.nearby = load_nearby();
             self.asked = Instant::now();
+            self.follow_pairing();
+        }
+    }
+
+    /// Opens the Layout tab once the PC being paired is online; gives up
+    /// after the two minutes a pairing stays open.
+    fn follow_pairing(&mut self) {
+        let Some((name, since)) = &self.pairing else {
+            return;
+        };
+        let online = self.peers.as_ref().is_ok_and(|peers| {
+            peers
+                .peers
+                .iter()
+                .any(|peer| peer.name == *name && peer.online)
+        });
+        if online {
+            self.message = format!("Paired with {name}. Place it next to this PC's screens.");
+            self.tab = Tab::Layout;
+            self.pairing = None;
+        } else if since.elapsed() > Duration::from_secs(120) {
+            self.pairing = None;
         }
     }
 
@@ -411,6 +440,14 @@ fn parse_nearby(text: &str) -> Vec<Nearby> {
             })
         })
         .collect()
+}
+
+/// The PC named in `mickey connect`'s answer (its `mickey: ` already
+/// taken off), when a pairing started.
+fn pairing_with(answer: &str) -> Option<String> {
+    let rest = answer.strip_prefix("pairing with ")?;
+    let (name, _) = rest.split_once(": ")?;
+    Some(name.to_string())
 }
 
 fn load_peers() -> Result<Peers, String> {
@@ -584,7 +621,13 @@ impl eframe::App for Settings {
                     });
                     if let Some((address, name)) = connect {
                         self.message = match ask_mickey(&["connect", &address, &name]) {
-                            Ok(answer) => answer.trim().trim_start_matches("mickey: ").to_string(),
+                            Ok(answer) => {
+                                let answer = answer.trim().trim_start_matches("mickey: ").to_string();
+                                // "pairing with <name>: check …": Mickey may have
+                                // named it differently from the list.
+                                self.pairing = pairing_with(&answer).map(|name| (name, Instant::now()));
+                                answer
+                            }
                             Err(err) => format!("Could not connect: {err}"),
                         };
                     }
@@ -900,6 +943,19 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn the_pairing_pc_is_read_from_mickeys_answer() {
+        // What `mickey connect` prints, without its "mickey: ".
+        assert_eq!(
+            pairing_with("pairing with Desk PC: check that both PCs show the same code").as_deref(),
+            Some("Desk PC")
+        );
+        assert_eq!(
+            pairing_with("192.0.2.10:4242 is already one of this PC's PCs"),
+            None
+        );
+    }
 
     #[test]
     fn what_the_form_writes_parses_back_to_the_same_form() {
