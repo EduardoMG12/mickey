@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Mickey
+Comment=Starts Mickey on desktops that do not start systemd's graphical session (Cinnamon, MATE, XFCE)
+# GNOME, KDE and others start graphical-session.target, which starts
+# mickey.service: nothing to do there. Elsewhere, hand the session's
+# display to the user's systemd and (re)start Mickey with it.
+Exec=sh -c "systemctl --user is-active -q graphical-session.target || { systemctl --user import-environment DISPLAY XAUTHORITY WAYLAND_DISPLAY XDG_CURRENT_DESKTOP XDG_SESSION_TYPE; systemctl --user restart mickey.service; }"
+NoDisplay=true
+X-GNOME-Autostart-enabled=true

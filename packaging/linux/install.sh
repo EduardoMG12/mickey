@@ -35,15 +35,22 @@ mkdir -p "$units"
 install -m 644 "$here/mickey.service" "$units/mickey.service"
 systemctl --user daemon-reload
 systemctl --user enable mickey.service
+# Some desktops (Cinnamon, MATE, XFCE) never start graphical-session.target,
+# so the service above would not start: this login entry starts it there.
+autostart="${XDG_CONFIG_HOME:-$HOME/.config}/autostart"
+mkdir -p "$autostart"
+install -m 644 "$here/mickey-autostart.desktop" "$autostart/mickey.desktop"
 
 if [ "${relogin:-0}" = 1 ]; then
     echo
-    echo "Done. Log out and back in once (you were added to the input group);"
+    # Logging out is often not enough: the user's systemd outlives the
+    # session and keeps the old groups.
+    echo "Done. Restart this PC once (you were added to the input group);"
     echo "Mickey then starts by itself."
 else
     systemctl --user restart mickey.service
     echo
     echo "Done. Mickey is running: systemctl --user status mickey"
 fi
-echo "Add your other PCs to ~/.config/mickey/config.toml (see the README)."
-echo "To pair a new PC, run 'mickey run' in a terminal once: it asks there."
+echo "Then open 'Mickey settings' from your applications to name this PC"
+echo "and connect your other PCs (PCs tab)."
