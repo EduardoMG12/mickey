@@ -115,6 +115,15 @@ speakers stay silent the whole time.
   therefore removes every module that made a `mickey` sink when it starts,
   and sets the real default back, whatever happened before (like the
   input grab: never leave the owner without sound).
+- **Voicemeeter works as it is.** On the owner's Windows PC the default
+  output is Voicemeeter Banana's virtual input ("VoiceMeeter Input"),
+  which Voicemeeter mixes out to the real headphones and speakers. Loopback
+  capture of it gets the apps' sound (RMS 0.0353, the same muted), and
+  muting it silenced the headphones: a tone heard, muted, then heard again
+  by the owner. (Voicemeeter drives the hardware its own way, so loopback
+  of the physical outputs sees nothing: only an ear can check them.) The
+  listener's sound plays into the default output too, so it follows the
+  owner's Voicemeeter routing.
 - **On Linux, muting is not the way, unlike Windows.** A sink's monitor
   follows its mute and volume on PipeWire (tone at 0.21 RMS: muted 0.0,
   volume 0 0.0), so the null sink stays: Mickey cannot mute the speakers
