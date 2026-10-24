@@ -55,6 +55,10 @@ pub fn answer(
 /// for, once: the source asks right after the switch.
 const ASK_WINDOW: std::time::Duration = std::time::Duration::from_secs(5);
 
+/// How long a peer may stay silent while answering `Ask`. Per read: a big
+/// answer still arriving is not cut short.
+const ANSWER_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
+
 /// When a source may read this PC's clipboard (#185): once, within
 /// `ASK_WINDOW` after its keyboard left this PC, never at any other time,
 /// so a paired PC cannot poll it for copied passwords.
@@ -157,6 +161,13 @@ impl Mover {
             for job in todo {
                 match job {
                     Job::Link(peer, mut link) => {
+                        // A peer that goes silent mid-answer (lid closed,
+                        // Wi-Fi gone) must not hold this one thread, and
+                        // every clipboard after it, for good: a read waits
+                        // this long, then the link is dropped.
+                        if link.set_read_timeout(Some(ANSWER_WAIT)).is_err() {
+                            continue;
+                        }
                         if map.as_ref().is_none_or(|map| link.send_bulk(map).is_ok()) {
                             links.insert(peer, link);
                         }
