@@ -35,6 +35,9 @@ Section "Mickey"
   File "${BIN}\mickey.exe"
   File "${BIN}\mickey-ui.exe"
   File "start-hidden.vbs"
+  ; Mickey's license, and the notices of the crates built into it.
+  File "${BIN}\LICENSE.txt"
+  File "${BIN}\THIRD-PARTY-LICENSES.txt"
 
   ; Start at login, hidden (mickey.exe is a console program), and with the
   ; highest privileges: Windows refuses injected input in windows running as
@@ -72,6 +75,8 @@ Section "Uninstall"
   Delete "$INSTDIR\mickey.exe"
   Delete "$INSTDIR\mickey-ui.exe"
   Delete "$INSTDIR\start-hidden.vbs"
+  Delete "$INSTDIR\LICENSE.txt"
+  Delete "$INSTDIR\THIRD-PARTY-LICENSES.txt"
   Delete "$INSTDIR\uninstall.exe"
   ; The trusted PCs of Mickey run as administrator (PRD 0002 Discoveries).
   RMDir /r "$INSTDIR\state"

@@ -23,7 +23,7 @@ jobs:
     container: ubuntu:22.04
     steps:
       - name: Tools the container lacks
-        run: apt-get update -qq && apt-get install -y -qq curl ca-certificates build-essential git binutils >/dev/null
+        run: apt-get update -qq && apt-get install -y -qq curl ca-certificates build-essential git binutils python3 >/dev/null
       - uses: actions/checkout@v4
       - name: Install Rust
         run: |
@@ -45,6 +45,8 @@ jobs:
           mkdir "$dir"
           cp target/release/mickey target/release/mickey-ui "$dir/"
           cp packaging/linux/* README.md LICENSE "$dir/"
+          # The crates' own notices travel with the binaries.
+          python3 tools/licenses/third_party_licenses.py x86_64-unknown-linux-gnu > "$dir/THIRD-PARTY-LICENSES.txt"
           tar czf "$dir.tar.gz" "$dir"
       - uses: actions/upload-artifact@v4
         with:
@@ -65,6 +67,9 @@ jobs:
         run: |
           version="${GITHUB_REF_NAME#v}"
           case "$GITHUB_REF" in refs/tags/*) ;; *) version=0.0.0-test ;; esac
+          # Installed next to the programs (see mickey.nsi).
+          cp LICENSE target/release/LICENSE.txt
+          python tools/licenses/third_party_licenses.py x86_64-pc-windows-msvc > target/release/THIRD-PARTY-LICENSES.txt
           "/c/Program Files (x86)/NSIS/makensis.exe" -DVERSION="$version" \
             -DBIN="$GITHUB_WORKSPACE\\target\\release" packaging/windows/mickey.nsi
           mv packaging/windows/Mickey-Setup-*.exe .
