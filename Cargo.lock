@@ -1573,6 +1573,7 @@ dependencies = [
  "snow",
  "wayland-client",
  "wayland-protocols-wlr",
+ "zbus",
 ]
 
 [[package]]
