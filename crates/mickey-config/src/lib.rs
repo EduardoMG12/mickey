@@ -189,7 +189,6 @@ pub struct Clipboard {
     pub history: Option<bool>,
 }
 
-
 fn default_switcher_position() -> String {
     "bottom-right".into()
 }
