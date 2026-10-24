@@ -52,7 +52,7 @@ impl Clipboard {
         {
             return Some(Content::Files(paths));
         }
-        if let Ok(text) = self.0.get_text() {
+        if let Some(text) = text(&mut self.0) {
             return Some(Content::Text(text));
         }
         let image = self.0.get_image().ok()?;
@@ -104,7 +104,7 @@ impl Keeper {
                         let _ = answer.send(board.read());
                     }
                     Job::ReadText(answer) => {
-                        let _ = answer.send(board.0.get_text().ok());
+                        let _ = answer.send(text(&mut board.0));
                     }
                     Job::Write(content) => {
                         if let Err(err) = board.write(&content) {
@@ -136,8 +136,75 @@ impl Keeper {
     }
 }
 
+/// The copied text: from GPaste on GNOME Wayland when it runs, else
+/// through `arboard`.
+fn text(board: &mut arboard::Clipboard) -> Option<String> {
+    #[cfg(target_os = "linux")]
+    if let Some(text) = gpaste::latest() {
+        return Some(text);
+    }
+    board.get_text().ok()
+}
+
+/// GNOME on Wayland lets no program read the clipboard in the background:
+/// `arboard` only sees what X11 apps copy. GPaste, with its GNOME Shell
+/// extension, does follow it, and hands out its latest copy over D-Bus
+/// (#258). Asked only on GNOME Wayland, and only while GPaste runs (never
+/// started by asking).
+#[cfg(target_os = "linux")]
+mod gpaste {
+    use std::sync::OnceLock;
+    use zbus::blocking::{Connection, fdo::DBusProxy};
+
+    const NAME: &str = "org.gnome.GPaste";
+
+    /// The session bus, opened once, on GNOME Wayland only.
+    fn bus() -> Option<&'static Connection> {
+        static BUS: OnceLock<Option<Connection>> = OnceLock::new();
+        BUS.get_or_init(|| {
+            let gnome = std::env::var("XDG_CURRENT_DESKTOP")
+                .is_ok_and(|desktop| desktop.split(':').any(|part| part == "GNOME"));
+            let wayland = std::env::var_os("WAYLAND_DISPLAY").is_some();
+            (gnome && wayland).then(Connection::session)?.ok()
+        })
+        .as_ref()
+    }
+
+    /// GPaste's newest copy, if GPaste runs and has one.
+    pub fn latest() -> Option<String> {
+        let bus = bus()?;
+        let running = DBusProxy::new(bus)
+            .ok()?
+            .name_has_owner(NAME.try_into().ok()?)
+            .ok()?;
+        if !running {
+            return None;
+        }
+        let reply = bus
+            .call_method(
+                Some(NAME),
+                "/org/gnome/GPaste",
+                Some("org.gnome.GPaste2"),
+                "GetElementAtIndex",
+                &(0u64,),
+            )
+            .ok()?;
+        // (uuid, text)
+        let (_, text): (String, String) = reply.body().deserialize().ok()?;
+        Some(text)
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    /// Run by hand on GNOME Wayland with GPaste: prints its newest copy.
+    #[cfg(target_os = "linux")]
+    #[test]
+    #[ignore = "needs a GNOME Wayland session with GPaste"]
+    fn gpaste_hands_out_its_newest_copy() {
+        println!("gpaste: {:?}", super::gpaste::latest());
+    }
+
     use super::*;
 
     #[test]

@@ -32,3 +32,7 @@ ksni = { version = "0.3", default-features = false, features = ["blocking", "asy
 # already in the tree through arboard.
 wayland-client = "0.31"
 wayland-protocols-wlr = { version = "0.3", features = ["client"] }
+# Reading the clipboard through GPaste on GNOME Wayland (#258), over the
+# session D-Bus. Already in the tree through ksni; this adds only its
+# blocking API.
+zbus = { version = "5", default-features = false, features = ["async-io", "blocking-api"] }
