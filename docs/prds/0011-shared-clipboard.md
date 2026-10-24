@@ -57,7 +57,7 @@ recent copies.
 - [x] Text and images synced when the keyboard crosses (big ones on paste: not yet, see *Discoveries*).
 - [x] History window (this PC's copies, including what arrived from others).
 - [x] Files (up to 60 MB per crossing, no folders yet).
-- [ ] Option to leave the history to an existing manager.
+- [x] Option to leave the history to an existing manager (`[clipboard] history = false`, #134).
 
 ## Non-Goals
 
@@ -90,3 +90,8 @@ recent copies.
 - **The history is this PC's**: it includes what arrived from other PCs,
   but not copies made on another PC that never crossed. Showing the other
   PCs' histories is left for later.
+- **Leaving the history to another manager** (2026-10-24, #134):
+  `[clipboard] history = false`, or the checkbox in the settings window's
+  General tab, starts no history recorder; the clipboard is still shared,
+  and what Mickey writes reaches cliphist, CopyQ or Klipper, which watch
+  the clipboard themselves. `mickey history` then says the history is off.

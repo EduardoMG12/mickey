@@ -52,6 +52,8 @@ pub struct Config {
     #[serde(default)]
     pub interface: Interface,
     #[serde(default)]
+    pub clipboard: Clipboard,
+    #[serde(default)]
     pub this_pc: ThisPc,
 }
 
@@ -173,6 +175,23 @@ pub const SWITCHER_POSITIONS: [&str; 5] = [
     "bottom-left",
     "bottom-right",
 ];
+
+/// `[clipboard]`.
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct Clipboard {
+    /// Keep a history of the copies on this PC. `false` leaves it to
+    /// another clipboard manager (cliphist, CopyQ, Klipper): the clipboard
+    /// is still shared, and what Mickey puts in it reaches that manager.
+    #[serde(default = "yes")]
+    pub history: bool,
+}
+
+impl Default for Clipboard {
+    fn default() -> Clipboard {
+        Clipboard { history: true }
+    }
+}
 
 fn default_switcher_position() -> String {
     "bottom-right".into()
@@ -755,8 +774,20 @@ mod tests {
                 touchpad: Touchpad::default(),
                 hotkeys: Hotkeys::default(),
                 interface: Interface::default(),
+                clipboard: Clipboard::default(),
                 this_pc: ThisPc::default(),
             }
+        );
+        assert!(parse("").unwrap().clipboard.history, "on unless turned off");
+    }
+
+    #[test]
+    fn the_history_can_be_left_to_another_manager() {
+        let config = parse("[clipboard]\nhistory = false\n").unwrap();
+        assert!(!config.clipboard.history);
+        assert!(
+            parse("[clipboard]\nhistroy = false\n").is_err(),
+            "a typo is an error"
         );
     }
 
