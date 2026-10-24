@@ -767,7 +767,12 @@ pub fn run(
                 }
             }
             let remote = matches!(switcher.focus(), Focus::Remote(_));
-            next_ping = now + if bench && remote { BENCH_PING_EVERY } else { PING_EVERY };
+            next_ping = now
+                + if bench && remote {
+                    BENCH_PING_EVERY
+                } else {
+                    PING_EVERY
+                };
         }
 
         // Sleep until something wakes us or the next ping is due; poll often
