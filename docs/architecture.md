@@ -164,7 +164,7 @@ sequenceDiagram
     Dev->>Cap: evdev event, or a hook callback on Windows
     Cap->>Main: Wake Input, Key code 30 pressed
     Main->>Main: Switcher handle, then Hotkey feed
-    Note over Main: a hotkey's last key is held back here; modifiers go on at once
+    Note over Main: the last key of a hotkey is held back here, modifiers go on at once
     Main->>Link: send Message Input Key
     Link->>Link: protocol encode, Noise seal, 16-byte tag
     Link->>Serve: 2-byte length and ciphertext over TCP
