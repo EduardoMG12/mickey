@@ -179,7 +179,13 @@ mod imp {
             .map_err(|err| format!("cannot write {}: {err}", script.display()))?;
         }
         let dir = exe.parent().ok_or("mickey.exe has no folder")?;
-        let level = if install_is_safe() {
+        // As administrator, Mickey also needs Windows to refuse users'
+        // junctions (main turned that on); a process without those rights
+        // fails to make a "highest" task anyway, and asks again as one.
+        let elevated = crate::platform::acl::elevated();
+        let level = if install_is_safe()
+            && (!elevated || crate::platform::acl::user_junctions_refused())
+        {
             "highest"
         } else {
             eprintln!(
