@@ -36,11 +36,11 @@ mod received;
 mod record;
 mod secure;
 // Not used yet: the audio streams use it from Audio 6 (#270) on.
-#[cfg(target_os = "linux")]
 #[allow(dead_code)]
 mod sound;
 mod source;
-#[cfg(target_os = "linux")]
+// `divert` is used once streams start (#270); `clean_up` already is.
+#[allow(dead_code)]
 mod speakers;
 mod transport;
 mod tray;
@@ -318,17 +318,15 @@ fn keep_history(setting: Option<bool>) -> bool {
 /// waits for peers on its own thread; the source runs here.
 fn run_from_config() -> Result<(), String> {
     // The sound back on the speakers first, if a Mickey before this one
-    // ended while sending it (PRD 0012); and on a stop signal from now on.
-    #[cfg(target_os = "linux")]
-    {
-        if let Err(err) = speakers::clean_up() {
-            eprintln!("mickey: {err}");
-        }
-        platform::signals::on_stop(|| {
-            let _ = speakers::clean_up();
-        })
-        .map_err(|err| format!("cannot wait for stop signals: {err}"))?;
+    // ended while sending it (PRD 0012); on Linux, on a stop signal too.
+    if let Err(err) = speakers::clean_up() {
+        eprintln!("mickey: {err}");
     }
+    #[cfg(target_os = "linux")]
+    platform::signals::on_stop(|| {
+        let _ = speakers::clean_up();
+    })
+    .map_err(|err| format!("cannot wait for stop signals: {err}"))?;
     // As administrator only where nobody else can change this Mickey: else
     // a program could have changed what it runs or trusts (#247).
     #[cfg(windows)]

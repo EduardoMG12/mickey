@@ -1,13 +1,12 @@
-//! Recording what this PC plays, and playing what another PC sends (PRD
-//! 0012), in the datagrams' unit: 5 ms of 48 kHz stereo 16-bit PCM.
-//!
 //! Linux: libpulse's blocking ("simple") API, which PipeWire also answers.
-//! A `Recorder` reads `mickey.monitor` (the silent sink `speakers.rs` made
-//! the default) or, when this PC keeps its sound too, the default output's
-//! monitor. A `Player` is one stream per sending PC, named after it, so the
-//! system's own volume control shows each one; its writes block while the
-//! sound card's buffer is full, which is what paces the jitter buffer.
+//! A `Recorder` reads the default output's monitor: `mickey.monitor` once
+//! `speakers` made the silent sink the default (so divert first), or the
+//! speakers' own when this PC keeps its sound too. A `Player` is one stream
+//! per sending PC, named after it, so the system's own volume control shows
+//! each one; its writes block while the sound card's buffer is full, which
+//! is what paces the jitter buffer.
 
+use super::at_volume;
 use crate::audio_wire::{CHANNELS, PCM_BYTES, RATE};
 use libpulse_binding::def::BufferAttr;
 use libpulse_binding::sample::{Format, Spec};
@@ -15,7 +14,7 @@ use libpulse_binding::stream::Direction;
 use libpulse_simple_binding::Simple;
 
 /// The default output's monitor, whatever the default is.
-pub const DEFAULT_MONITOR: &str = "@DEFAULT_MONITOR@";
+const DEFAULT_MONITOR: &str = "@DEFAULT_MONITOR@";
 /// How much the player keeps queued for the sound card: 20 ms, enough to
 /// ride over a late wake-up, little enough not to be heard as delay.
 const PLAY_AHEAD: u32 = 4 * PCM_BYTES as u32;
@@ -43,9 +42,9 @@ fn attr(play_ahead: u32, fragment: u32) -> BufferAttr {
 pub struct Recorder(Simple);
 
 impl Recorder {
-    /// Records `source`: `mickey.monitor` while sending only, or
-    /// `DEFAULT_MONITOR` while this PC keeps its sound too.
-    pub fn open(source: &str) -> Result<Recorder, String> {
+    /// Records what the default output plays.
+    pub fn open() -> Result<Recorder, String> {
+        let source = DEFAULT_MONITOR;
         Simple::new(
             None,
             "Mickey",
@@ -99,55 +98,10 @@ impl Player {
     }
 }
 
-/// `pcm` with every sample scaled by `volume` (0.0 to 1.0): each PC's own
-/// volume, applied here so it is the same on Linux and Windows.
-pub fn at_volume(pcm: &[u8; PCM_BYTES], volume: f32) -> [u8; PCM_BYTES] {
-    let volume = volume.clamp(0.0, 1.0);
-    let mut out = [0u8; PCM_BYTES];
-    for (from, to) in pcm
-        .as_chunks::<2>()
-        .0
-        .iter()
-        .zip(out.as_chunks_mut::<2>().0)
-    {
-        let sample = i16::from_le_bytes(*from);
-        let scaled = (f32::from(sample) * volume).round() as i16;
-        to.copy_from_slice(&scaled.to_le_bytes());
-    }
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn samples(pcm: &[u8; PCM_BYTES]) -> Vec<i16> {
-        pcm.as_chunks::<2>()
-            .0
-            .iter()
-            .map(|b| i16::from_le_bytes(*b))
-            .collect()
-    }
-
-    #[test]
-    fn volume_scales_every_sample() {
-        let mut pcm = [0u8; PCM_BYTES];
-        for (i, chunk) in pcm.as_chunks_mut::<2>().0.iter_mut().enumerate() {
-            let sample: i16 = if i % 2 == 0 { 20_000 } else { -32_768 };
-            chunk.copy_from_slice(&sample.to_le_bytes());
-        }
-        assert_eq!(samples(&at_volume(&pcm, 1.0))[..2], [20_000, -32_768]);
-        assert_eq!(samples(&at_volume(&pcm, 0.5))[..2], [10_000, -16_384]);
-        assert!(
-            samples(&at_volume(&pcm, 0.0)).iter().all(|&s| s == 0),
-            "muted"
-        );
-        assert_eq!(
-            samples(&at_volume(&pcm, 7.0))[..2],
-            [20_000, -32_768],
-            "never louder"
-        );
-    }
+    use crate::sound::samples;
 
     /// Run by hand on a Linux desktop: plays a quiet 440 Hz tone for one
     /// second on the default output while recording that output's monitor,
@@ -156,7 +110,7 @@ mod tests {
     #[test]
     #[ignore = "plays a tone on this PC for one second"]
     fn a_tone_played_comes_back_recorded() {
-        let mut recorder = Recorder::open(DEFAULT_MONITOR).unwrap();
+        let mut recorder = Recorder::open().unwrap();
         let player = std::thread::spawn(|| {
             let mut player = Player::open("test").unwrap();
             let mut phase = 0f32;

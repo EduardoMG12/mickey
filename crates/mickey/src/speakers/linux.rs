@@ -1,6 +1,3 @@
-//! Taking this PC's sound off its speakers while Mickey sends it to the PC
-//! that listens (PRD 0012, *Send only*), and always giving it back.
-//!
 //! Linux (PulseAudio, or PipeWire speaking its protocol): a sink's monitor
 //! follows its mute, so muting the speakers would also silence what Mickey
 //! records. Instead Mickey adds a silent sink, `mickey`, and makes it the

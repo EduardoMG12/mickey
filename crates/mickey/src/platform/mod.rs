@@ -8,6 +8,9 @@ pub mod hooks;
 pub mod linux;
 #[cfg(windows)]
 pub mod netif;
+#[cfg(windows)]
+#[allow(dead_code)] // `muted` is used once streams start (#270)
+pub mod output;
 #[cfg(target_os = "linux")]
 pub mod signals;
 #[cfg(windows)]
