@@ -113,7 +113,11 @@ mod tests {
     fn only_plain_names_are_safe() {
         assert_eq!(safe_name("report.pdf"), Some("report.pdf"));
         assert_eq!(safe_name("foto de férias.png"), Some("foto de férias.png"));
-        assert_eq!(safe_name("console.txt"), Some("console.txt"), "only exact device names");
+        assert_eq!(
+            safe_name("console.txt"),
+            Some("console.txt"),
+            "only exact device names"
+        );
         assert_eq!(safe_name(".bashrc"), Some(".bashrc"));
         for bad in [
             "",

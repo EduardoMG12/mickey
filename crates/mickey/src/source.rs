@@ -316,7 +316,7 @@ fn add_peer(
     let name = config::path().and_then(|path| {
         let text = std::fs::read_to_string(&path).unwrap_or_default();
         let (text, name) = config::add_peer(&text, name, address, position)?;
-        std::fs::write(&path, text).map_err(|err| err.to_string())?;
+        config::write(&path, &text)?;
         Ok(name)
     })?;
     peers.push(Peer {
@@ -332,26 +332,26 @@ fn add_peer(
     Ok(peers.len() - 1)
 }
 
-/// Writes where a peer placed itself into config.toml, so the settings
-/// window and the next start see it too.
 /// Writes `key` into the peer's block in config.toml, the first time it
 /// connects (#184).
 fn save_key(name: &str, key: &[u8; 32]) {
     let saved = config::path().and_then(|path| {
         let text = std::fs::read_to_string(&path).map_err(|err| err.to_string())?;
         let text = config::set_key(&text, name, &trust::to_hex(key))?;
-        std::fs::write(&path, text).map_err(|err| err.to_string())
+        config::write(&path, &text)
     });
     if let Err(err) = saved {
         eprintln!("mickey: cannot remember {name}'s key: {err}");
     }
 }
 
+/// Writes where a peer placed itself into config.toml, so the settings
+/// window and the next start see it too.
 fn save_position(name: &str, position: [i32; 2]) {
     let saved = config::path().and_then(|path| {
         let text = std::fs::read_to_string(&path).map_err(|err| err.to_string())?;
         let text = config::set_position(&text, name, position)?;
-        std::fs::write(&path, text).map_err(|err| err.to_string())
+        config::write(&path, &text)
     });
     match saved {
         Ok(()) => println!("mickey: {name} placed itself on this desktop at {position:?}"),
@@ -980,7 +980,7 @@ pub fn run(
                 let new = config::set_hotkeys(&text, &hotkeys)?;
                 // Checked as hotkeys before anything is written.
                 config::parse(&new)?.hotkeys()?;
-                std::fs::write(&path, new).map_err(|err| err.to_string())?;
+                config::write(&path, &new)?;
                 config::Config::load()?.ok_or_else(|| "config.toml is gone".to_string())
             });
             match taken {
