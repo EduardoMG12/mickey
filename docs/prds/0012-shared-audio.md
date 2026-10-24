@@ -111,6 +111,17 @@ speakers stay silent the whole time.
   therefore removes every module that made a `mickey` sink when it starts,
   and sets the real default back, whatever happened before (like the
   input grab: never leave the owner without sound).
+- **On Linux, muting is not the way, unlike Windows.** A sink's monitor
+  follows its mute and volume on PipeWire (tone at 0.21 RMS: muted 0.0,
+  volume 0 0.0), so the null sink stays: Mickey cannot mute the speakers
+  and still record what they would play.
+- **Stopping Mickey must give the sound back.** The null sink outlives
+  the process that made it default, and Mickey handled no signal so far
+  (the input grab did not need it: the kernel releases it when the
+  process dies). `systemctl --user stop mickey` or Ctrl+C would leave the
+  owner without sound until the next start. The Linux backend therefore
+  waits for SIGTERM, SIGINT and SIGHUP on a thread of its own and puts
+  the real output back before exiting.
 - **No command-line tools to rely on.** Ubuntu's desktop ships neither
   `pactl` nor `parec`; `libpulse` itself is on every desktop. The Linux
   backend talks to it directly. (A PipeWire VM with no sound card has only
