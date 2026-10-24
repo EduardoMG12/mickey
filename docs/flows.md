@@ -236,7 +236,7 @@ arrived from other PCs, in memory only, never on disk (`history.rs`).
 flowchart LR
     copy["a copy on this PC<br/>or content from another PC"] --> watch["clip_watch.rs notices it"]
     watch --> rec["history record thread<br/>Keeper read"]
-    rec --> hist["History in memory<br/>50 entries, 64 MiB"]
+    rec --> hist["History in memory<br/>50 entries, 16 MiB"]
     cli["mickey history"] -->|control socket| hist
     win["mickey-ui history"] -->|control socket| hist
     win -->|history copy id| keeper["Keeper write"]
