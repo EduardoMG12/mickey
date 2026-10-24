@@ -87,3 +87,10 @@ crosses, with no terminal and no restart.
 - **The terminal is still a fallback.** When `mickey-ui pair` cannot open a
   window (exit code 2, no display), `trust.rs` asks "type y to pair" on
   the terminal, with the same code printed above it.
+- **A PC the group introduces is asked about once (#184).** Before, a
+  PC listed in a paired PC's group map was trusted at once. Now each
+  other PC asks "Let *X* in? *Y* says *X* is one of your PCs" in a
+  `mickey-ui join` window, on its own thread so keys keep moving, and
+  trusts *X* only on *Let in*. Asked once per run, whatever the answer;
+  with no window to ask in, *X* stays out. Decided with the owner on
+  2026-10-24 (ask once, rather than let it in and notify).

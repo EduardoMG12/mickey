@@ -242,7 +242,12 @@ fn main() -> ExitCode {
     if let [command, who, code] = args.as_slice()
         && command == "pair"
     {
-        return pair::window(who, code);
+        return pair::window(who, pair::Ask::Pair { code: code.clone() });
+    }
+    if let [command, who, by] = args.as_slice()
+        && command == "join"
+    {
+        return pair::window(who, pair::Ask::Join { by: by.clone() });
     }
     // `switcher --mirror …`: the copy for the PCs not in use.
     let mirror = args.iter().any(|arg| arg == "--mirror");
