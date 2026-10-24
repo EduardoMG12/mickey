@@ -123,7 +123,10 @@ another, what was copied on the first is put on the second. Received files
 land in a fresh folder under Mickey's cache (`~/.cache/mickey/received`,
 `%LOCALAPPDATA%\mickey\received`). **Clipboard history** (tray menu, or
 `mickey history`) lists the last 50 copies, searchable; pick one to copy it
-again. It lives in memory only and is gone when Mickey stops.
+again. It lives in memory only and is gone when Mickey stops. Already
+using cliphist, CopyQ or Klipper? Turn the history off in the settings
+(**General**) or with `[clipboard] history = false`: the clipboard is still
+shared, and those managers see everything Mickey writes.
 
 ### The tray, commands and Waybar
 
@@ -166,8 +169,9 @@ restart Mickey afterwards, or run `mickey arranged` after changing positions.
 
 - **Screen edges only on Windows and Hyprland.** Elsewhere, use the hotkeys
   and the switcher; native GNOME and KDE support is planned (#178).
-- **The switcher on GNOME and KDE (Wayland)** opens where the desktop puts
-  it, often centred and with a title bar, not in the chosen corner (#218).
+- **The switcher on GNOME (Wayland)** opens without a title bar, but where
+  GNOME puts it, not in the chosen corner: GNOME lets no program place a
+  window. On KDE Plasma and Hyprland it goes to its corner.
 - **Touchpad:** one-finger motion and the physical click work; tap to click
   and two-finger scroll do not yet. A wheel mouse scrolls.
 - **Windows' secure screens** (lock screen, UAC prompt, `Ctrl+Alt+Del`)
