@@ -25,6 +25,13 @@ png = "0.18"
 # The tray icon on Linux (PRD 0009): the StatusNotifierItem protocol over
 # D-Bus, too large to write by hand. Without tokio: its blocking API runs on
 # the small async-io executor, on a thread of its own.
+# Shared audio on Windows (PRD 0012): WASAPI through `wasapi`, which also
+# brings Microsoft's `windows` crate; that one only for the output's mute.
+# Their COM interfaces by hand would be long and easy to get wrong.
+[target.'cfg(windows)'.dependencies]
+wasapi = "0.19"
+windows = { version = "0.61", features = ["Win32_Media_Audio", "Win32_Media_Audio_Endpoints", "Win32_System_Com"] }
+
 [target.'cfg(target_os = "linux")'.dependencies]
 ksni = { version = "0.3", default-features = false, features = ["blocking", "async-io"] }
 # Hearing every copy on Wayland without reading the clipboard over and
