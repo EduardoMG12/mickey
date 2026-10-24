@@ -34,6 +34,15 @@ fn run(program: &str, args: &[&str]) -> Result<(), String> {
     }
 }
 
+/// `text` as a PowerShell single-quoted string. Inside one, only `'` is
+/// special, written twice: a path such as `C:\Users\o'brien` must not end
+/// the string early and turn the rest into commands run as administrator
+/// (#186).
+#[cfg_attr(not(windows), allow(dead_code))]
+fn powershell_quoted(text: &str) -> String {
+    format!("'{}'", text.replace('\'', "''"))
+}
+
 #[cfg(target_os = "linux")]
 mod imp {
     use super::run;
@@ -93,7 +102,7 @@ mod imp {
 
 #[cfg(windows)]
 mod imp {
-    use super::run;
+    use super::{powershell_quoted, run};
 
     /// The installer's task (packaging/windows/mickey.nsi).
     const TASK: &str = "Mickey";
@@ -155,11 +164,29 @@ mod imp {
         let exe = std::env::current_exe().map_err(|err| err.to_string())?;
         let word = if on { "on" } else { "off" };
         let script = format!(
-            "$p = Start-Process -FilePath '{}' -ArgumentList 'autostart','{word}' -Verb RunAs -WindowStyle Hidden -Wait -PassThru; exit $p.ExitCode",
-            exe.display()
+            "$p = Start-Process -FilePath {} -ArgumentList 'autostart','{word}' -Verb RunAs -WindowStyle Hidden -Wait -PassThru; exit $p.ExitCode",
+            powershell_quoted(&exe.display().to_string())
         );
         run("powershell", &["-NoProfile", "-Command", &script]).map_err(|_| {
             "Windows did not allow it (the administrator prompt was refused?)".to_string()
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_quote_in_the_path_stays_inside_the_string() {
+        assert_eq!(
+            powershell_quoted(r"C:\Program Files\Mickey\mickey.exe"),
+            r"'C:\Program Files\Mickey\mickey.exe'"
+        );
+        // Without doubling, `'; calc; '` would close the string and run calc.
+        assert_eq!(
+            powershell_quoted(r"C:\Users\o'brien\x'; calc; '\mickey.exe"),
+            r"'C:\Users\o''brien\x''; calc; ''\mickey.exe'"
+        );
     }
 }
