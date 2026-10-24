@@ -23,7 +23,7 @@ jobs:
     container: ubuntu:22.04
     steps:
       - name: Tools the container lacks
-        run: apt-get update -qq && apt-get install -y -qq curl ca-certificates build-essential git binutils python3 >/dev/null
+        run: apt-get update -qq && apt-get install -y -qq curl ca-certificates build-essential git binutils python3 pkg-config libpulse-dev >/dev/null
       - uses: actions/checkout@v4
       - name: Install Rust
         run: |

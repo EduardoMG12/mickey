@@ -8,6 +8,8 @@ pub mod hooks;
 pub mod linux;
 #[cfg(windows)]
 pub mod netif;
+#[cfg(target_os = "linux")]
+pub mod signals;
 #[cfg(windows)]
 pub mod tray;
 #[cfg(target_os = "linux")]
