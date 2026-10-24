@@ -144,6 +144,11 @@ mod imp {
     /// that way: otherwise any program could replace them and become
     /// administrator at the next logon. A script someone else planted is
     /// harmless then: the task runs without administrator rights.
+    ///
+    /// The folder must also be inside Program Files: a folder only
+    /// administrators may change can still be renamed away, and replaced,
+    /// by whoever may change the folder it is in. Inside Program Files,
+    /// nobody but administrators can.
     fn create() -> Result<(), String> {
         let exe = std::env::current_exe().map_err(|err| err.to_string())?;
         let script = exe.with_file_name("start-hidden.vbs");
@@ -159,15 +164,16 @@ mod imp {
         // Read from Windows directly: a program that runs PowerShell to
         // read permissions, then makes an elevated logon task, looks like
         // malware to Windows Defender, which flagged it.
-        let safe = [dir, exe.as_path(), script.as_path(), ui.as_path()]
-            .iter()
-            .filter(|path| path.exists())
-            .all(|path| crate::platform::acl::admin_only(path).unwrap_or(false));
+        let safe = in_program_files(dir)
+            && [dir, exe.as_path(), script.as_path(), ui.as_path()]
+                .iter()
+                .filter(|path| path.exists())
+                .all(|path| crate::platform::acl::admin_only(path).unwrap_or(false));
         let level = if safe {
             "highest"
         } else {
             eprintln!(
-                "mickey: {} can be changed by any user, so Mickey will start without administrator rights (it cannot drive administrator windows); install it with the installer, or make the folder writable by administrators only",
+                "mickey: {} is not inside Program Files or can be changed by any user, so Mickey will start without administrator rights (it cannot drive administrator windows); install it with the installer",
                 dir.display()
             );
             "limited"
@@ -187,6 +193,17 @@ mod imp {
             system("powershell.exe"),
             &["-NoProfile", "-Command", ON_BATTERY],
         )
+    }
+
+    /// Whether `dir` is inside Program Files, both with links and junctions
+    /// followed (a junction inside could point anywhere).
+    fn in_program_files(dir: &std::path::Path) -> bool {
+        let real = |path: &std::path::Path| std::fs::canonicalize(path).ok();
+        let program_files = crate::platform::acl::program_files().ok();
+        match (real(dir), program_files.as_deref().and_then(real)) {
+            (Some(dir), Some(root)) => dir.starts_with(root),
+            _ => false,
+        }
     }
 
     /// `net session` only works for an administrator.
@@ -211,6 +228,18 @@ mod imp {
             _ => {
                 Err("Windows did not allow it (the administrator prompt was refused?)".to_string())
             }
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        #[test]
+        fn only_folders_inside_program_files_count() {
+            let root = crate::platform::acl::program_files().unwrap();
+            assert!(super::in_program_files(&root.join("Common Files")));
+            assert!(!super::in_program_files(std::path::Path::new("C:\\Users")));
+            // `..` is resolved before comparing.
+            assert!(!super::in_program_files(&root.join("..\\Users")));
         }
     }
 }
