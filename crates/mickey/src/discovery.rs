@@ -187,9 +187,14 @@ pub fn start(me: Announce) -> Result<Table, String> {
 }
 
 /// Where to announce: each local network's broadcast address, then the
-/// limited broadcast as before.
+/// limited broadcast as before. Only private networks, the same rule that
+/// decides whose packets are heard: a VPN that joins strangers (Radmin,
+/// Hamachi) never gets this PC's name and key.
 fn targets() -> Vec<Ipv4Addr> {
-    let mut all = networks();
+    let mut all: Vec<Ipv4Addr> = networks()
+        .into_iter()
+        .filter(|network| crate::group::is_local((*network).into()))
+        .collect();
     all.push(Ipv4Addr::BROADCAST);
     all
 }
@@ -201,10 +206,28 @@ fn networks() -> Vec<Ipv4Addr> {
         .unwrap_or_default()
 }
 
-/// Windows: the limited broadcast only, for now (not yet checked there).
-#[cfg(not(target_os = "linux"))]
+/// Windows: from each adapter's address and mask.
+#[cfg(windows)]
 fn networks() -> Vec<Ipv4Addr> {
-    Vec::new()
+    broadcasts_of(&crate::platform::netif::networks())
+}
+
+/// The broadcast address of each address and mask, leaving out loopback
+/// and masks that make no network (0, or all ones).
+#[cfg_attr(not(windows), allow(dead_code))]
+fn broadcasts_of(networks: &[(Ipv4Addr, Ipv4Addr)]) -> Vec<Ipv4Addr> {
+    let mut found = Vec::new();
+    for &(address, mask) in networks {
+        let mask = u32::from(mask);
+        if address.is_loopback() || mask == 0 || mask == u32::MAX {
+            continue;
+        }
+        let broadcast = Ipv4Addr::from(u32::from(address) | !mask);
+        if !found.contains(&broadcast) {
+            found.push(broadcast);
+        }
+    }
+    found
 }
 
 /// The broadcast address of each network this PC sits on, from the text
@@ -333,6 +356,25 @@ mod tests {
                 Ipv4Addr::new(10, 0, 2, 255),
                 Ipv4Addr::new(192, 0, 2, 255),
                 Ipv4Addr::new(198, 51, 101, 255),
+            ]
+        );
+    }
+
+    #[test]
+    fn each_windows_address_gives_its_network_broadcast() {
+        let net = |a: [u8; 4], m: [u8; 4]| (Ipv4Addr::from(a), Ipv4Addr::from(m));
+        let found = broadcasts_of(&[
+            net([192, 0, 2, 10], [255, 255, 255, 0]),
+            net([198, 51, 100, 7], [255, 255, 254, 0]),
+            net([127, 0, 0, 1], [255, 0, 0, 0]),
+            net([203, 0, 113, 9], [255, 255, 255, 255]),
+            net([192, 0, 2, 11], [255, 255, 255, 0]),
+        ]);
+        assert_eq!(
+            found,
+            [
+                Ipv4Addr::new(192, 0, 2, 255),
+                Ipv4Addr::new(198, 51, 101, 255)
             ]
         );
     }
