@@ -1,6 +1,8 @@
 //! Operating-system interfaces. All `unsafe` code in Mickey lives here.
 
 #[cfg(windows)]
+pub mod acl;
+#[cfg(windows)]
 pub mod hooks;
 #[cfg(target_os = "linux")]
 pub mod linux;

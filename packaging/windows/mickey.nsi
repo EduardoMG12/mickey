@@ -41,9 +41,10 @@ Section "Mickey"
   ; administrator to a program that is not, and Mickey must reach every
   ; window. A scheduled task can start elevated without asking each time.
   DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "Mickey"
-  nsExec::Exec 'schtasks /create /tn "Mickey" /tr "wscript.exe \"$INSTDIR\start-hidden.vbs\"" /sc onlogon /ru "$%USERDOMAIN%\$%USERNAME%" /it /rl highest /f'
-  ; A new task does not start on battery: on a laptop Mickey would not start.
-  nsExec::Exec 'powershell -NoProfile -Command "Set-ScheduledTask -TaskName Mickey -Settings (New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit 0)"'
+  ; Mickey makes the task itself, as the settings window does: elevated only
+  ; when its folder is writable by administrators alone (the default, under
+  ; Program Files), allowed on battery, through start-hidden.vbs.
+  nsExec::Exec '"$INSTDIR\mickey.exe" autostart on'
 
   ; Peers connect to the target; private networks only, never public ones.
   nsExec::Exec 'netsh advfirewall firewall delete rule name="Mickey"'
@@ -66,7 +67,7 @@ Section "Uninstall"
   nsExec::Exec 'taskkill /im mickey.exe /f'
   nsExec::Exec 'taskkill /im mickey-ui.exe /f'
   DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "Mickey"
-  nsExec::Exec 'schtasks /delete /tn "Mickey" /f'
+  nsExec::Exec '"$INSTDIR\mickey.exe" autostart off'
   nsExec::Exec 'netsh advfirewall firewall delete rule name="Mickey"'
   Delete "$INSTDIR\mickey.exe"
   Delete "$INSTDIR\mickey-ui.exe"
