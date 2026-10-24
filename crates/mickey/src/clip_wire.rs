@@ -136,7 +136,10 @@ fn files(mut body: &[u8]) -> Result<Vec<(String, Vec<u8>)>, String> {
             .ok_or_else(|| format!("refused a file name from the network: {name:?}"))?
             .to_string();
         let size = u64::from_be_bytes(take(8)?.try_into().map_err(|_| short())?);
-        total += size;
+        // Sizes come from the network: their sum must not wrap around.
+        total = total
+            .checked_add(size)
+            .ok_or("more file bytes than allowed")?;
         if total > MAX_FILES {
             return Err("more file bytes than allowed".into());
         }
@@ -157,8 +160,13 @@ fn image(png_bytes: &[u8]) -> Result<Content, String> {
         return Err("a clipboard image must be 8-bit RGBA".into());
     }
     let (width, height) = (info.width as usize, info.height as usize);
+    // Checked before allocating: `Limits` only bounds what the decoder
+    // keeps itself, not the frame buffer, and a few bytes of header can
+    // claim 100000 x 100000 pixels (40 GB, and a failed allocation ends
+    // the whole process).
     let size = reader
         .output_buffer_size()
+        .filter(|&size| size <= MAX_PIXELS)
         .ok_or("the image is too large")?;
     let mut rgba = vec![0; size];
     reader
@@ -229,5 +237,53 @@ mod tests {
         assert!(decode(&[TEXT, 0xff]).is_err());
         assert!(decode(&[IMAGE, 1, 2, 3]).is_err());
         assert!(decode(&[9]).is_err());
+    }
+
+    /// The PNG chunk checksum (CRC-32), to forge a header in a test.
+    fn crc32(bytes: &[u8]) -> u32 {
+        let mut crc = !0u32;
+        for &byte in bytes {
+            crc ^= u32::from(byte);
+            for _ in 0..8 {
+                crc = if crc & 1 == 1 {
+                    (crc >> 1) ^ 0xedb8_8320
+                } else {
+                    crc >> 1
+                };
+            }
+        }
+        !crc
+    }
+
+    #[test]
+    fn a_tiny_png_claiming_huge_pixels_is_refused_before_allocating() {
+        let small = Content::Image {
+            width: 1,
+            height: 1,
+            rgba: vec![0; 4],
+        };
+        let mut bytes = encode(&Wire::Content(small)).unwrap();
+        // After the kind byte: the 8-byte signature, then IHDR's length and
+        // type (8 bytes), its 13 data bytes and their checksum.
+        let ihdr = 1 + 8 + 4;
+        bytes[ihdr + 4..ihdr + 8].copy_from_slice(&100_000u32.to_be_bytes());
+        bytes[ihdr + 8..ihdr + 12].copy_from_slice(&100_000u32.to_be_bytes());
+        let crc = crc32(&bytes[ihdr..ihdr + 4 + 13]);
+        bytes[ihdr + 17..ihdr + 21].copy_from_slice(&crc.to_be_bytes());
+        // 100000 x 100000 RGBA is 40 GB: refused, not allocated.
+        assert_eq!(decode(&bytes).unwrap_err(), "the image is too large");
+    }
+
+    #[test]
+    fn file_sizes_that_would_wrap_around_are_refused() {
+        let mut bytes = vec![FILES];
+        bytes.extend(2u32.to_be_bytes());
+        for (name, size) in [(b'a', 1), (b'b', u64::MAX)] {
+            bytes.extend(1u16.to_be_bytes());
+            bytes.push(name);
+            bytes.extend(size.to_be_bytes());
+        }
+        bytes.push(0);
+        assert!(decode(&bytes).is_err());
     }
 }

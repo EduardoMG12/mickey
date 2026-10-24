@@ -630,7 +630,13 @@ pub fn run(
             }
             read_peer(index, &link, &pong_sender, start);
             if let Some(mover) = &mover {
-                open_data_link(index, peers[index].address, &shared, mover);
+                open_data_link(
+                    index,
+                    peers[index].address,
+                    *link.peer_key(),
+                    &shared,
+                    mover,
+                );
             }
             peers[index].key = Some(*link.peer_key());
             peers[index].link = Some(link);
@@ -1176,11 +1182,23 @@ fn connect_and_pair(
 /// Opens the data link to a connected peer in the background and hands it
 /// to the mover. A peer without one (an older Mickey) only misses the
 /// shared clipboard.
-fn open_data_link(index: usize, input: SocketAddr, shared: &Arc<Shared>, mover: &Mover) {
+/// The data link must answer with `key`, the key of the input link just
+/// opened to the same peer: otherwise whoever answers the data port (a PC
+/// that took over the address) would get the clipboard and the group map.
+fn open_data_link(
+    index: usize,
+    input: SocketAddr,
+    key: [u8; 32],
+    shared: &Arc<Shared>,
+    mover: &Mover,
+) {
     let (shared, mover) = (Arc::clone(shared), mover.clone());
     thread::spawn(
         move || match transport::connect_data(input, &shared.identity) {
-            Ok(link) => mover.link(index, link),
+            Ok(link) if *link.peer_key() == key => mover.link(index, link),
+            Ok(_) => eprintln!(
+                "mickey: the data port of {input} answered with another PC's key; no shared clipboard with it"
+            ),
             Err(err) => eprintln!("mickey: no shared clipboard with {input}: {err}"),
         },
     );
