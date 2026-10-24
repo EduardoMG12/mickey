@@ -185,7 +185,7 @@ Ideas the owner wants to keep in view. Each one is a different problem from
 moving input, so each needs its own PRD before any work starts, and they stay
 non-goals until then.
 
-- Sharing headphones and audio between peers.
+- ~~Sharing headphones and audio between peers.~~ *(in progress: [0012](0012-shared-audio.md))*
 - Sharing other USB peripherals.
 - Remote control in the style of TeamViewer: screen sharing and control over
   the internet.
