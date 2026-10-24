@@ -225,3 +225,11 @@ arrows/Enter/Esc/click, and a second thread sending a message every second.
   Windows and X11 place the window themselves; on Hyprland Mickey adds a
   window rule for the `mickey-ui` app id (`place.rs`); other Wayland
   compositors place it where they like, usually the center.
+- **Plasma and GNOME** (2026-10-24, #218). On Wayland a window cannot
+  place itself. On Plasma, `mickey-ui` loads a small KWin script through
+  D-Bus (`gdbus`) that puts the switcher in its corner of the screen's
+  usable area, with no title bar, above everything and out of the taskbar
+  and Alt+Tab; it stays loaded and is replaced by the next switcher. On
+  every Linux desktop the switcher now asks for no decorations, so GNOME,
+  which has no way to place it, at least shows it without a title bar.
+  Windows keeps its look.

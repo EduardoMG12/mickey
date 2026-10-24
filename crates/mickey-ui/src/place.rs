@@ -2,8 +2,8 @@
 //!
 //! On Windows and X11 a program may place its own window. On Wayland only
 //! the compositor may, so Mickey asks it: on Hyprland with a window rule
-//! for its app id. Other Wayland desktops place it themselves (usually in
-//! the center) until they get their own branch here.
+//! for its app id, on Plasma with a KWin script (#218). Other Wayland
+//! desktops, GNOME among them, place it themselves (usually in the center).
 
 use std::process::Command;
 
@@ -48,6 +48,45 @@ impl Corner {
         }
     }
 
+    /// A KWin script (Plasma 6) that places windows with this app id in the
+    /// corner of their screen's usable area (panels left out) when they
+    /// appear, keeps them above the rest, takes their title bar away and
+    /// keeps them out of the taskbar and Alt+Tab (Wayland ignores the
+    /// window's own wish for that).
+    pub fn kwin_script(self, app_id: &str) -> String {
+        let (x, y) = match self {
+            Corner::Center => (
+                "a.x + (a.width - g.width) / 2".to_string(),
+                "a.y + (a.height - g.height) / 2".to_string(),
+            ),
+            corner => {
+                let x = match corner {
+                    Corner::TopLeft | Corner::BottomLeft => format!("a.x + {MARGIN}"),
+                    _ => format!("a.x + a.width - g.width - {MARGIN}"),
+                };
+                let y = match corner {
+                    Corner::TopLeft | Corner::TopRight => format!("a.y + {MARGIN}"),
+                    _ => format!("a.y + a.height - g.height - {MARGIN}"),
+                };
+                (x, y)
+            }
+        };
+        format!(
+            "function place(w) {{\n\
+             \x20   if (w.resourceClass != \"{app_id}\") return;\n\
+             \x20   const a = workspace.clientArea(KWin.MaximizeArea, w);\n\
+             \x20   w.noBorder = true;\n\
+             \x20   w.keepAbove = true;\n\
+             \x20   w.skipTaskbar = true;\n\
+             \x20   w.skipSwitcher = true;\n\
+             \x20   const g = w.frameGeometry;\n\
+             \x20   w.frameGeometry = {{ x: {x}, y: {y}, width: g.width, height: g.height }};\n\
+             }}\n\
+             workspace.windowAdded.connect(place);\n\
+             workspace.windowList().forEach(place);\n"
+        )
+    }
+
     /// A Hyprland (0.50+, Lua config) window rule that floats, pins and
     /// places windows with this app id. Adding a rule with the same name
     /// replaces the previous one.
@@ -82,12 +121,82 @@ pub fn ask_compositor(corner: Corner, app_id: &str) -> bool {
             .output()
             .is_ok_and(|output| output.status.success());
     }
+    let plasma = std::env::var("XDG_CURRENT_DESKTOP").is_ok_and(|desktop| desktop.contains("KDE"));
+    if plasma && std::env::var_os("WAYLAND_DISPLAY").is_some() {
+        return kwin_place(&corner.kwin_script(app_id)).is_some();
+    }
     false
+}
+
+/// Loads `script` into KWin (Plasma 6) through D-Bus and runs it, in place
+/// of the one an earlier switcher left: a script stays loaded until
+/// replaced, so it places every later window with that app id too.
+fn kwin_place(script: &str) -> Option<()> {
+    const NAME: &str = "mickey-switcher";
+    let dir = std::env::var_os("XDG_RUNTIME_DIR").map_or_else(std::env::temp_dir, Into::into);
+    let path = std::path::Path::new(&dir).join("mickey-switcher.js");
+    std::fs::write(&path, script).ok()?;
+    let call = |object: &str, method: &str, args: &[&str]| {
+        Command::new("gdbus")
+            .args([
+                "call",
+                "--session",
+                "--dest",
+                "org.kde.KWin",
+                "--object-path",
+                object,
+                "--method",
+                method,
+            ])
+            .args(args)
+            .output()
+            .ok()
+            .filter(|output| output.status.success())
+            .map(|output| String::from_utf8_lossy(&output.stdout).into_owned())
+    };
+    let _ = call("/Scripting", "org.kde.kwin.Scripting.unloadScript", &[NAME]);
+    let path = path.to_str()?;
+    // Answers "(7,)": the new script's number, -1 if it was refused.
+    let answer = call(
+        "/Scripting",
+        "org.kde.kwin.Scripting.loadScript",
+        &[path, NAME],
+    )?;
+    let id: i32 = answer
+        .trim()
+        .trim_start_matches('(')
+        .trim_end_matches(",)")
+        .parse()
+        .ok()?;
+    if id < 0 {
+        return None;
+    }
+    call(
+        &format!("/Scripting/Script{id}"),
+        "org.kde.kwin.Script.run",
+        &[],
+    )
+    .map(|_| ())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_kwin_script_places_only_mickeys_window() {
+        let script = Corner::BottomRight.kwin_script("mickey-ui");
+        assert!(script.contains("w.resourceClass != \"mickey-ui\""));
+        assert!(script.contains("x: a.x + a.width - g.width - 24"));
+        assert!(script.contains("y: a.y + a.height - g.height - 24"));
+        assert!(script.contains("w.noBorder = true"));
+        assert!(script.contains("w.skipTaskbar = true"));
+        assert!(
+            Corner::Center
+                .kwin_script("x")
+                .contains("(a.width - g.width) / 2")
+        );
+    }
 
     #[test]
     fn corners_keep_their_margins() {

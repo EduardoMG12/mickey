@@ -261,6 +261,9 @@ fn main() -> ExitCode {
             .with_app_id(APP_ID)
             .with_inner_size(size)
             .with_always_on_top()
+            // No title bar where the window draws its own (GNOME, Plasma);
+            // Hyprland draws none anyway. Windows keeps its look.
+            .with_decorations(cfg!(windows))
             // A switcher is not an app that was opened: no taskbar button.
             .with_taskbar(false)
             // Not mouse passthrough for the copy: on Windows that makes the
