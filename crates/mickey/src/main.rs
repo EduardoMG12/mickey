@@ -67,6 +67,10 @@ fn main() {
 
 fn run(command: Command) -> Result<(), String> {
     match command {
+        Command::Version => {
+            println!("mickey {}", env!("CARGO_PKG_VERSION"));
+            Ok(())
+        }
         Command::Help => {
             print!("{}", cli::USAGE);
             Ok(())

@@ -28,6 +28,21 @@ RequestExecutionLevel admin
 !insertmacro MUI_LANGUAGE "English"
 !insertmacro MUI_LANGUAGE "PortugueseBR"
 
+; The installer's own version and name, in its file properties (Windows
+; and code signing read them). The numeric one has four parts and no
+; suffix: 0.0.0-test is 0.0.0.0.
+!searchparse /noerrors "${VERSION}" "" VERSION_NUM "-"
+!ifndef VERSION_NUM
+  !define VERSION_NUM "${VERSION}"
+!endif
+VIProductVersion "${VERSION_NUM}.0"
+VIFileVersion "${VERSION_NUM}.0"
+VIAddVersionKey /LANG=${LANG_ENGLISH} "ProductName" "Mickey"
+VIAddVersionKey /LANG=${LANG_ENGLISH} "ProductVersion" "${VERSION}"
+VIAddVersionKey /LANG=${LANG_ENGLISH} "FileVersion" "${VERSION}"
+VIAddVersionKey /LANG=${LANG_ENGLISH} "FileDescription" "Mickey installer: one keyboard and mouse for all your PCs"
+VIAddVersionKey /LANG=${LANG_ENGLISH} "LegalCopyright" "GPL-3.0-or-later"
+
 Section "Mickey"
   SetOutPath "$INSTDIR"
   ; A running Mickey keeps its files locked.

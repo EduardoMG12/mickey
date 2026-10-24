@@ -29,7 +29,7 @@ jobs:
         run: |
           curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
-      - run: cargo build --release --workspace
+      - run: cargo build --release --workspace --locked
       - name: Check the glibc they need
         # Every version a binary names, weak ones included: a weak one still
         # makes the loader warn on an older system.
@@ -59,7 +59,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install Rust
         run: rustup toolchain install stable --profile minimal; rustup default stable
-      - run: cargo build --release --workspace
+      - run: cargo build --release --workspace --locked
       - name: Install NSIS
         run: choco install nsis -y --no-progress
       - name: Build the installer
@@ -67,6 +67,9 @@ jobs:
         run: |
           version="${GITHUB_REF_NAME#v}"
           case "$GITHUB_REF" in refs/tags/*) ;; *) version=0.0.0-test ;; esac
+          # A tag must match the version the programs report (Cargo.toml).
+          cargo_version=$(grep -m1 '^version' crates/mickey/Cargo.toml | cut -d'"' -f2)
+          case "$GITHUB_REF" in refs/tags/*) [ "$version" = "$cargo_version" ] || { echo "tag $version but Cargo.toml says $cargo_version"; exit 1; } ;; esac
           # Installed next to the programs (see mickey.nsi).
           cp LICENSE target/release/LICENSE.txt
           python tools/licenses/third_party_licenses.py x86_64-pc-windows-msvc > target/release/THIRD-PARTY-LICENSES.txt
