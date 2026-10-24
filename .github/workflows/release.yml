@@ -14,12 +14,31 @@ permissions:
 
 jobs:
   linux:
+    # Built inside Ubuntu 22.04, whatever the runner: a binary needs the
+    # glibc it was built against or newer, so this sets the minimum at 2.35
+    # (Ubuntu 22.04, Mint 21, Debian 12, Fedora 36 or newer, #220). Built on
+    # 24.04 it also asked, weakly, for 2.39 symbols, and 22.04 printed a
+    # loader warning on every start. The container does not move on by itself.
     runs-on: ubuntu-latest
+    container: ubuntu:22.04
     steps:
+      - name: Tools the container lacks
+        run: apt-get update -qq && apt-get install -y -qq curl ca-certificates build-essential git binutils >/dev/null
       - uses: actions/checkout@v4
       - name: Install Rust
-        run: rustup toolchain install stable --profile minimal && rustup default stable
+        run: |
+          curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
       - run: cargo build --release --workspace
+      - name: Check the glibc they need
+        # Every version a binary names, weak ones included: a weak one still
+        # makes the loader warn on an older system.
+        run: |
+          for bin in target/release/mickey target/release/mickey-ui; do
+            needs=$(objdump -T "$bin" | grep -oE 'GLIBC_[0-9.]+' | sort -V | tail -1)
+            echo "$bin needs $needs"
+            [ "$(printf '%s\nGLIBC_2.35\n' "$needs" | sort -V | tail -1)" = GLIBC_2.35 ] || { echo "newer than the README's minimum (2.35)"; exit 1; }
+          done
       - name: Pack
         run: |
           dir=mickey-linux-x86_64
@@ -64,6 +83,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # Checksums, so a download can be checked (sha256sum -c SHA256SUMS).
+          cp linux/mickey-linux-x86_64.tar.gz windows/Mickey-Setup-*.exe .
+          sha256sum mickey-linux-x86_64.tar.gz Mickey-Setup-*.exe > SHA256SUMS
           gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
             --title "Mickey $GITHUB_REF_NAME" --generate-notes \
-            linux/mickey-linux-x86_64.tar.gz windows/Mickey-Setup-*.exe
+            mickey-linux-x86_64.tar.gz Mickey-Setup-*.exe SHA256SUMS
