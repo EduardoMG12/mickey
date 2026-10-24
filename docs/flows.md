@@ -7,7 +7,9 @@ the messages in [protocol.md](protocol.md).
 ## Pairing
 
 Two PCs talk only if each trusts the other's public key (`trust.rs`,
-`trusted_peers` next to the identity). Trust is by key, never by address.
+`trusted_peers` next to the identity; for Mickey running as administrator
+on Windows, in `state` next to `mickey.exe`, which only administrators can
+change). Trust is by key, never by address.
 
 ```mermaid
 flowchart TD

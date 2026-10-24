@@ -191,6 +191,13 @@ restart Mickey afterwards, or run `mickey arranged` after changing positions.
 - **The `input` group** lets every program you run read the keyboard, not
   only Mickey; desktop portals are the long-term fix (#178).
 - **Local network only:** no relay over the internet.
+- **Windows Defender may block the installer** as
+  `Trojan:Win32/Bearfoos.B!ml`. The `!ml` means its machine-learning guess,
+  not a known virus: a new program, not code-signed yet, that reads the
+  keyboard and talks over the network looks like a keylogger to it. Check
+  the download against `SHA256SUMS`, then in *Windows Security → Virus &
+  threat protection → Protection history* open the item and choose
+  *Allow on device*. Signing is planned.
 
 ## Security
 

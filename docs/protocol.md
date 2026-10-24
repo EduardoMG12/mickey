@@ -43,8 +43,10 @@ source -> target   s, se
 ```
 
 After them each side knows the other's public key, proven by the
-handshake, and both hold the same handshake hash. A peer that stalls for
-5 s in the middle is dropped. The handshake carries no payload: who the
+handshake, and both hold the same handshake hash. The whole handshake
+must finish within 5 s, however its bytes trickle in, or the peer is
+dropped; each port takes at most 32 connections at once, paired or not
+(`main.rs`), so nobody can use up its threads. The handshake carries no payload: who the
 peer is comes only from its key, which `trust.rs` looks up in
 `trusted_peers` (a peer is trusted by its key, never by its address).
 
@@ -125,10 +127,13 @@ button the source still held there.
 
 The source side opens it in the background once the input link is up
 (`open_data_link` in `source.rs`): TCP to the input port + 1, then the same
-Noise `XX` handshake with the same identities. The target side
-(`transport::accept_data`) refuses any key that is not already trusted: a
-data link never asks to pair. Writes may take 10 s here (megabytes), not
-1 s.
+Noise `XX` handshake with the same identities. The source keeps it only if
+it answers with the key of the input link just opened to that PC: whoever
+took over the address could otherwise answer only this port and get the
+clipboard and the group map. The target side (`transport::accept_data`)
+refuses any key that is not already trusted: a data link never asks to
+pair. Writes may take 10 s here (megabytes), not 1 s, and the `Mover`
+drops a link that stays silent for 10 s in the middle of an answer.
 
 All data links of a source are owned by one thread, the `Mover`
 (`clip_sync.rs`); on the target each data link has its own thread running
