@@ -317,7 +317,11 @@ fn run_from_config() -> Result<(), String> {
                 port: this_pc.listen.port(),
                 controlled,
                 found,
-                history: keeper.clone().map(history::record),
+                // Off: another clipboard manager keeps the history.
+                history: keeper
+                    .clone()
+                    .filter(|_| config.clipboard.history)
+                    .map(history::record),
                 keeper,
             },
         );

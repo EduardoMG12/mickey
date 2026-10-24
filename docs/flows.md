@@ -248,4 +248,6 @@ flowchart LR
 over: Wayland selection events, the Windows clipboard counter, or else the
 text compared once a second. Copying the same thing again moves it to the
 top. The history window searches the entries, and picking one runs
-`mickey history copy <id>`, which puts it back in the clipboard.
+`mickey history copy <id>`, which puts it back in the clipboard. With
+`[clipboard] history = false` no history is kept: another clipboard manager
+(cliphist, CopyQ, Klipper) keeps it, and still sees everything Mickey writes.

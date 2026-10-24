@@ -41,6 +41,8 @@ pub struct Form {
     pub position: String,
     /// The switcher as a column.
     pub vertical: bool,
+    /// Keep a clipboard history here (off: another manager keeps it).
+    pub history: bool,
     /// The switcher's custom order, by name; empty: as the layout goes.
     pub order: Vec<String>,
     pub speed: i32,
@@ -81,6 +83,7 @@ impl Form {
                 .unwrap_or(config::DEFAULT_DOUBLE_TAP_MS),
             position: config.interface.switcher_position.clone(),
             vertical: config.interface.switcher_vertical,
+            history: config.clipboard.history,
             order: config.interface.switcher_order.clone(),
             speed: config.touchpad.speed,
         }
@@ -162,6 +165,10 @@ impl Form {
         if !self.order.is_empty() {
             let names: Vec<String> = self.order.iter().map(|name| quote(name)).collect();
             out += &format!("switcher_order = [{}]\n", names.join(", "));
+        }
+        if !self.history {
+            out += "\n[clipboard]\n";
+            out += "history = false    # another clipboard manager keeps the history\n";
         }
         out += "\n[touchpad]\n";
         out += &format!("speed = {}    # higher is faster\n", self.speed);
@@ -784,6 +791,9 @@ impl eframe::App for Settings {
                     ui.checkbox(&mut form.vertical, "Show the PCs in a column");
                     ui.add_space(8.0);
                     switcher_order(ui, form);
+                    ui.add_space(12.0);
+                    ui.checkbox(&mut form.history, "Keep a history of copies on this PC");
+                    ui.weak("Off: the clipboard is still shared, and another manager (cliphist, CopyQ, Klipper) keeps the history. Applies after a restart.");
                 }
             }
             });
@@ -960,12 +970,16 @@ mod tests {
     #[test]
     fn what_the_form_writes_parses_back_to_the_same_form() {
         let original = config::parse(
-            "[[peer]]\nname = \"Windows \\\"main\\\"\"\naddress = \"192.0.2.10:4242\"\nhotkey = \"AltGr+RightShift+1\"\nposition = [-1920, 0]\nkey = \"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"\n\n[hotkeys]\nhome = \"AltGr+RightShift+H\"\n\n[interface]\nswitcher_position = \"top-left\"\n\n[this_pc]\ncontrolled = false\nname = \"Desk\"\n",
+            "[[peer]]\nname = \"Windows \\\"main\\\"\"\naddress = \"192.0.2.10:4242\"\nhotkey = \"AltGr+RightShift+1\"\nposition = [-1920, 0]\nkey = \"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"\n\n[hotkeys]\nhome = \"AltGr+RightShift+H\"\n\n[interface]\nswitcher_position = \"top-left\"\n\n[clipboard]\nhistory = false\n\n[this_pc]\ncontrolled = false\nname = \"Desk\"\n",
         )
         .unwrap();
         let form = Form::from_config(&original);
         let reread = config::parse(&form.to_toml()).unwrap();
         assert_eq!(Form::from_config(&reread), form);
+        assert!(
+            !reread.clipboard.history,
+            "the history setting survives a save"
+        );
     }
 
     #[test]

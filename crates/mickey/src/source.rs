@@ -888,13 +888,16 @@ pub fn run(
             }
             // Answered below, once `act` no longer borrows the peers.
             Ok(Wake::Control(request)) if request.order == Order::History => {
-                let answer = history.as_ref().map_or_else(
-                    || "error: the clipboard is not shared on this PC".to_string(),
-                    |history| {
+                let answer = match (&history, &keeper) {
+                    (Some(history), _) => {
                         let history = history.lock().unwrap_or_else(|p| p.into_inner());
                         history::lines(&history, std::time::SystemTime::now())
-                    },
-                );
+                    }
+                    (None, Some(_)) => {
+                        "error: the history is off on this PC; another clipboard manager keeps it ([clipboard] history in config.toml)".to_string()
+                    }
+                    (None, None) => "error: the clipboard is not shared on this PC".to_string(),
+                };
                 let _ = request.reply.send(answer);
             }
             Ok(Wake::Control(Request {
