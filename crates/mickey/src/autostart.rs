@@ -118,21 +118,6 @@ mod imp {
     /// time limit. (Same as the installer.)
     const ON_BATTERY: &str = "Set-ScheduledTask -TaskName Mickey -Settings (New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit 0) | Out-Null";
 
-    /// Exits 1 if anyone but Administrators, SYSTEM, TrustedInstaller or
-    /// CREATOR OWNER may change one of `MICKEY_PATHS` (separated by `|`):
-    /// write, append, attributes, delete, permissions, owner, or generic
-    /// write/all. Names differ per language, so it compares SIDs.
-    const ADMIN_ONLY: &str = concat!(
-        "$ok = 'S-1-5-32-544','S-1-5-18','S-1-3-0',",
-        "'S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464'; ",
-        "foreach ($path in $env:MICKEY_PATHS.Split('|')) { ",
-        "(Get-Acl -LiteralPath $path).Access | Where-Object { ",
-        "$_.AccessControlType -eq 'Allow' -and ([int]$_.FileSystemRights -band 0x500D0116) } | ",
-        "ForEach-Object { $sid = try { $_.IdentityReference.Translate(",
-        "[Security.Principal.SecurityIdentifier]).Value } catch { $_.IdentityReference.Value }; ",
-        "if ($ok -notcontains $sid) { exit 1 } } }; exit 0",
-    );
-
     pub fn set(on: bool) -> Result<(), String> {
         let result = if on {
             create()
@@ -153,32 +138,31 @@ mod imp {
     }
 
     /// At this user's logon (the account creating it), hidden, through
-    /// `start-hidden.vbs` next to this `mickey.exe` (written every time, so
-    /// nobody's copy is ever kept). As administrator, so it can drive
-    /// administrator windows, but only when nobody else can change the
-    /// files that would run that way: otherwise any program could replace
-    /// them and become administrator at the next logon.
+    /// `start-hidden.vbs` next to this `mickey.exe` (written if missing).
+    /// As administrator, so it can drive administrator windows, but only
+    /// when nobody else can change the folder and the files that would run
+    /// that way: otherwise any program could replace them and become
+    /// administrator at the next logon. A script someone else planted is
+    /// harmless then: the task runs without administrator rights.
     fn create() -> Result<(), String> {
         let exe = std::env::current_exe().map_err(|err| err.to_string())?;
         let script = exe.with_file_name("start-hidden.vbs");
-        std::fs::write(
-            &script,
-            include_str!("../../../packaging/windows/start-hidden.vbs"),
-        )
-        .map_err(|err| format!("cannot write {}: {err}", script.display()))?;
+        if !script.exists() {
+            std::fs::write(
+                &script,
+                include_str!("../../../packaging/windows/start-hidden.vbs"),
+            )
+            .map_err(|err| format!("cannot write {}: {err}", script.display()))?;
+        }
         let ui = exe.with_file_name("mickey-ui.exe");
         let dir = exe.parent().ok_or("mickey.exe has no folder")?;
-        let paths = [dir, exe.as_path(), script.as_path(), ui.as_path()]
+        // Read from Windows directly: a program that runs PowerShell to
+        // read permissions, then makes an elevated logon task, looks like
+        // malware to Windows Defender, which flagged it.
+        let safe = [dir, exe.as_path(), script.as_path(), ui.as_path()]
             .iter()
             .filter(|path| path.exists())
-            .map(|path| path.display().to_string())
-            .collect::<Vec<_>>()
-            .join("|");
-        let safe = std::process::Command::new(system("powershell.exe"))
-            .args(["-NoProfile", "-Command", ADMIN_ONLY])
-            .env("MICKEY_PATHS", paths)
-            .status()
-            .is_ok_and(|status| status.success());
+            .all(|path| crate::platform::acl::admin_only(path).unwrap_or(false));
         let level = if safe {
             "highest"
         } else {
