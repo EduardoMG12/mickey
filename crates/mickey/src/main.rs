@@ -1,6 +1,6 @@
 //! Mickey: one keyboard and mouse shared across computers on the LAN.
 
-// Not used yet: the audio streams use it from Audio 6 (#270) on.
+// Not used yet: the audio streams use them from Audio 6 (#270) on.
 #[allow(dead_code)]
 mod audio_wire;
 mod autostart;
@@ -23,6 +23,8 @@ mod history;
 mod hotkey;
 mod identity;
 mod input;
+#[allow(dead_code)]
+mod jitter;
 mod latency;
 mod monitors;
 // The Linux build never translates keys for Windows.
