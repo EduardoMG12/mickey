@@ -91,70 +91,60 @@ Screen edges need Windows or Hyprland for now.
 A PC on another network does not show up in the list: use **Add by
 address…**, and on that PC press **Let a new PC pair (2 min)**.
 
-## Try it from source
+## Everyday use
 
-Mickey is a command-line program today; a setup window comes later (M1b).
+### Hotkeys
 
-### Build
+| Keys | Does |
+|---|---|
+| **AltGr + Right Shift** | One other PC: go there, or come back. Two or more: open the switcher |
+| **AltGr + Right Shift + 1** … **+ 9** | Straight to that PC (in the order of the PCs tab) |
+| **AltGr + Right Shift + 0** | Back to this PC |
+| **AltGr + Up** | Open the switcher |
+| **AltGr + Right** / **AltGr + Left** | The next / previous PC, skipping the offline ones |
+| **Right Shift** twice, quickly | Same as AltGr + Right |
+| **Right Shift** held 3 s, or **AltGr + Right Shift** held 2 s | Home, always: no setting can take this away |
 
-Needs [Rust](https://rustup.rs). On Linux you can build both sides; the
-Windows `.exe` is cross-compiled:
+On keyboards without AltGr, it is the Right Alt key. A hotkey fires when
+you let go and only if nothing else was pressed, so AltGr + Q and Shift + 1
+still type. Change them in the **Hotkeys** tab (**Type** records the keys);
+saved hotkeys go to every PC in the group, so all use the same ones.
+
+### The switcher
+
+One card per PC; pick one with the arrow keys and Enter, or a click; Esc
+cancels. It opens on the PC you are looking at, and a view-only copy shows
+on the others. Choose its corner in the settings (**General**).
+
+### The clipboard and its history
+
+Nothing crosses on every copy: when the keyboard moves from one PC to
+another, what was copied on the first is put on the second. Received files
+land in a fresh folder under Mickey's cache (`~/.cache/mickey/received`,
+`%LOCALAPPDATA%\mickey\received`). **Clipboard history** (tray menu, or
+`mickey history`) lists the last 50 copies, searchable; pick one to copy it
+again. It lives in memory only and is gone when Mickey stops.
+
+### The tray, commands and Waybar
+
+The tray menu moves the keyboard to any PC and opens the settings and the
+history. The same things work from a terminal, for launchers and
+compositor binds (`mickey --help` lists them all):
 
 ```sh
-cargo build --release                                   # Linux: target/release/mickey
-rustup target add x86_64-pc-windows-gnu                 # once
-sudo pacman -S mingw-w64-gcc                            # once (Arch; other distros: mingw-w64)
-cargo build --release --target x86_64-pc-windows-gnu    # Windows: target/x86_64-pc-windows-gnu/release/mickey.exe
+mickey status          # where the keyboard is, and which PCs are online
+mickey go Desktop      # send the keyboard and mouse to the PC named Desktop
+mickey home            # bring them back
+mickey switcher        # show the switcher
 ```
 
-### Run
+A Hyprland bind such as `bind = SUPER ALT, 1, exec, mickey go Desktop` only
+reaches Mickey while the keyboard is on this PC; from another PC, use the
+hotkeys.
 
-On **Windows**, the machine to be controlled (allow the firewall prompt on
-**private networks only**):
-
-```sh
-mickey.exe target --listen 192.0.2.10:4242      # this PC's own LAN address
-```
-
-On **Linux**, the machine with the keyboard. Reading input devices needs the
-`input` group, once:
-
-```sh
-sudo usermod -aG input $USER                    # then log out and in again
-mickey source --to 192.0.2.10:4242              # the Windows PC's address
-```
-
-Instead of `--to`, you can list your PCs in `~/.config/mickey/config.toml`
-(`%APPDATA%\mickey\config.toml` on Windows) and run `mickey source`:
-
-```toml
-[[peer]]
-name = "Desktop"
-address = "192.0.2.10:4242"
-
-[touchpad]
-speed = 16      # higher is faster (1-200)
-```
-
-Press and release **AltGr + Right Shift** (Right Alt + Right Shift on
-keyboards without AltGr: it is the same key) to send the keyboard and
-touchpad (or mouse) to Windows; press it again to bring them back. To jump
-straight to a PC, add its number: **AltGr + Right Shift + 1** goes to the
-first PC in `config.toml`, **+ 2** to the second, and **+ 0** comes home.
-All of them can be changed in the settings window. `mickey --help`
-lists the commands.
-
-With **two or more PCs** in `config.toml`, the hotkey opens the **switcher**:
-one card per PC; pick one with the arrow keys and Enter, or click it; Esc
-cancels. From another PC, the hotkey brings you home and opens it. The
-switcher is a separate program, `mickey-ui`, which must sit next to `mickey`
-(`cargo build --release` builds both).
-
-`mickey status` shows where the focus is and which PCs are online.
-
-**Waybar.** Add a custom module (and put `"custom/mickey"` in one of the
-`modules-*` lists). It updates the moment the focus changes; left click
-opens the switcher, right click will open the settings:
+**Waybar:** a module that changes the moment the keyboard moves; left click
+opens the switcher, right click the settings. Its class is `local`,
+`remote` or `off`, for the bar's CSS:
 
 ```jsonc
 "custom/mickey": {
@@ -165,65 +155,26 @@ opens the switcher, right click will open the settings:
 }
 ```
 
-The module's class is `local`, `remote` or `off`, so the bar can show at a
-glance where you are typing:
+### Settings by hand
 
-```css
-#custom-mickey.remote { color: #f5a97f; }
-#custom-mickey.off    { opacity: 0.5; }
-```
+The settings window writes `config.toml` for you
+(`~/.config/mickey/config.toml`; `%APPDATA%\mickey\config.toml` on Windows),
+and follows it when another PC rewrites it. Editing it by hand works too;
+restart Mickey afterwards, or run `mickey arranged` after changing positions.
 
-**Commands.** While `mickey source` runs, `mickey go <name>` sends the
-keyboard and mouse to a PC from `config.toml`, `mickey home` brings them
-back and `mickey switcher` shows the switcher. They are meant for bars,
-launchers and compositor binds, e.g. on Hyprland (classic syntax):
+## Known limits
 
-```ini
-bind = SUPER ALT, 1, exec, mickey go Windows
-```
-
-Compositor binds only reach Mickey while the focus is on this PC; to come
-back from another PC, use Mickey's hotkey.
-
-The switcher appears in the **bottom-right corner** by default; choose
-another place in `config.toml`:
-
-```toml
-[interface]
-switcher_position = "bottom-right"   # or center, top-left, top-right, bottom-left
-```
-
-On Windows and X11 the window moves itself there. On Hyprland, `mickey-ui`
-adds the window rule itself (`hyprctl eval`), so nothing needs configuring.
-Other Wayland desktops place it themselves (usually centered) for now.
-
-On older Hyprland versions without `hyprctl eval`, the switcher tiles like
-any window unless a rule makes it float. Lua config (Hyprland 0.56+):
-
-```lua
-hl.window_rule({ name = "mickey-ui", match = { class = "^(mickey-ui)$" },
-                 float = true, center = true, pin = true })
-```
-
-Classic `hyprland.conf`:
-
-```ini
-windowrulev2 = float, class:^(mickey-ui)$
-windowrulev2 = center, class:^(mickey-ui)$
-windowrulev2 = pin, class:^(mickey-ui)$
-```
-
-### Known limits
-
-- **Hotkey only**, no screen edges yet (M1a). The hotkey is fixed.
+- **Screen edges only on Windows and Hyprland.** Elsewhere, use the hotkeys
+  and the switcher; native GNOME and KDE support is planned (#178).
+- **The switcher on GNOME and KDE (Wayland)** opens where the desktop puts
+  it, often centred and with a title bar, not in the chosen corner (#218).
 - **Touchpad:** one-finger motion and the physical click work; tap to click
-  and two-finger scroll do not yet. The speed is set in `config.toml`.
-- **Windows won't take input** in the lock screen, the UAC prompt,
-  `Ctrl+Alt+Del` or windows running as administrator. That is a Windows rule.
-- **The keyboard layout is Windows'**: keys are sent by position, so set
-  Windows to the same layout as your keyboard (e.g. ABNT2).
-- If something goes wrong while your keyboard is on Windows, the hotkey
-  still works; if Mickey itself dies, Linux gets the keyboard back at once.
+  and two-finger scroll do not yet. A wheel mouse scrolls.
+- **Windows' secure screens** (lock screen, UAC prompt, `Ctrl+Alt+Del`)
+  take no input from any program; if a PC refuses the input, the keyboard
+  comes home.
+- **Keys are sent by position**, so give both PCs the same keyboard layout
+  (e.g. ABNT2).
 - **No tray icon on stock GNOME** (Debian, Fedora Workstation): GNOME has
   no area for status icons of its own. Ubuntu ships the *AppIndicator and
   KStatusNotifierItem Support* extension switched on; elsewhere install
@@ -231,45 +182,57 @@ windowrulev2 = pin, class:^(mickey-ui)$
   turn it on in *Extensions* and log in again. Mickey works without it:
   `mickey status` says where the keyboard is, and `mickey settings` opens
   the settings window.
+- **The clipboard on GNOME (Wayland)** only sees what X11 apps copy: GNOME
+  offers other programs no way to follow the clipboard.
+- **The `input` group** lets every program you run read the keyboard, not
+  only Mickey; desktop portals are the long-term fix (#178).
+- **Local network only:** no relay over the internet.
 
 ## Security
 
-Everything you type crosses the network, so Mickey protects it:
+Everything you type crosses the network, so:
 
 - **Encrypted and authenticated.** Everything travels inside a Noise `XX`
   channel (X25519, ChaCha20-Poly1305, BLAKE2s): it cannot be read, changed
   or replayed.
-- **Paired machines only.** Each machine has its own key (`mickey id` shows
-  its fingerprint). The first time two machines meet, **both** screens show
-  both fingerprints:
-
-  ```text
-  mickey: new peer at 192.0.2.10:4242
-  mickey:   this PC:   NRMP-6SSY-5DJZ-2PXV-ZELA-PCWY-EWPC-BF43
-  mickey:   other PC:  E6AK-SYJ6-CDML-5HAY-445U-DABI-3N4X-BYZP
-  ```
-
-  Check that "other PC" on one screen matches "this PC" on the other, then
-  type `y` on both. Until both say yes, the target emits nothing and the
-  source sends nothing. After that they connect without asking. A machine
-  with any other key is asked about again, never trusted silently.
-  `mickey forget <fingerprint>` removes a paired machine.
-- **Never logged or stored:** what you type. Input goes only to the address
-  you give, and only if that machine holds the paired key.
+- **Paired PCs only.** Each PC has its own key (`mickey id` shows its
+  fingerprint). The six-digit code both pairing windows show comes from the
+  encrypted handshake itself: if both show the same code, no one is in
+  between. Trust is by key, never by address; reconnects never ask again.
+  `mickey forget <fingerprint>` removes a PC.
+- **The group:** a PC that one of your paired PCs introduces is trusted
+  too, so one pairing reaches the whole group.
+- **Never logged or stored:** what you type, and what you copy (only its
+  kind and size).
 - **Not covered:** someone who can already log in as you (they can read the
-  key files, as with SSH keys), and someone on the network who just wants to
-  break the connection.
+  key files, as with SSH keys), and someone on the network who just wants
+  to break the connection.
+
+Found a problem? See [SECURITY.md](SECURITY.md).
+
+## Build from source
+
+Needs [Rust](https://rustup.rs). On Linux you can build both; the Windows
+programs are cross-compiled:
+
+```sh
+cargo build --release                                   # Linux: target/release/mickey and mickey-ui
+rustup target add x86_64-pc-windows-gnu                 # once
+sudo pacman -S mingw-w64-gcc                            # once (Arch; other distros: mingw-w64)
+cargo build --release --target x86_64-pc-windows-gnu    # Windows: target/x86_64-pc-windows-gnu/release/
+```
+
+`mickey-ui` (the windows) must sit next to `mickey`. `cargo test` runs the
+tests; [CONTRIBUTING.md](CONTRIBUTING.md) has the rest.
 
 ## Roadmap
 
-| Milestone | What you get | Status |
-|---|---|---|
-| **M0: It crosses** | Press a hotkey, and a Linux PC's keyboard and mouse drive a Windows PC; press it again to come back ([PRD](docs/prds/0001-m0-hotkey-switch.md)) | working; final check pending |
-| **M1a: Screens have edges** | 3+ PCs in a layout: the cursor leaves your screen and enters the neighbor you configured, and back; Linux targets; encryption and pairing | planned |
-| **M1b: Point and click setup** | A window that draws each PC's monitors so you can arrange them with the mouse | planned |
-| **M2: Any desktop** | Native backends: X11, Wayland portals (GNOME/KDE), wlroots; Windows as the source | planned |
-| Later | Shared clipboard, file drag and drop, automatic discovery (mDNS), tray icon, macOS | ideas |
-| Someday | Sharing headphones and other USB peripherals, TeamViewer-style remote control | very long term |
+| Next | What you get |
+|---|---|
+| **Any desktop** | Native GNOME and KDE support through desktop portals: screen edges everywhere, no `input` group (#178) |
+| **Packages** | AUR, `.deb`, `.rpm`, winget, Scoop (#176) |
+| **macOS** | A first look at whether Mickey can run there (#177) |
+| Someday | Sharing headphones and other USB devices, remote control over the internet |
 
 ## Architecture at a glance
 
@@ -279,7 +242,7 @@ Everything you type crosses the network, so Mickey protects it:
 └───────────────────────────────────────────────────────────────┬───────┘
                                                                 │ LAN
 ┌─────────────── mickey on the controlled machine ──────────────▼───────┐
-│  transport ──► core ──► emit backend (uinput, XTest, SendInput, …)    │
+│  transport ──► core ──► emit backend (uinput on Linux, SendInput)     │
 └───────────────────────────────────────────────────────────────────────┘
 ```
 
