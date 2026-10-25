@@ -18,6 +18,8 @@ pub enum Click {
     Settings,
     /// Open the clipboard history window.
     History,
+    /// Make this PC the one that listens (PRD 0012).
+    ListenHere,
     Quit,
 }
 
@@ -95,6 +97,11 @@ impl ksni::Tray for Icon {
             menu.push(item(name.clone(), *online, Click::Go(index)));
         }
         menu.push(ksni::MenuItem::Separator);
+        menu.push(item(
+            "Listen here (every PC's sound)".into(),
+            true,
+            Click::ListenHere,
+        ));
         menu.push(item("Clipboard history".into(), true, Click::History));
         menu.push(item("Settings".into(), true, Click::Settings));
         menu.push(item("Quit Mickey".into(), true, Click::Quit));
@@ -147,6 +154,8 @@ const SETTINGS: u32 = 1000;
 const QUIT: u32 = 1001;
 #[cfg(windows)]
 const HISTORY: u32 = 1002;
+#[cfg(windows)]
+const LISTEN: u32 = 1003;
 
 #[cfg(windows)]
 impl Tray {
@@ -157,6 +166,7 @@ impl Tray {
             let click = match id {
                 SETTINGS => Click::Settings,
                 HISTORY => Click::History,
+                LISTEN => Click::ListenHere,
                 QUIT => Click::Quit,
                 1 => Click::Home,
                 peer => Click::Go(peer as usize - 2),
@@ -218,6 +228,7 @@ fn look(status: &Status) -> crate::platform::tray::Look {
         menu.push(item(name, *online, index as u32 + 2));
     }
     menu.push(item("", true, 0));
+    menu.push(item("Listen here (every PC's sound)", true, LISTEN));
     menu.push(item("Clipboard history", true, HISTORY));
     menu.push(item("Settings", true, SETTINGS));
     menu.push(item("Quit Mickey", true, QUIT));

@@ -48,6 +48,11 @@ pub struct Form {
     pub listener: Option<String>,
     /// Where this PC's own sound goes.
     pub mode: SoundMode,
+    /// Each PC's volume on the listener (0–100) and the muted PCs, by key.
+    pub volumes: std::collections::BTreeMap<String, u8>,
+    pub muted: Vec<String>,
+    /// When what every PC shares last changed (`Audio::since`).
+    pub since: u64,
     /// The switcher's custom order, by name; empty: as the layout goes.
     pub order: Vec<String>,
     pub speed: i32,
@@ -91,6 +96,9 @@ impl Form {
             history: config.clipboard.history,
             listener: config.audio.listener.clone(),
             mode: config.audio.mode,
+            volumes: config.audio.volumes.clone(),
+            muted: config.audio.muted.clone(),
+            since: config.audio.since,
             order: config.interface.switcher_order.clone(),
             speed: config.touchpad.speed,
         }
@@ -176,6 +184,9 @@ impl Form {
         let audio = Audio {
             listener: self.listener.clone(),
             mode: self.mode,
+            volumes: self.volumes.clone(),
+            muted: self.muted.clone(),
+            since: self.since,
         };
         if audio != Audio::default() {
             out += "\n[audio]\n";
@@ -197,12 +208,39 @@ impl Form {
 }
 
 /// A TOML basic string: quotes and backslashes escaped.
+/// A PC's volume on the listener and its mute, by its key; every PC shows
+/// and changes the same, which Mickey shares (PRD 0012).
+fn volume(
+    ui: &mut egui::Ui,
+    key: &str,
+    volumes: &mut std::collections::BTreeMap<String, u8>,
+    muted: &mut Vec<String>,
+) {
+    ui.horizontal(|ui| {
+        let mut level = volumes.get(key).copied().unwrap_or(100);
+        ui.spacing_mut().slider_width = 110.0;
+        if ui
+            .add(egui::Slider::new(&mut level, 0..=100).suffix("%"))
+            .changed()
+        {
+            volumes.insert(key.to_string(), level);
+        }
+        let mut silent = muted.iter().any(|muted| muted == key);
+        if ui.checkbox(&mut silent, "mute").changed() {
+            muted.retain(|muted| muted != key);
+            if silent {
+                muted.push(key.to_string());
+            }
+        }
+    });
+}
+
 /// "Who listens" and "This PC's sound" (PRD 0012), in the This PC tab: the
 /// listener is picked from every PC with a key, the same choice on every
 /// PC (Mickey shares it); the mode is this PC's own.
 fn sound(ui: &mut egui::Ui, form: &mut Form, own_key: Option<&str>) {
     let mut choices: Vec<(Option<String>, String)> =
-        vec![(None, "Nobody: each PC plays its own sound".into())];
+        vec![(None, "Nobody: each PC uses its own speakers".into())];
     if let Some(key) = own_key {
         choices.push((Some(key.to_string()), format!("This PC ({})", form.name)));
     }
@@ -211,36 +249,58 @@ fn sound(ui: &mut egui::Ui, form: &mut Form, own_key: Option<&str>) {
             choices.push((Some(key.clone()), pc.name.clone()));
         }
     }
-    let shown = choices
-        .iter()
-        .find(|(key, _)| *key == form.listener)
-        .map_or("a PC not in this list", |(_, name)| name.as_str())
-        .to_string();
-    ui.strong("Sound");
+    let name_of = |key: &Option<String>| {
+        choices
+            .iter()
+            .find(|(choice, _)| choice == key)
+            .map_or("a PC not in this list".to_string(), |(_, name)| {
+                name.clone()
+            })
+    };
+    let shown = name_of(&form.listener);
+    ui.strong("Shared sound");
     ui.add_space(4.0);
     ui.horizontal(|ui| {
-        ui.label("Who listens");
+        ui.label("Where are your headphones?");
         egui::ComboBox::from_id_salt("listener")
-            .selected_text(shown)
+            .selected_text(&shown)
             .width(260.0)
             .show_ui(ui, |ui| {
-                for (key, name) in choices {
+                for (key, name) in choices.clone() {
                     ui.selectable_value(&mut form.listener, key, name);
                 }
             });
     });
-    ui.weak("The PC with your headphones: every PC's sound plays there. Picked here, it changes on every PC.");
+    // What happens with these choices, in one sentence.
+    let here = form.listener.is_some() && form.listener.as_deref() == own_key;
+    let now = match (&form.listener, here, form.mode) {
+        (None, _, _) => "Each PC plays its own sound on its own speakers.".to_string(),
+        (Some(_), true, _) => "Every PC's sound plays here, on this PC's headphones.".to_string(),
+        (Some(_), false, SoundMode::Here) => "This PC's sound stays here.".to_string(),
+        (Some(_), false, SoundMode::Both) => {
+            format!("This PC's sound plays on {shown}, and here too.")
+        }
+        (Some(_), false, SoundMode::Listener) => {
+            format!("This PC's sound plays on {shown}; this PC stays quiet.")
+        }
+    };
+    ui.label(egui::RichText::new(format!("●  Now: {now}")).color(crate::theme::palette::HERE));
+    ui.weak("Picked on any PC, it changes on every PC.");
     ui.add_space(6.0);
-    ui.label("This PC's sound goes");
+    ui.label("When another PC has the headphones, this PC's sound:");
     for (mode, text) in [
-        (
-            SoundMode::Listener,
-            "To the PC that listens only (its speakers here stay silent)",
-        ),
-        (SoundMode::Both, "To the PC that listens, and here too"),
-        (SoundMode::Here, "Here only"),
+        (SoundMode::Listener, "goes there only (this PC goes quiet)"),
+        (SoundMode::Both, "goes there and plays here too"),
+        (SoundMode::Here, "stays here"),
     ] {
         ui.radio_value(&mut form.mode, mode, text);
+    }
+    if let Some(key) = own_key {
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            ui.label("Volume of this PC's sound there");
+            volume(ui, key, &mut form.volumes, &mut form.muted);
+        });
     }
 }
 
@@ -436,6 +496,18 @@ impl Settings {
     }
 
     fn save(&mut self) {
+        // What every PC shares changed here: newer than anyone's, so the
+        // other PCs take it (and an older one never undoes it).
+        let shared = |form: &Form| {
+            (
+                form.listener.clone(),
+                form.volumes.clone(),
+                form.muted.clone(),
+            )
+        };
+        if shared(&self.form) != shared(&self.saved) {
+            self.form.since = config::now_seconds();
+        }
         let text = self.form.to_toml();
         // The same check `mickey` makes when it reads the file.
         if let Err(err) = config::parse(&text) {
@@ -641,7 +713,7 @@ impl eframe::App for Settings {
                         ui.weak("None yet: connect one from the list below.");
                     }
                     let mut remove = None;
-                    egui::Grid::new("pcs").num_columns(5).spacing([10.0, 8.0]).show(ui, |ui| {
+                    egui::Grid::new("pcs").num_columns(6).spacing([10.0, 8.0]).show(ui, |ui| {
                         for (i, pc) in form.pcs.iter_mut().enumerate() {
                             let info = online(&pc.name);
                             let up = info.is_some_and(|info| info.online);
@@ -658,6 +730,12 @@ impl eframe::App for Settings {
                                 Some(n) => format!("{}  {n} monitors", icon::MONITOR),
                             });
                             ui.add_sized([170.0, 24.0], egui::TextEdit::singleline(&mut pc.hotkey).hint_text("own hotkey"));
+                            match &pc.key {
+                                Some(key) => volume(ui, key, &mut form.volumes, &mut form.muted),
+                                None => {
+                                    ui.weak("volume: once connected");
+                                }
+                            }
                             if ui.button(format!("{}  Remove", icon::TRASH)).clicked() {
                                 remove = Some(i);
                             }

@@ -42,9 +42,16 @@ fn attr(play_ahead: u32, fragment: u32) -> BufferAttr {
 pub struct Recorder(Simple);
 
 impl Recorder {
-    /// Records what the default output plays.
-    pub fn open() -> Result<Recorder, String> {
-        let source = DEFAULT_MONITOR;
+    /// Records what this PC plays: Mickey's silent sink by name once
+    /// `diverted` (asking for the default's monitor right after switching
+    /// the default still gave the speakers', a race the two-PC test found),
+    /// else the default output's.
+    pub fn open(diverted: bool) -> Result<Recorder, String> {
+        let source = if diverted {
+            "mickey.monitor"
+        } else {
+            DEFAULT_MONITOR
+        };
         Simple::new(
             None,
             "Mickey",
@@ -111,7 +118,7 @@ mod tests {
     #[test]
     #[ignore = "plays a tone on this PC for one second"]
     fn a_tone_played_comes_back_recorded() {
-        let mut recorder = Recorder::open().unwrap();
+        let mut recorder = Recorder::open(false).unwrap();
         let player = std::thread::spawn(|| {
             let mut player = Player::open("test").unwrap();
             let mut phase = 0f32;
