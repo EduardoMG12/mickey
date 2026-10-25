@@ -5,11 +5,9 @@
 
 #[cfg(target_os = "linux")]
 mod linux;
-#[allow(unused_imports)] // all used once streams start (#270)
 #[cfg(target_os = "linux")]
-pub use linux::{Diverted, clean_up, divert};
+pub use linux::{clean_up, divert};
 #[cfg(windows)]
 mod windows;
-#[allow(unused_imports)] // all used once streams start (#270)
 #[cfg(windows)]
-pub use windows::{Diverted, clean_up, divert};
+pub use windows::{clean_up, divert};

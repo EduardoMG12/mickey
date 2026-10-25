@@ -60,12 +60,13 @@ impl Recorder {
     }
 
     /// The next 5 ms; waits for them.
-    pub fn read(&mut self) -> Result<[u8; PCM_BYTES], String> {
+    /// (A monitor always gives sound, silence included: never `None`.)
+    pub fn read(&mut self) -> Result<Option<[u8; PCM_BYTES]>, String> {
         let mut pcm = [0u8; PCM_BYTES];
         self.0
             .read(&mut pcm)
             .map_err(|err| format!("recording stopped: {err}"))?;
-        Ok(pcm)
+        Ok(Some(pcm))
     }
 }
 
@@ -128,7 +129,10 @@ mod tests {
         let started = std::time::Instant::now();
         let (mut first, mut sum, mut n) = (None, 0f64, 0usize);
         for _ in 0..240 {
-            let pcm = recorder.read().unwrap();
+            let pcm = recorder
+                .read()
+                .unwrap()
+                .expect("a monitor always gives sound");
             let loud = samples(&pcm).iter().any(|s| s.unsigned_abs() > 1000);
             if loud && first.is_none() {
                 first = Some(started.elapsed());
