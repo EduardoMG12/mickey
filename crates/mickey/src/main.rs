@@ -1,7 +1,6 @@
 //! Mickey: one keyboard and mouse shared across computers on the LAN.
 
-// Not used yet: the audio streams use them from Audio 6 (#270) on.
-#[allow(dead_code)]
+mod audio;
 mod audio_wire;
 mod autostart;
 #[cfg(target_os = "linux")]
@@ -23,7 +22,6 @@ mod history;
 mod hotkey;
 mod identity;
 mod input;
-#[allow(dead_code)]
 mod jitter;
 mod latency;
 mod monitors;
@@ -35,12 +33,8 @@ mod protocol;
 mod received;
 mod record;
 mod secure;
-// Not used yet: the audio streams use it from Audio 6 (#270) on.
-#[allow(dead_code)]
 mod sound;
 mod source;
-// `divert` is used once streams start (#270); `clean_up` already is.
-#[allow(dead_code)]
 mod speakers;
 mod transport;
 mod tray;
@@ -356,6 +350,14 @@ fn run_from_config() -> Result<(), String> {
         port: this_pc.listen.port(),
         key: *identity.public(),
     };
+    // Ready for other PCs' sound, should this PC be the one that listens
+    // (PRD 0012).
+    if let Err(err) = audio::listen(audio::port(this_pc.listen.port())) {
+        eprintln!(
+            "mickey: no shared audio: cannot listen on UDP {}: {err}",
+            audio::port(this_pc.listen.port())
+        );
+    }
     let found = discovery::start(me)
         .inspect_err(|err| eprintln!("mickey: {err}; other PCs will not show up by themselves"))
         .ok();
@@ -620,6 +622,20 @@ fn serve_clipboard(
                             group::HOTKEYS => {
                                 let _ =
                                     controlled.send(source::TargetNews::Hotkeys(text.to_string()));
+                            }
+                            group::AUDIO_KEY => {
+                                // Named after the PC, as config.toml knows it.
+                                let name = config::Config::load()
+                                    .ok()
+                                    .flatten()
+                                    .and_then(|config| {
+                                        config
+                                            .peers
+                                            .into_iter()
+                                            .find(|peer| peer.address.ip() == from)
+                                    })
+                                    .map_or_else(|| from.to_string(), |peer| peer.name);
+                                audio::heard_key(text, from, &name);
                             }
                             group::AUDIO => {
                                 let _ =

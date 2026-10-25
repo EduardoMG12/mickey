@@ -246,6 +246,14 @@ impl Mover {
         )));
     }
 
+    /// Gives `peer`, the PC that listens, this PC's audio stream key.
+    pub fn give_audio_key(&self, peer: usize, hex: &str) {
+        let _ = self.0.send(Job::SendTo(
+            peer,
+            crate::group::tagged(crate::group::AUDIO_KEY, hex),
+        ));
+    }
+
     /// Tells every peer who listens (`[audio]`'s shared lines), now and as
     /// links open.
     pub fn share_audio(&self, lines: &str) {

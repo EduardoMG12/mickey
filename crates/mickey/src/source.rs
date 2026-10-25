@@ -254,7 +254,7 @@ fn arrange(positions: &mut [Option<[i32; 2]>], peers: &mut [Peer]) -> String {
 /// Writes who listens, as a peer shared it, into config.toml, keeping this
 /// PC's own mode; nothing when it is already so (every new data link
 /// sends it again).
-fn take_audio(lines: &str) -> Result<(), String> {
+fn take_audio(lines: &str) -> Result<config::Audio, String> {
     let path = config::path()?;
     let text = std::fs::read_to_string(&path).unwrap_or_default();
     let mine = config::parse(&text)?.audio;
@@ -263,7 +263,36 @@ fn take_audio(lines: &str) -> Result<(), String> {
         config::write(&path, &config::set_audio(&text, &taken)?)?;
         println!("mickey: another PC changed who listens");
     }
-    Ok(())
+    Ok(taken)
+}
+
+/// Where this PC's sound should go now (PRD 0012): the listener's audio
+/// port and its index, when another PC listens, is online, and this PC's
+/// mode sends.
+fn audio_target(
+    audio: &config::Audio,
+    me: &[u8; 32],
+    peers: &[Peer],
+    online: &[bool],
+) -> Option<(usize, SocketAddr)> {
+    if audio.mode == config::SoundMode::Here {
+        return None;
+    }
+    let listener = audio.listener.as_deref()?;
+    if listener == crate::trust::to_hex(me) {
+        return None;
+    }
+    let index = peers.iter().position(|peer| {
+        peer.key
+            .is_some_and(|key| crate::trust::to_hex(&key) == listener)
+    })?;
+    let address = peers[index].address;
+    online[index].then(|| {
+        (
+            index,
+            SocketAddr::new(address.ip(), crate::audio::port(address.port())),
+        )
+    })
 }
 
 /// Asks, on its own thread (the main loop must keep moving keys), whether
@@ -578,9 +607,16 @@ pub fn run(
     // The clipboard follows the keyboard (PRD 0011), over data links.
     let mover = keeper.clone().map(Mover::start);
     // Who listens, to every peer as its data link opens (PRD 0012).
-    if let (Some(mover), Ok(Some(config))) = (&mover, config::Config::load()) {
-        mover.share_audio(&config.audio.shared_lines());
+    let mut audio = config::Config::load()
+        .ok()
+        .flatten()
+        .map(|config| config.audio)
+        .unwrap_or_default();
+    if let Some(mover) = &mover {
+        mover.share_audio(&audio.shared_lines());
     }
+    // This PC's sound on its way to the listener, while it should be.
+    let mut sending: Option<(usize, crate::audio::Sending)> = None;
     println!("mickey: AltGr + Right Shift switches focus");
 
     // One channel wakes the loop for input, a switcher pick or an order
@@ -841,6 +877,19 @@ pub fn run(
         // Reuses one buffer: no allocation per input event.
         online.clear();
         online.extend(peers.iter().map(|peer| peer.link.is_some()));
+        let target = audio_target(&audio, shared.identity.public(), &peers, &online);
+        if target.map(|(_, to)| to) != sending.as_ref().map(|(_, sending)| sending.to()) {
+            // Dropping the old one gives the speakers back.
+            sending = None;
+            if let (Some((index, to)), Some(mover)) = (target, &mover) {
+                let mover = mover.clone();
+                let give_key = move |hex: &str| mover.give_audio_key(index, hex);
+                match crate::audio::Sending::start(to, audio.mode, give_key) {
+                    Ok(started) => sending = Some((index, started)),
+                    Err(err) => eprintln!("mickey: {err}"),
+                }
+            }
+        }
         let mut open = false;
         // The switcher shown on the focused peer instead (it is where the
         // owner is looking).
@@ -1043,6 +1092,7 @@ pub fn run(
                     mover.share_hotkeys(&config.hotkeys.to_lines());
                     mover.share_audio(&config.audio.shared_lines());
                 }
+                audio = config.audio.clone();
             }
             // Everyone gets the new places, not only the PCs moved.
             shared_with.clear();
@@ -1069,10 +1119,11 @@ pub fn run(
         if let Some(lines) = heard_hotkeys {
             pending_hotkeys = Some(lines);
         }
-        if let Some(lines) = heard_audio
-            && let Err(err) = take_audio(&lines)
-        {
-            eprintln!("mickey: cannot take who listens from another PC: {err}");
+        if let Some(lines) = heard_audio {
+            match take_audio(&lines) {
+                Ok(taken) => audio = taken,
+                Err(err) => eprintln!("mickey: cannot take who listens from another PC: {err}"),
+            }
         }
         // Never while the keyboard is on another PC: new hotkeys could leave
         // no way home from there (#182). They wait until it is back.

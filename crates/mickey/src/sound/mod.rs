@@ -6,12 +6,10 @@ use crate::audio_wire::PCM_BYTES;
 
 #[cfg(target_os = "linux")]
 mod linux;
-#[allow(unused_imports)] // all used once streams start (#270)
 #[cfg(target_os = "linux")]
 pub use linux::{Player, Recorder};
 #[cfg(windows)]
 mod windows;
-#[allow(unused_imports)] // all used once streams start (#270)
 #[cfg(windows)]
 pub use windows::{Player, Recorder};
 
@@ -33,7 +31,8 @@ pub fn at_volume(pcm: &[u8; PCM_BYTES], volume: f32) -> [u8; PCM_BYTES] {
     out
 }
 
-/// The samples of 5 ms of PCM.
+/// The samples of 5 ms of PCM (the tests listen with it).
+#[cfg(test)]
 pub fn samples(pcm: &[u8; PCM_BYTES]) -> Vec<i16> {
     pcm.as_chunks::<2>()
         .0

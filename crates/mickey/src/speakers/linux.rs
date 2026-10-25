@@ -102,7 +102,6 @@ impl Pulse {
         Ok(found.take())
     }
 
-    #[allow(dead_code)] // sending starts in Audio 6 (#270)
     fn load_sink(&mut self, restore: &str) -> Result<u32, String> {
         let index = Rc::new(RefCell::new(u32::MAX));
         let into = Rc::clone(&index);
@@ -139,11 +138,9 @@ fn restore_of(argument: &str) -> Option<String> {
 }
 
 /// The sound taken off the speakers; given back when dropped.
-#[allow(dead_code)] // sending starts in Audio 6 (#270)
 pub struct Diverted;
 
 /// Makes `mickey` the default output, after putting back any left over.
-#[allow(dead_code)] // sending starts in Audio 6 (#270)
 pub fn divert() -> Result<Diverted, String> {
     clean_up()?;
     let mut pulse = Pulse::connect()?;

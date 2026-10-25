@@ -56,10 +56,13 @@ impl Recorder {
         })
     }
 
-    /// The next 5 ms; waits for them (while nothing plays, that is until
-    /// something does).
-    pub fn read(&mut self) -> Result<[u8; PCM_BYTES], String> {
-        while self.queue.len() < PCM_BYTES {
+    /// The next 5 ms; `None` after 50 ms with nothing, which is what a
+    /// loopback capture gives while nothing plays (so the caller can stop).
+    pub fn read(&mut self) -> Result<Option<[u8; PCM_BYTES]>, String> {
+        for _ in 0..25 {
+            if self.queue.len() >= PCM_BYTES {
+                break;
+            }
             self.capture
                 .read_from_device_to_deque(&mut self.queue)
                 .map_err(|err| format!("recording stopped: {err}"))?;
@@ -67,11 +70,14 @@ impl Recorder {
                 std::thread::sleep(Duration::from_millis(2));
             }
         }
+        if self.queue.len() < PCM_BYTES {
+            return Ok(None);
+        }
         let mut pcm = [0u8; PCM_BYTES];
         for (byte, queued) in pcm.iter_mut().zip(self.queue.drain(..PCM_BYTES)) {
             *byte = queued;
         }
-        Ok(pcm)
+        Ok(Some(pcm))
     }
 }
 
@@ -158,7 +164,9 @@ mod tests {
         let started = std::time::Instant::now();
         let (mut first, mut sum, mut n) = (None, 0f64, 0usize);
         for _ in 0..200 {
-            let pcm = recorder.read().unwrap();
+            let Some(pcm) = recorder.read().unwrap() else {
+                continue;
+            };
             let all = samples(&pcm);
             if first.is_none() && all.iter().any(|s| s.unsigned_abs() > 1000) {
                 first = Some(started.elapsed());
