@@ -118,6 +118,10 @@ anything about focus; every other thread feeds it through one channel of
 | Clipboard watch and history | `clip_watch.rs`, `history::record` | Notice every copy, add it to the in-memory history |
 | Control socket, two | `control::Control::start` | One accepts requests, one pushes status lines to `follow` clients |
 | Tray | `tray.rs`, `platform/tray.rs` | `ksni` on its own thread on Linux; a hidden window with a message loop on Windows |
+| Audio in | `audio::listen` | Receives audio datagrams on UDP 4244, opens them with the keys the data links brought, hands each to its sending PC's player |
+| Audio out, one per sending PC (listener) | `audio::play` | Jitter buffer and player for one PC's sound; ends after 250 ms of nothing, starts again with the next sound |
+| Audio out (sender) | `audio::Sending` | Takes the sound off the speakers, records what this PC plays, seals and sends it to the listener |
+| Signals (Linux) | `platform/signals.rs` | Waits for SIGTERM, SIGINT and SIGHUP, gives the sound back to the speakers, ends |
 
 Why so many threads: each one blocks on exactly one thing (a device, a
 socket, a child process), so the main loop never waits on the network or a

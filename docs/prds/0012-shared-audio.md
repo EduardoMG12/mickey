@@ -124,6 +124,23 @@ speakers stay silent the whole time.
   of the physical outputs sees nothing: only an ear can check them.) The
   listener's sound plays into the default output too, so it follows the
   owner's Voicemeeter routing.
+- **First two-PC run, and its delay** (2026-10-24, the owner's Arch
+  laptop and Windows 10 PC over Wi-Fi). Both ways worked: the Windows
+  PC's sound on the laptop's headphones ("nearly real time", the owner),
+  and the laptop's on the Windows PC's, mixed with its own. Measured
+  pieces of Windows → laptop: capture on Windows ~11 ms (half of a 22.8 ms
+  play-and-capture round trip), Wi-Fi ~8 ms average one way (ping 16 ms
+  average, 69 ms worst of 50), the jitter buffer 15 ms (once 20), playback
+  on Linux ~30 ms (half of the VM's 65 ms round trip): about **65 ms** in
+  all on Wi-Fi. The cable budget (p99 < 40 ms) is still to measure (#272,
+  with #191); Linux playback (20 ms queued, plus PipeWire's quantum) is
+  the first thing to trim.
+- **Two bugs the run found, fixed before merging.** Each Mickey shares who
+  listens when it starts, so a PC restarted with an old config.toml undid
+  a newer choice: the shared settings carry `since` and only newer ones
+  are taken. And asking PipeWire for `@DEFAULT_MONITOR@` right after
+  switching the default still gave the speakers' monitor, so Linux
+  recorded silence: Mickey records `mickey.monitor` by name.
 - **On Linux, muting is not the way, unlike Windows.** A sink's monitor
   follows its mute and volume on PipeWire (tone at 0.21 RMS: muted 0.0,
   volume 0 0.0), so the null sink stays: Mickey cannot mute the speakers
