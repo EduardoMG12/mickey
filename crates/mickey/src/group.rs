@@ -28,6 +28,9 @@ pub const SWITCHER: u8 = 18;
 pub const MIRROR: u8 = 19;
 /// Close the switcher (or its copy) shown for the source: a pick was made.
 pub const CLOSE: u8 = 20;
+/// The first byte of who listens (PRD 0012): the `[audio]` lines every PC
+/// shares (`Audio::shared_lines`; empty, nobody).
+pub const AUDIO: u8 = 21;
 
 /// Whether `ip` is on a local network: private IPv4 ranges, link-local,
 /// the 100.64.0.0/10 range VPNs such as Tailscale use, IPv6 unique-local

@@ -21,7 +21,7 @@ usage:
   mickey arranged                    after editing positions in config.toml: use them and
                                      tell the other PCs (the settings window does this)
   mickey settings                    open the settings window
-  mickey id                          show this machine's fingerprint
+  mickey id [--key]                  show this machine's fingerprint (--key: its public key)
   mickey monitors                    list this machine's monitors
   mickey peers                       list the PCs, whether they are online, and their monitors
   mickey discover [--lines]          list the PCs running Mickey on this network
@@ -60,6 +60,9 @@ pub enum Command {
     },
     Settings,
     Id,
+    /// `mickey id --key`: this PC's public key, as config.toml writes it
+    /// (the settings window marks this PC in "Who listens" with it).
+    IdKey,
     /// Start with the system: `Some(on)` sets it, `None` asks.
     Autostart(Option<bool>),
     Status {
@@ -87,6 +90,7 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
             Ok(Command::Version)
         }
         [command] if command == "id" => Ok(Command::Id),
+        [command, flag] if command == "id" && flag == "--key" => Ok(Command::IdKey),
         [command] if command == "run" => Ok(Command::Run),
         [command] if command == "monitors" => Ok(Command::Monitors),
         [command] if command == "peers" => Ok(Command::Peers),

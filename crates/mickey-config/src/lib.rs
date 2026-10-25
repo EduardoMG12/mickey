@@ -54,6 +54,8 @@ pub struct Config {
     #[serde(default)]
     pub clipboard: Clipboard,
     #[serde(default)]
+    pub audio: Audio,
+    #[serde(default)]
     pub this_pc: ThisPc,
 }
 
@@ -187,6 +189,84 @@ pub struct Clipboard {
     /// manager runs (#257).
     #[serde(default)]
     pub history: Option<bool>,
+}
+
+/// `[audio]` (PRD 0012): which PC listens, and where this PC's sound goes.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct Audio {
+    /// The public key (64 hex digits) of the PC whose speakers or
+    /// headphones play every PC's sound; not set, nobody: each PC plays its
+    /// own. A key, not a name: each PC may name the others its own way.
+    /// The same on every PC: picked on one, it is sent to the others.
+    #[serde(default)]
+    pub listener: Option<String>,
+    /// Where this PC's own sound goes. This PC's alone, never sent.
+    #[serde(default)]
+    pub mode: SoundMode,
+}
+
+/// Where a PC's sound goes while another PC listens.
+#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum SoundMode {
+    /// To the listener only: this PC's speakers stay silent.
+    #[default]
+    Listener,
+    /// To the listener, and on this PC's speakers too.
+    Both,
+    /// On this PC's speakers only: nothing is sent.
+    Here,
+}
+
+impl SoundMode {
+    pub fn word(self) -> &'static str {
+        match self {
+            SoundMode::Listener => "listener",
+            SoundMode::Both => "both",
+            SoundMode::Here => "here",
+        }
+    }
+}
+
+impl Audio {
+    /// The section's lines, as config.toml takes them (no header).
+    pub fn to_lines(&self) -> String {
+        let mut lines = String::new();
+        if let Some(listener) = &self.listener {
+            lines += &format!("listener = {}\n", toml_string(listener));
+        }
+        if self.mode != SoundMode::default() {
+            lines += &format!("mode = {}\n", toml_string(self.mode.word()));
+        }
+        lines
+    }
+
+    /// What every PC shares: who listens. (Each PC's mode is its own.)
+    pub fn shared_lines(&self) -> String {
+        Audio {
+            listener: self.listener.clone(),
+            mode: SoundMode::default(),
+        }
+        .to_lines()
+    }
+
+    /// This PC's audio with the listener another PC sent (`shared_lines`).
+    pub fn taking(&self, lines: &str) -> Result<Audio, String> {
+        let heard: Audio = toml::from_str(lines).map_err(|err| err.to_string())?;
+        if heard.listener.as_ref().is_some_and(|key| !is_key(key)) {
+            return Err("a listener that is not a public key".into());
+        }
+        Ok(Audio {
+            listener: heard.listener,
+            mode: self.mode,
+        })
+    }
+}
+
+/// 64 hex digits: a public key as config.toml keeps it.
+fn is_key(text: &str) -> bool {
+    text.len() == 64 && text.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
 fn default_switcher_position() -> String {
@@ -526,13 +606,25 @@ impl Hotkeys {
 /// `hotkeys`, in place, or added at the end. Other lines are kept, and the
 /// result is checked with `parse`.
 pub fn set_hotkeys(text: &str, hotkeys: &Hotkeys) -> Result<String, String> {
-    let section = format!("[hotkeys]\n{}", hotkeys.to_lines());
+    set_section(text, "hotkeys", &hotkeys.to_lines())
+}
+
+/// `text` (a config.toml) with its `[audio]` section replaced by `audio`.
+pub fn set_audio(text: &str, audio: &Audio) -> Result<String, String> {
+    set_section(text, "audio", &audio.to_lines())
+}
+
+/// `text` with section `[name]` replaced by `lines`, in place, or added at
+/// the end. Other lines are kept, and the result is checked with `parse`.
+fn set_section(text: &str, name: &str, lines: &str) -> Result<String, String> {
+    let header = format!("[{name}]");
+    let section = format!("{header}\n{lines}");
     let mut out: Vec<String> = Vec::new();
     let (mut skipping, mut done) = (false, false);
     for line in text.lines() {
         let trimmed = line.trim_start();
         if trimmed.starts_with('[') {
-            skipping = trimmed.starts_with("[hotkeys]");
+            skipping = trimmed.starts_with(&header);
             if skipping {
                 out.push(section.clone());
                 out.push(String::new());
@@ -771,6 +863,7 @@ mod tests {
                 hotkeys: Hotkeys::default(),
                 interface: Interface::default(),
                 clipboard: Clipboard::default(),
+                audio: Audio::default(),
                 this_pc: ThisPc::default(),
             }
         );
@@ -779,6 +872,54 @@ mod tests {
             None,
             "automatic unless set"
         );
+    }
+
+    const KEY_A: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+    #[test]
+    fn audio_is_nobody_listening_unless_set() {
+        assert_eq!(parse("").unwrap().audio, Audio::default());
+        let config = parse(&format!(
+            "[audio]\nlistener = \"{KEY_A}\"\nmode = \"both\"\n"
+        ))
+        .unwrap();
+        assert_eq!(config.audio.listener.as_deref(), Some(KEY_A));
+        assert_eq!(config.audio.mode, SoundMode::Both);
+        assert!(parse("[audio]\nmode = \"loud\"\n").is_err());
+    }
+
+    #[test]
+    fn a_heard_listener_keeps_this_pcs_mode() {
+        let mine = Audio {
+            listener: None,
+            mode: SoundMode::Here,
+        };
+        let sent = Audio {
+            listener: Some(KEY_A.into()),
+            mode: SoundMode::Both,
+        };
+        // Only who listens travels.
+        assert_eq!(sent.shared_lines(), format!("listener = \"{KEY_A}\"\n"));
+        let taken = mine.taking(&sent.shared_lines()).unwrap();
+        assert_eq!(taken.listener.as_deref(), Some(KEY_A));
+        assert_eq!(taken.mode, SoundMode::Here);
+        assert!(mine.taking("listener = \"not-a-key\"\n").is_err());
+        // Nobody: the empty lines.
+        assert_eq!(mine.taking("").unwrap().listener, None);
+    }
+
+    #[test]
+    fn the_audio_section_is_replaced_in_place() {
+        let text = "[clipboard]\nhistory = false\n\n[audio]\nmode = \"here\"\n\n[this_pc]\nname = \"Desk\"\n";
+        let audio = Audio {
+            listener: Some(KEY_A.into()),
+            mode: SoundMode::Here,
+        };
+        let new = set_audio(text, &audio).unwrap();
+        let config = parse(&new).unwrap();
+        assert_eq!(config.audio, audio);
+        assert_eq!(config.this_pc.name(), "Desk", "other sections kept");
+        assert_eq!(new.matches("[audio]").count(), 1);
     }
 
     #[test]

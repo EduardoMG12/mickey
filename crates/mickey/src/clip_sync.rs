@@ -142,6 +142,8 @@ enum Job {
     Map(Vec<u8>),
     /// Send this to every peer once (the shared hotkeys).
     Broadcast(Vec<u8>),
+    /// Who listens changed: send it to every peer, now and as links open.
+    Audio(Vec<u8>),
     /// Send this to one peer (the switcher, shown there).
     SendTo(usize, Vec<u8>),
     /// The keyboard went from `from` to `to` (`None`: this PC).
@@ -156,8 +158,10 @@ impl Mover {
         let (jobs, todo) = mpsc::channel();
         thread::spawn(move || {
             let mut links: HashMap<usize, Link> = HashMap::new();
-            // The latest map, for links that open after it was shared.
+            // The latest map and listener, for links that open after they
+            // were shared.
             let mut map: Option<Vec<u8>> = None;
+            let mut audio: Option<Vec<u8>> = None;
             for job in todo {
                 match job {
                     Job::Link(peer, mut link) => {
@@ -168,7 +172,11 @@ impl Mover {
                         if link.set_read_timeout(Some(ANSWER_WAIT)).is_err() {
                             continue;
                         }
-                        if map.as_ref().is_none_or(|map| link.send_bulk(map).is_ok()) {
+                        let sent = [&map, &audio]
+                            .into_iter()
+                            .flatten()
+                            .all(|bytes| link.send_bulk(bytes).is_ok());
+                        if sent {
                             links.insert(peer, link);
                         }
                     }
@@ -185,6 +193,10 @@ impl Mover {
                     Job::Map(bytes) => {
                         links.retain(|_, link| link.send_bulk(&bytes).is_ok());
                         map = Some(bytes);
+                    }
+                    Job::Audio(bytes) => {
+                        links.retain(|_, link| link.send_bulk(&bytes).is_ok());
+                        audio = Some(bytes);
                     }
                     Job::Moved { from, to } => carry(&keeper, &mut links, from, to),
                 }
@@ -232,6 +244,14 @@ impl Mover {
             crate::group::HOTKEYS,
             lines,
         )));
+    }
+
+    /// Tells every peer who listens (`[audio]`'s shared lines), now and as
+    /// links open.
+    pub fn share_audio(&self, lines: &str) {
+        let _ = self
+            .0
+            .send(Job::Audio(crate::group::tagged(crate::group::AUDIO, lines)));
     }
 
     pub fn moved(&self, from: Option<usize>, to: Option<usize>) {

@@ -61,6 +61,8 @@ enum Wake {
     Group(Vec<group::Member>, [u8; 32]),
     /// A peer's hotkeys, to take.
     Hotkeys(String),
+    /// Who listens, from a peer.
+    Audio(String),
     /// The person here accepted a PC the group introduced (#184).
     Accepted(group::Member, [u8; 32]),
 }
@@ -249,6 +251,21 @@ fn arrange(positions: &mut [Option<[i32; 2]>], peers: &mut [Peer]) -> String {
 /// because a trusted member vouches for it (the owner's choice, PRD 0010);
 /// its place taken if it has one; added to config.toml and to `peers` if
 /// this PC did not know it. Returns the new peer's index, to connect to.
+/// Writes who listens, as a peer shared it, into config.toml, keeping this
+/// PC's own mode; nothing when it is already so (every new data link
+/// sends it again).
+fn take_audio(lines: &str) -> Result<(), String> {
+    let path = config::path()?;
+    let text = std::fs::read_to_string(&path).unwrap_or_default();
+    let mine = config::parse(&text)?.audio;
+    let taken = mine.taking(lines)?;
+    if taken != mine {
+        config::write(&path, &config::set_audio(&text, &taken)?)?;
+        println!("mickey: another PC changed who listens");
+    }
+    Ok(())
+}
+
 /// Asks, on its own thread (the main loop must keep moving keys), whether
 /// to let `member` join, as `introducer` (who sent the map) says it is in
 /// the group. A yes comes back as `Wake::Accepted`; anything else leaves
@@ -471,6 +488,8 @@ pub enum TargetNews {
     },
     /// A peer's `[hotkeys]` lines, saved there: the group shares hotkeys.
     Hotkeys(String),
+    /// Who listens, as a peer shared it (PRD 0012).
+    Audio(String),
 }
 
 /// What the rest of Mickey shares with the source. Each is optional:
@@ -558,6 +577,10 @@ pub fn run(
     }
     // The clipboard follows the keyboard (PRD 0011), over data links.
     let mover = keeper.clone().map(Mover::start);
+    // Who listens, to every peer as its data link opens (PRD 0012).
+    if let (Some(mover), Ok(Some(config))) = (&mover, config::Config::load()) {
+        mover.share_audio(&config.audio.shared_lines());
+    }
     println!("mickey: AltGr + Right Shift switches focus");
 
     // One channel wakes the loop for input, a switcher pick or an order
@@ -594,6 +617,7 @@ pub fn run(
                     TargetNews::Arranged { from, position } => Wake::Arranged(from, position),
                     TargetNews::Group { members, by } => Wake::Group(members, by),
                     TargetNews::Hotkeys(lines) => Wake::Hotkeys(lines),
+                    TargetNews::Audio(lines) => Wake::Audio(lines),
                 };
                 if wake.send(woken).is_err() {
                     return;
@@ -858,6 +882,7 @@ pub fn run(
         let mut heard_map = None;
         let mut accepted = None;
         let mut heard_hotkeys = None;
+        let mut heard_audio = None;
         // A PC to connect to from the settings: handled below, like `join`.
         let mut connecting = None;
         let mut asked_to_arrange = None;
@@ -903,6 +928,7 @@ pub fn run(
             Ok(Wake::Group(members, by)) => heard_map = Some((members, by)),
             Ok(Wake::Accepted(member, by)) => accepted = Some((member, by)),
             Ok(Wake::Hotkeys(lines)) => heard_hotkeys = Some(lines),
+            Ok(Wake::Audio(lines)) => heard_audio = Some(lines),
             Ok(Wake::Control(request)) if request.order == Order::Arranged => {
                 asked_to_arrange = Some(request.reply);
             }
@@ -1015,6 +1041,7 @@ pub fn run(
                 interface = config.interface.clone();
                 if let Some(mover) = &mover {
                     mover.share_hotkeys(&config.hotkeys.to_lines());
+                    mover.share_audio(&config.audio.shared_lines());
                 }
             }
             // Everyone gets the new places, not only the PCs moved.
@@ -1041,6 +1068,11 @@ pub fn run(
         }
         if let Some(lines) = heard_hotkeys {
             pending_hotkeys = Some(lines);
+        }
+        if let Some(lines) = heard_audio
+            && let Err(err) = take_audio(&lines)
+        {
+            eprintln!("mickey: cannot take who listens from another PC: {err}");
         }
         // Never while the keyboard is on another PC: new hotkeys could leave
         // no way home from there (#182). They wait until it is back.

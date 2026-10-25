@@ -5,7 +5,7 @@
 use crate::layout;
 use eframe::egui;
 use mickey_config::peers::Peers;
-use mickey_config::{self as config, Config, SWITCHER_POSITIONS};
+use mickey_config::{self as config, Audio, Config, SWITCHER_POSITIONS, SoundMode};
 use std::process::Command;
 use std::time::{Duration, Instant};
 
@@ -44,6 +44,10 @@ pub struct Form {
     /// Keep a clipboard history here: always, never (another manager keeps
     /// it), or `None`, only when no other manager runs.
     pub history: Option<bool>,
+    /// Who listens (PRD 0012): a PC's public key; `None`, nobody.
+    pub listener: Option<String>,
+    /// Where this PC's own sound goes.
+    pub mode: SoundMode,
     /// The switcher's custom order, by name; empty: as the layout goes.
     pub order: Vec<String>,
     pub speed: i32,
@@ -85,6 +89,8 @@ impl Form {
             position: config.interface.switcher_position.clone(),
             vertical: config.interface.switcher_vertical,
             history: config.clipboard.history,
+            listener: config.audio.listener.clone(),
+            mode: config.audio.mode,
             order: config.interface.switcher_order.clone(),
             speed: config.touchpad.speed,
         }
@@ -167,6 +173,14 @@ impl Form {
             let names: Vec<String> = self.order.iter().map(|name| quote(name)).collect();
             out += &format!("switcher_order = [{}]\n", names.join(", "));
         }
+        let audio = Audio {
+            listener: self.listener.clone(),
+            mode: self.mode,
+        };
+        if audio != Audio::default() {
+            out += "\n[audio]\n";
+            out += &audio.to_lines();
+        }
         match self.history {
             None => {}
             Some(true) => {
@@ -183,6 +197,53 @@ impl Form {
 }
 
 /// A TOML basic string: quotes and backslashes escaped.
+/// "Who listens" and "This PC's sound" (PRD 0012), in the This PC tab: the
+/// listener is picked from every PC with a key, the same choice on every
+/// PC (Mickey shares it); the mode is this PC's own.
+fn sound(ui: &mut egui::Ui, form: &mut Form, own_key: Option<&str>) {
+    let mut choices: Vec<(Option<String>, String)> =
+        vec![(None, "Nobody: each PC plays its own sound".into())];
+    if let Some(key) = own_key {
+        choices.push((Some(key.to_string()), format!("This PC ({})", form.name)));
+    }
+    for pc in &form.pcs {
+        if let Some(key) = &pc.key {
+            choices.push((Some(key.clone()), pc.name.clone()));
+        }
+    }
+    let shown = choices
+        .iter()
+        .find(|(key, _)| *key == form.listener)
+        .map_or("a PC not in this list", |(_, name)| name.as_str())
+        .to_string();
+    ui.strong("Sound");
+    ui.add_space(4.0);
+    ui.horizontal(|ui| {
+        ui.label("Who listens");
+        egui::ComboBox::from_id_salt("listener")
+            .selected_text(shown)
+            .width(260.0)
+            .show_ui(ui, |ui| {
+                for (key, name) in choices {
+                    ui.selectable_value(&mut form.listener, key, name);
+                }
+            });
+    });
+    ui.weak("The PC with your headphones: every PC's sound plays there. Picked here, it changes on every PC.");
+    ui.add_space(6.0);
+    ui.label("This PC's sound goes");
+    for (mode, text) in [
+        (
+            SoundMode::Listener,
+            "To the PC that listens only (its speakers here stay silent)",
+        ),
+        (SoundMode::Both, "To the PC that listens, and here too"),
+        (SoundMode::Here, "Here only"),
+    ] {
+        ui.radio_value(&mut form.mode, mode, text);
+    }
+}
+
 fn quote(text: &str) -> String {
     format!("\"{}\"", text.replace('\\', "\\\\").replace('"', "\\\""))
 }
@@ -191,6 +252,8 @@ pub struct Settings {
     form: Form,
     saved: Form,
     fingerprint: String,
+    /// This PC's public key, to mark it in "Who listens".
+    own_key: Option<String>,
     /// What the running Mickey said about the PCs; `Err` says why not.
     peers: Result<Peers, String>,
     asked: Instant,
@@ -297,6 +360,9 @@ impl Settings {
             saved: form.clone(),
             form,
             fingerprint: ask_mickey(&["id"]).unwrap_or_else(|_| "(run `mickey id`)".into()),
+            own_key: ask_mickey(&["id", "--key"])
+                .ok()
+                .map(|key| key.trim().to_string()),
             peers: load_peers(),
             asked: Instant::now(),
             pairing: None,
@@ -554,6 +620,8 @@ impl eframe::App for Settings {
                         ui.label(format!("{}  Touchpad speed", icon::LAPTOP));
                         ui.add(egui::Slider::new(&mut form.speed, 1..=200));
                     });
+                    ui.add_space(12.0);
+                    sound(ui, form, self.own_key.as_deref());
                     ui.add_space(10.0);
                     egui::CollapsingHeader::new("Advanced").show(ui, |ui| {
                         ui.horizontal(|ui| {
@@ -983,7 +1051,7 @@ mod tests {
     #[test]
     fn what_the_form_writes_parses_back_to_the_same_form() {
         let original = config::parse(
-            "[[peer]]\nname = \"Windows \\\"main\\\"\"\naddress = \"192.0.2.10:4242\"\nhotkey = \"AltGr+RightShift+1\"\nposition = [-1920, 0]\nkey = \"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"\n\n[hotkeys]\nhome = \"AltGr+RightShift+H\"\n\n[interface]\nswitcher_position = \"top-left\"\n\n[clipboard]\nhistory = false\n\n[this_pc]\ncontrolled = false\nname = \"Desk\"\n",
+            "[[peer]]\nname = \"Windows \\\"main\\\"\"\naddress = \"192.0.2.10:4242\"\nhotkey = \"AltGr+RightShift+1\"\nposition = [-1920, 0]\nkey = \"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"\n\n[hotkeys]\nhome = \"AltGr+RightShift+H\"\n\n[interface]\nswitcher_position = \"top-left\"\n\n[clipboard]\nhistory = false\n\n[audio]\nlistener = \"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"\nmode = \"both\"\n\n[this_pc]\ncontrolled = false\nname = \"Desk\"\n",
         )
         .unwrap();
         let form = Form::from_config(&original);
@@ -993,6 +1061,11 @@ mod tests {
             reread.clipboard.history == Some(false),
             "the history setting survives a save"
         );
+        assert_eq!(
+            reread.audio, original.audio,
+            "who listens and the mode survive a save"
+        );
+        assert_eq!(reread.audio.mode, config::SoundMode::Both);
     }
 
     #[test]

@@ -101,6 +101,11 @@ fn run(command: Command) -> Result<(), String> {
             println!("{}", identity.fingerprint());
             Ok(())
         }
+        Command::IdKey => {
+            let identity = identity::Identity::load_or_create(&identity::data_dir()?)?;
+            println!("{}", trust::to_hex(identity.public()));
+            Ok(())
+        }
         Command::Order(order) => {
             let answer = control::request(&order)?
                 .next()
@@ -615,6 +620,10 @@ fn serve_clipboard(
                             group::HOTKEYS => {
                                 let _ =
                                     controlled.send(source::TargetNews::Hotkeys(text.to_string()));
+                            }
+                            group::AUDIO => {
+                                let _ =
+                                    controlled.send(source::TargetNews::Audio(text.to_string()));
                             }
                             _ => {}
                         };
