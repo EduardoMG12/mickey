@@ -9,6 +9,20 @@ here=$(cd "$(dirname "$0")" && pwd)
 bin="$HOME/.local/bin"
 units="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 
+# Mickey links PulseAudio's client library (shared audio, which PipeWire
+# answers too). Every desktop has it; a very lean system may not, and then
+# Mickey would not start at all.
+if ! "$here/mickey" --version >/dev/null 2>&1; then
+    echo "Mickey cannot start here: a library it needs is missing:" >&2
+    "$here/mickey" --version 2>&1 | head -1 >&2
+    echo "Most likely PulseAudio's client library. Install it, then run ./install.sh again:" >&2
+    echo "  Debian, Ubuntu, Mint:  sudo apt install libpulse0" >&2
+    echo "  Fedora:                sudo dnf install pulseaudio-libs" >&2
+    echo "  Arch:                  sudo pacman -S libpulse" >&2
+    echo "  openSUSE:              sudo zypper install libpulse0" >&2
+    exit 1
+fi
+
 echo "Installing mickey and mickey-ui to $bin"
 mkdir -p "$bin"
 install -m 755 "$here/mickey" "$here/mickey-ui" "$bin/"
