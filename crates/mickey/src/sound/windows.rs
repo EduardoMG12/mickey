@@ -41,8 +41,9 @@ pub struct Recorder {
 }
 
 impl Recorder {
-    /// Records what the default output plays.
-    pub fn open() -> Result<Recorder, String> {
+    /// Records what the default output plays (muted or not: `diverted`
+    /// changes nothing here).
+    pub fn open(_diverted: bool) -> Result<Recorder, String> {
         let client = client(Direction::Capture)
             .map_err(|err| format!("cannot record this PC's sound: {err}"))?;
         let capture = client
@@ -146,7 +147,7 @@ mod tests {
         println!("muted before: {}", muted());
         let diverted = crate::speakers::divert().unwrap();
         println!("muted while sending: {}", muted());
-        let mut recorder = Recorder::open().unwrap();
+        let mut recorder = Recorder::open(true).unwrap();
         let player = std::thread::spawn(|| {
             let mut player = Player::open("test").unwrap();
             let mut phase = 0f32;

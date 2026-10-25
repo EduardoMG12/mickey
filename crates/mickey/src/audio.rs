@@ -240,11 +240,11 @@ fn send(
     let mut key_given = Instant::now();
     // Off the speakers first, then record: on Linux the recorder follows
     // the default output, which `divert` changes.
-    let _diverted = match mode {
+    let diverted = match mode {
         SoundMode::Listener => Some(crate::speakers::divert()?),
         _ => None,
     };
-    let mut recorder = Recorder::open()?;
+    let mut recorder = Recorder::open(diverted.is_some())?;
     let socket =
         UdpSocket::bind(SocketAddr::from(([0, 0, 0, 0], 0))).map_err(|err| err.to_string())?;
     let mut sealer = Sealer::new(stream);
