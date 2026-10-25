@@ -204,6 +204,13 @@ pub struct Audio {
     /// Where this PC's own sound goes. This PC's alone, never sent.
     #[serde(default)]
     pub mode: SoundMode,
+    /// Each PC's volume on the listener, 0 to 100, by public key; a PC not
+    /// here plays at 100. Shared, like `listener`.
+    #[serde(default)]
+    pub volumes: std::collections::BTreeMap<String, u8>,
+    /// The PCs muted on the listener, by public key. Shared.
+    #[serde(default)]
+    pub muted: Vec<String>,
 }
 
 /// Where a PC's sound goes while another PC listens.
@@ -239,14 +246,37 @@ impl Audio {
         if self.mode != SoundMode::default() {
             lines += &format!("mode = {}\n", toml_string(self.mode.word()));
         }
+        let volumes: Vec<String> = self
+            .volumes
+            .iter()
+            .filter(|(_, volume)| **volume != 100)
+            .map(|(key, volume)| format!("{} = {volume}", toml_string(key)))
+            .collect();
+        if !volumes.is_empty() {
+            lines += &format!("volumes = {{ {} }}\n", volumes.join(", "));
+        }
+        if !self.muted.is_empty() {
+            let muted: Vec<String> = self.muted.iter().map(|key| toml_string(key)).collect();
+            lines += &format!("muted = [{}]\n", muted.join(", "));
+        }
         lines
     }
 
-    /// What every PC shares: who listens. (Each PC's mode is its own.)
+    /// How loud the PC with public key `key` plays on the listener, 0.0 to
+    /// 1.0.
+    pub fn volume_of(&self, key: &str) -> f32 {
+        if self.muted.iter().any(|muted| muted == key) {
+            return 0.0;
+        }
+        f32::from(self.volumes.get(key).copied().unwrap_or(100).min(100)) / 100.0
+    }
+
+    /// What every PC shares: who listens, and each PC's volume. (Each
+    /// PC's mode is its own.)
     pub fn shared_lines(&self) -> String {
         Audio {
-            listener: self.listener.clone(),
             mode: SoundMode::default(),
+            ..self.clone()
         }
         .to_lines()
     }
@@ -254,12 +284,19 @@ impl Audio {
     /// This PC's audio with the listener another PC sent (`shared_lines`).
     pub fn taking(&self, lines: &str) -> Result<Audio, String> {
         let heard: Audio = toml::from_str(lines).map_err(|err| err.to_string())?;
-        if heard.listener.as_ref().is_some_and(|key| !is_key(key)) {
-            return Err("a listener that is not a public key".into());
+        let keys = heard
+            .listener
+            .iter()
+            .chain(heard.volumes.keys())
+            .chain(&heard.muted);
+        for key in keys {
+            if !is_key(key) {
+                return Err("a PC named by something that is not a public key".into());
+            }
         }
         Ok(Audio {
-            listener: heard.listener,
             mode: self.mode,
+            ..heard
         })
     }
 }
@@ -891,12 +928,13 @@ mod tests {
     #[test]
     fn a_heard_listener_keeps_this_pcs_mode() {
         let mine = Audio {
-            listener: None,
             mode: SoundMode::Here,
+            ..Audio::default()
         };
         let sent = Audio {
             listener: Some(KEY_A.into()),
             mode: SoundMode::Both,
+            ..Audio::default()
         };
         // Only who listens travels.
         assert_eq!(sent.shared_lines(), format!("listener = \"{KEY_A}\"\n"));
@@ -909,11 +947,35 @@ mod tests {
     }
 
     #[test]
+    fn each_pc_has_a_volume_and_a_mute_shared_with_the_others() {
+        let other = "f".repeat(64);
+        let audio = Audio {
+            volumes: [(KEY_A.to_string(), 40), (other.clone(), 100)].into(),
+            muted: vec![other.clone()],
+            ..Audio::default()
+        };
+        assert_eq!(audio.volume_of(KEY_A), 0.4);
+        assert_eq!(audio.volume_of(&other), 0.0, "muted");
+        assert_eq!(audio.volume_of(&"e".repeat(64)), 1.0, "not set: full");
+        // 100 is not written; volumes and mutes travel.
+        let lines = audio.shared_lines();
+        assert_eq!(
+            lines,
+            format!("volumes = {{ \"{KEY_A}\" = 40 }}\nmuted = [\"{other}\"]\n")
+        );
+        let taken = Audio::default().taking(&lines).unwrap();
+        assert_eq!(taken.volume_of(KEY_A), 0.4);
+        assert!(Audio::default().taking("muted = [\"nope\"]\n").is_err());
+    }
+
+    #[test]
     fn the_audio_section_is_replaced_in_place() {
         let text = "[clipboard]\nhistory = false\n\n[audio]\nmode = \"here\"\n\n[this_pc]\nname = \"Desk\"\n";
         let audio = Audio {
             listener: Some(KEY_A.into()),
             mode: SoundMode::Here,
+            volumes: [(KEY_A.to_string(), 40)].into(),
+            muted: vec![KEY_A.into()],
         };
         let new = set_audio(text, &audio).unwrap();
         let config = parse(&new).unwrap();

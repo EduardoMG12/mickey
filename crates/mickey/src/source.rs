@@ -266,6 +266,20 @@ fn take_audio(lines: &str) -> Result<config::Audio, String> {
     Ok(taken)
 }
 
+/// Makes this PC the one that listens, in config.toml (the tray's
+/// "Listen here").
+fn listen_here(me: &[u8; 32]) -> Result<config::Audio, String> {
+    let path = config::path()?;
+    let text = std::fs::read_to_string(&path).unwrap_or_default();
+    let audio = config::Audio {
+        listener: Some(crate::trust::to_hex(me)),
+        ..config::parse(&text)?.audio
+    };
+    config::write(&path, &config::set_audio(&text, &audio)?)?;
+    println!("mickey: this PC listens now");
+    Ok(audio)
+}
+
 /// Where this PC's sound should go now (PRD 0012): the listener's audio
 /// port and its index, when another PC listens, is online, and this PC's
 /// mode sends.
@@ -1005,6 +1019,19 @@ pub fn run(
             }
             Ok(Wake::Tray(tray::Click::Settings)) => open_window("settings"),
             Ok(Wake::Tray(tray::Click::History)) => open_window("history"),
+            Ok(Wake::Tray(tray::Click::ListenHere)) => {
+                match listen_here(shared.identity.public()) {
+                    Ok(taken) => {
+                        if let Some(mover) = &mover {
+                            mover.share_audio(&taken.shared_lines());
+                        }
+                        audio = taken;
+                    }
+                    Err(err) => {
+                        eprintln!("mickey: cannot make this PC the one that listens: {err}")
+                    }
+                }
+            }
             Ok(Wake::Tray(tray::Click::Home)) => switcher.go_home(&mut act),
             Ok(Wake::Tray(tray::Click::Go(peer))) => {
                 // As from the switcher: only from here, only to a PC online.

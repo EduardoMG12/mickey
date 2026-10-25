@@ -114,10 +114,10 @@ fn receive(socket: &UdpSocket, heard: &Receiver<(StreamKey, IpAddr, String)>) {
         if !alive {
             let (player, sound) = mpsc::channel();
             let _ = player.send(opened);
-            let name = stream.name.clone();
+            let (name, from) = (stream.name.clone(), stream.from);
             if thread::Builder::new()
                 .name("audio out".into())
-                .spawn(move || play(&name, &sound))
+                .spawn(move || play(&name, from, &sound))
                 .is_ok()
             {
                 stream.player = Some(player);
@@ -126,14 +126,34 @@ fn receive(socket: &UdpSocket, heard: &Receiver<(StreamKey, IpAddr, String)>) {
     }
 }
 
+/// How loud the PC at `from` plays here: its volume in config.toml, found
+/// by its key (the volume is shared by key, PRD 0012).
+fn volume_of(from: IpAddr) -> f32 {
+    let Ok(Some(config)) = mickey_config::Config::load() else {
+        return 1.0;
+    };
+    config
+        .peers
+        .iter()
+        .find(|peer| peer.address.ip() == from)
+        .and_then(|peer| peer.key.as_deref())
+        .map_or(1.0, |key| config.audio.volume_of(key))
+}
+
+/// How often a player looks at its PC's volume again: a change in the
+/// settings is heard within this.
+const VOLUME_AGAIN: Duration = Duration::from_secs(1);
+
 /// Plays one sending PC until it goes quiet.
-fn play(name: &str, sound: &Receiver<(u64, [u8; PCM_BYTES])>) {
+fn play(name: &str, from: IpAddr, sound: &Receiver<(u64, [u8; PCM_BYTES])>) {
     let mut player = match Player::open(name) {
         Ok(player) => player,
         Err(err) => return eprintln!("mickey: {err}"),
     };
     let mut jitter = Jitter::default();
     let mut heard = Instant::now();
+    let mut volume = volume_of(from);
+    let mut volume_read = Instant::now();
     let silence = [0u8; PCM_BYTES];
     loop {
         loop {
@@ -158,7 +178,11 @@ fn play(name: &str, sound: &Receiver<(u64, [u8; PCM_BYTES])>) {
             Turn::Silence => silence,
         };
         // Waits for room: the sound card's clock paces this loop.
-        if let Err(err) = player.write(&pcm, 1.0) {
+        if volume_read.elapsed() > VOLUME_AGAIN {
+            volume = volume_of(from);
+            volume_read = Instant::now();
+        }
+        if let Err(err) = player.write(&pcm, volume) {
             return eprintln!("mickey: {err}");
         }
     }

@@ -48,6 +48,9 @@ pub struct Form {
     pub listener: Option<String>,
     /// Where this PC's own sound goes.
     pub mode: SoundMode,
+    /// Each PC's volume on the listener (0–100) and the muted PCs, by key.
+    pub volumes: std::collections::BTreeMap<String, u8>,
+    pub muted: Vec<String>,
     /// The switcher's custom order, by name; empty: as the layout goes.
     pub order: Vec<String>,
     pub speed: i32,
@@ -91,6 +94,8 @@ impl Form {
             history: config.clipboard.history,
             listener: config.audio.listener.clone(),
             mode: config.audio.mode,
+            volumes: config.audio.volumes.clone(),
+            muted: config.audio.muted.clone(),
             order: config.interface.switcher_order.clone(),
             speed: config.touchpad.speed,
         }
@@ -176,6 +181,8 @@ impl Form {
         let audio = Audio {
             listener: self.listener.clone(),
             mode: self.mode,
+            volumes: self.volumes.clone(),
+            muted: self.muted.clone(),
         };
         if audio != Audio::default() {
             out += "\n[audio]\n";
@@ -197,6 +204,33 @@ impl Form {
 }
 
 /// A TOML basic string: quotes and backslashes escaped.
+/// A PC's volume on the listener and its mute, by its key; every PC shows
+/// and changes the same, which Mickey shares (PRD 0012).
+fn volume(
+    ui: &mut egui::Ui,
+    key: &str,
+    volumes: &mut std::collections::BTreeMap<String, u8>,
+    muted: &mut Vec<String>,
+) {
+    ui.horizontal(|ui| {
+        let mut level = volumes.get(key).copied().unwrap_or(100);
+        ui.spacing_mut().slider_width = 110.0;
+        if ui
+            .add(egui::Slider::new(&mut level, 0..=100).suffix("%"))
+            .changed()
+        {
+            volumes.insert(key.to_string(), level);
+        }
+        let mut silent = muted.iter().any(|muted| muted == key);
+        if ui.checkbox(&mut silent, "mute").changed() {
+            muted.retain(|muted| muted != key);
+            if silent {
+                muted.push(key.to_string());
+            }
+        }
+    });
+}
+
 /// "Who listens" and "This PC's sound" (PRD 0012), in the This PC tab: the
 /// listener is picked from every PC with a key, the same choice on every
 /// PC (Mickey shares it); the mode is this PC's own.
@@ -230,6 +264,12 @@ fn sound(ui: &mut egui::Ui, form: &mut Form, own_key: Option<&str>) {
             });
     });
     ui.weak("The PC with your headphones: every PC's sound plays there. Picked here, it changes on every PC.");
+    if let Some(key) = own_key {
+        ui.horizontal(|ui| {
+            ui.label("This PC's volume there");
+            volume(ui, key, &mut form.volumes, &mut form.muted);
+        });
+    }
     ui.add_space(6.0);
     ui.label("This PC's sound goes");
     for (mode, text) in [
@@ -641,7 +681,7 @@ impl eframe::App for Settings {
                         ui.weak("None yet: connect one from the list below.");
                     }
                     let mut remove = None;
-                    egui::Grid::new("pcs").num_columns(5).spacing([10.0, 8.0]).show(ui, |ui| {
+                    egui::Grid::new("pcs").num_columns(6).spacing([10.0, 8.0]).show(ui, |ui| {
                         for (i, pc) in form.pcs.iter_mut().enumerate() {
                             let info = online(&pc.name);
                             let up = info.is_some_and(|info| info.online);
@@ -658,6 +698,12 @@ impl eframe::App for Settings {
                                 Some(n) => format!("{}  {n} monitors", icon::MONITOR),
                             });
                             ui.add_sized([170.0, 24.0], egui::TextEdit::singleline(&mut pc.hotkey).hint_text("own hotkey"));
+                            match &pc.key {
+                                Some(key) => volume(ui, key, &mut form.volumes, &mut form.muted),
+                                None => {
+                                    ui.weak("volume: once connected");
+                                }
+                            }
                             if ui.button(format!("{}  Remove", icon::TRASH)).clicked() {
                                 remove = Some(i);
                             }
