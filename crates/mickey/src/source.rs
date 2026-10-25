@@ -273,6 +273,7 @@ fn listen_here(me: &[u8; 32]) -> Result<config::Audio, String> {
     let text = std::fs::read_to_string(&path).unwrap_or_default();
     let audio = config::Audio {
         listener: Some(crate::trust::to_hex(me)),
+        since: config::now_seconds(),
         ..config::parse(&text)?.audio
     };
     config::write(&path, &config::set_audio(&text, &audio)?)?;

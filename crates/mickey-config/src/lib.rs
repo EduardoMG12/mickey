@@ -211,6 +211,11 @@ pub struct Audio {
     /// The PCs muted on the listener, by public key. Shared.
     #[serde(default)]
     pub muted: Vec<String>,
+    /// When the owner last changed what is shared (seconds since 1970):
+    /// a PC takes another's only if it is newer, so one that starts with
+    /// an old config.toml does not undo a newer choice.
+    #[serde(default)]
+    pub since: u64,
 }
 
 /// Where a PC's sound goes while another PC listens.
@@ -259,6 +264,9 @@ impl Audio {
             let muted: Vec<String> = self.muted.iter().map(|key| toml_string(key)).collect();
             lines += &format!("muted = [{}]\n", muted.join(", "));
         }
+        if self.since != 0 {
+            lines += &format!("since = {}\n", self.since);
+        }
         lines
     }
 
@@ -281,7 +289,8 @@ impl Audio {
         .to_lines()
     }
 
-    /// This PC's audio with the listener another PC sent (`shared_lines`).
+    /// This PC's audio with what another PC sent (`shared_lines`), if that
+    /// is newer than this PC's; else this PC's, unchanged.
     pub fn taking(&self, lines: &str) -> Result<Audio, String> {
         let heard: Audio = toml::from_str(lines).map_err(|err| err.to_string())?;
         let keys = heard
@@ -294,11 +303,21 @@ impl Audio {
                 return Err("a PC named by something that is not a public key".into());
             }
         }
+        if heard.since <= self.since {
+            return Ok(self.clone());
+        }
         Ok(Audio {
             mode: self.mode,
             ..heard
         })
     }
+}
+
+/// Seconds since 1970, for `Audio::since`.
+pub fn now_seconds() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |since| since.as_secs())
 }
 
 /// 64 hex digits: a public key as config.toml keeps it.
@@ -934,16 +953,23 @@ mod tests {
         let sent = Audio {
             listener: Some(KEY_A.into()),
             mode: SoundMode::Both,
+            since: 5,
             ..Audio::default()
         };
         // Only who listens travels.
-        assert_eq!(sent.shared_lines(), format!("listener = \"{KEY_A}\"\n"));
+        assert_eq!(
+            sent.shared_lines(),
+            format!("listener = \"{KEY_A}\"\nsince = 5\n")
+        );
         let taken = mine.taking(&sent.shared_lines()).unwrap();
         assert_eq!(taken.listener.as_deref(), Some(KEY_A));
         assert_eq!(taken.mode, SoundMode::Here);
-        assert!(mine.taking("listener = \"not-a-key\"\n").is_err());
-        // Nobody: the empty lines.
-        assert_eq!(mine.taking("").unwrap().listener, None);
+        assert!(
+            mine.taking("listener = \"not-a-key\"\nsince = 9\n")
+                .is_err()
+        );
+        // Nobody, chosen later.
+        assert_eq!(taken.taking("since = 9\n").unwrap().listener, None);
     }
 
     #[test]
@@ -952,6 +978,7 @@ mod tests {
         let audio = Audio {
             volumes: [(KEY_A.to_string(), 40), (other.clone(), 100)].into(),
             muted: vec![other.clone()],
+            since: 1,
             ..Audio::default()
         };
         assert_eq!(audio.volume_of(KEY_A), 0.4);
@@ -961,11 +988,38 @@ mod tests {
         let lines = audio.shared_lines();
         assert_eq!(
             lines,
-            format!("volumes = {{ \"{KEY_A}\" = 40 }}\nmuted = [\"{other}\"]\n")
+            format!("volumes = {{ \"{KEY_A}\" = 40 }}\nmuted = [\"{other}\"]\nsince = 1\n")
         );
         let taken = Audio::default().taking(&lines).unwrap();
         assert_eq!(taken.volume_of(KEY_A), 0.4);
-        assert!(Audio::default().taking("muted = [\"nope\"]\n").is_err());
+        assert!(
+            Audio::default()
+                .taking("muted = [\"nope\"]\nsince = 1\n")
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn only_a_newer_choice_is_taken() {
+        let mine = Audio {
+            listener: Some(KEY_A.into()),
+            since: 200,
+            ..Audio::default()
+        };
+        let older = Audio {
+            since: 100,
+            ..Audio::default()
+        };
+        assert_eq!(
+            mine.taking(&older.shared_lines()).unwrap(),
+            mine,
+            "an old config.toml undoes nothing"
+        );
+        let newer = Audio {
+            since: 300,
+            ..Audio::default()
+        };
+        assert_eq!(mine.taking(&newer.shared_lines()).unwrap().listener, None);
     }
 
     #[test]
@@ -976,6 +1030,7 @@ mod tests {
             mode: SoundMode::Here,
             volumes: [(KEY_A.to_string(), 40)].into(),
             muted: vec![KEY_A.into()],
+            since: 7,
         };
         let new = set_audio(text, &audio).unwrap();
         let config = parse(&new).unwrap();

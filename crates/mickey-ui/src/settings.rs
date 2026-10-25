@@ -51,6 +51,8 @@ pub struct Form {
     /// Each PC's volume on the listener (0–100) and the muted PCs, by key.
     pub volumes: std::collections::BTreeMap<String, u8>,
     pub muted: Vec<String>,
+    /// When what every PC shares last changed (`Audio::since`).
+    pub since: u64,
     /// The switcher's custom order, by name; empty: as the layout goes.
     pub order: Vec<String>,
     pub speed: i32,
@@ -96,6 +98,7 @@ impl Form {
             mode: config.audio.mode,
             volumes: config.audio.volumes.clone(),
             muted: config.audio.muted.clone(),
+            since: config.audio.since,
             order: config.interface.switcher_order.clone(),
             speed: config.touchpad.speed,
         }
@@ -183,6 +186,7 @@ impl Form {
             mode: self.mode,
             volumes: self.volumes.clone(),
             muted: self.muted.clone(),
+            since: self.since,
         };
         if audio != Audio::default() {
             out += "\n[audio]\n";
@@ -476,6 +480,18 @@ impl Settings {
     }
 
     fn save(&mut self) {
+        // What every PC shares changed here: newer than anyone's, so the
+        // other PCs take it (and an older one never undoes it).
+        let shared = |form: &Form| {
+            (
+                form.listener.clone(),
+                form.volumes.clone(),
+                form.muted.clone(),
+            )
+        };
+        if shared(&self.form) != shared(&self.saved) {
+            self.form.since = config::now_seconds();
+        }
         let text = self.form.to_toml();
         // The same check `mickey` makes when it reads the file.
         if let Err(err) = config::parse(&text) {
