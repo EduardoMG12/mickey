@@ -5,13 +5,14 @@ that send and receive it are in [architecture.md](architecture.md); what
 happens around it (pairing windows, edges, the switcher) is in
 [flows.md](flows.md).
 
-## Three channels
+## Four channels
 
 | Channel | Transport | Port | Opened by | Carries | Code |
 |---|---|---|---|---|---|
 | Input link | TCP, Noise | `[this_pc] listen`, 4242 by default | The source side | Keys, motion, pings, focus, edges | `transport.rs`, `secure.rs`, `protocol.rs` |
 | Data link | TCP, Noise | The input port + 1 (4243) | The source side, once its input link is up | Clipboard, group map, hotkeys, switcher cards | `transport.rs`, `secure.rs`, `clip_wire.rs`, `group.rs` |
 | Discovery | UDP broadcast | 4243 | Everyone, every 3 s | Name, port and public key | `discovery.rs` |
+| Audio | UDP, sealed datagrams | The input port + 2 (4244) | A PC sending its sound to the PC that listens | 5 ms of sound each | `audio.rs`, `audio_wire.rs` |
 
 TCP 4243 and UDP 4243 do not collide: TCP and UDP ports are separate.
 
@@ -170,12 +171,37 @@ clipboard's (`clip_wire.rs`); 16 and up are passed to the target's
 | 18 | Switcher | the focused card, then one card per line | S → T: show the switcher here, the owner is looking at you |
 | 19 | Mirror | the same cards | S → T: show a copy that only looks |
 | 20 | Close | none | S → T: a pick was made, close the switcher or copy shown for me |
+| 21 | Audio | the shared `[audio]` lines: `listener`, `volumes`, `muted`, `since` | S → T, on every new data link and after the owner changes them; taken only if newer than the receiver's (`since`) |
+| 22 | Audio key | a stream's id and key, in hex | S → T, to the PC that listens, when sending starts and every 2 s while it lasts |
 
 A group map line is `<public key, 64 hex>`, `<name>`, `<ip:port>` (or
 `:port` for the sender itself) and `<x,y>` or `-`, separated by tabs
 (`group.rs`). A switcher card is `<id>=online:<name>` or
 `<id>=offline:<name>`; id 0 is the sending PC, `i + 1` its peer `i`
 (`switcher_cards` in `source.rs`). Only `Ask` gets a reply.
+
+## Audio datagrams
+
+Shared audio (PRD 0012) does not ride the data link: a lost or late piece
+of sound must cost 5 ms, never stall what follows, which TCP would do.
+Each datagram is 989 bytes (`audio_wire.rs`):
+
+| Bytes | Field |
+|---|---|
+| 1 | Version, 1 |
+| 4 | Stream id |
+| 8 | Counter: 0, 1, 2… per datagram |
+| 976 | 5 ms of 48 kHz stereo 16-bit PCM (960 bytes) sealed with ChaCha20-Poly1305, the counter as the nonce, the 13 bytes above as associated data (16 bytes of tag) |
+
+The key is not the data link's: the sending PC picks a random stream id
+and key and hands them to the listener as a kind 22 payload over its data
+link, which is already encrypted and authenticated. The listener plays a
+datagram only if its stream id has a key, it comes from that data link's
+address, it opens, and its counter is new and no more than 64 behind the
+newest (a replay or something too late is dropped). Silence is not sent.
+On the listener each sending PC has a jitter buffer (`jitter.rs`): it
+starts playing with 10 ms in hand, holds more when datagrams come late,
+and gives it back after 10 s of calm.
 
 ## Discovery
 

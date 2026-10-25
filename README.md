@@ -22,6 +22,10 @@ lan-mouse, built from scratch to be understood line by line.
 - **A shared clipboard that follows the keyboard.** Copy on one PC, move to
   another, paste: text, images and files (up to 60 MiB). The recent copies
   are kept in a searchable history, in memory only.
+- **One pair of headphones for every PC.** Pick the PC your headphones are
+  on, and every PC's sound plays there, mixed, each at its own volume,
+  with a delay you will not notice (Linux with PipeWire or PulseAudio, and
+  Windows).
 - **Finds your PCs and pairs them with a code.** PCs running Mickey on the
   network show up in the settings: press **Connect**, check that both
   screens show the same six-digit code, press **Pair**. A PC paired with one
@@ -130,6 +134,24 @@ it: the clipboard is still shared, and the manager sees everything Mickey
 writes. To choose yourself, pick *Always* or *Never* in the settings
 (**General**), or set `[clipboard] history = true` or `false`.
 
+### Shared sound
+
+Pick the PC your headphones are on: in the settings (**This PC → Where
+are your headphones?**) on any PC, or **Listen here** in its tray. Every
+PC learns it at once, and from then on every PC's sound plays there,
+mixed with that PC's own, while each PC goes quiet. Each PC's volume and
+mute are next to it in **PCs**, the same on every PC. Per PC you can also
+keep its sound playing there too, or keep it at home (**When another PC
+has the headphones, this PC's sound**). Pick **Nobody** and every PC uses
+its own speakers again.
+
+The sound crosses encrypted, only between paired PCs, in 5 ms pieces over
+UDP 4244; nothing is sent while a PC plays nothing. On Windows Mickey
+mutes the speakers while it sends (and unmutes them after, even if it
+ended unexpectedly); on Linux it moves the sound to a silent output of its
+own and puts the real one back when it stops, on Ctrl+C or
+`systemctl --user stop mickey` too.
+
 ### The tray, commands and Waybar
 
 The tray menu moves the keyboard to any PC and opens the settings and the
@@ -203,6 +225,10 @@ restart Mickey afterwards, or run `mickey arranged` after changing positions.
   the download against `SHA256SUMS`, then in *Windows Security → Virus &
   threat protection → Protection history* open the item and choose
   *Allow on device*. Signing is planned.
+- **Shared sound** is stereo and local-network only; microphones and
+  cameras do not cross (they would need a virtual device, on Windows a
+  driver). Linux needs PipeWire or PulseAudio, which every current
+  desktop has.
 
 ## Security
 
