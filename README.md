@@ -48,7 +48,9 @@ Download the latest release from the repository's **Releases** page:
   administrator windows), allows it through the firewall on **private**
   networks only and adds **Mickey settings** to the Start menu. Remove it
   from *Settings → Apps*.
-- **Linux** (x86-64, glibc 2.35 or newer, systemd): unpack
+- **Linux** (x86-64, glibc 2.35 or newer, systemd, and PulseAudio's
+  client library, which every desktop has; `install.sh` says how to add
+  it if not): unpack
   `mickey-linux-x86_64.tar.gz` and run `./install.sh`. It asks for your
   password once: the `input` group and a udev rule let Mickey read your
   keyboard and create its virtual one, and if firewalld or ufw is on it
