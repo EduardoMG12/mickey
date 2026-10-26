@@ -25,6 +25,8 @@ const NOTHING: u8 = 3;
 const FILES: u8 = 4;
 /// Room for the names under the data link's 64 MB.
 pub const MAX_FILES: u64 = 60 << 20;
+/// The most files one copy may carry.
+pub const MAX_FILE_COUNT: u32 = 1000;
 /// The most pixel bytes a received PNG may unpack to (an 8K screenshot is
 /// about 130 MB): a small PNG must not make us allocate gigabytes.
 const MAX_PIXELS: usize = 256 << 20;
@@ -126,6 +128,11 @@ fn files(mut body: &[u8]) -> Result<Vec<(String, Vec<u8>)>, String> {
         Ok(head)
     };
     let count = u32::from_be_bytes(take(4)?.try_into().map_err(|_| short())?);
+    // Each file becomes a file on disk: millions of empty ones would fit
+    // in MAX_FILES bytes.
+    if count > MAX_FILE_COUNT {
+        return Err(format!("{count} files at once, more than {MAX_FILE_COUNT}"));
+    }
     let mut files = Vec::new();
     let mut total = 0u64;
     for _ in 0..count {
@@ -182,6 +189,15 @@ fn image(png_bytes: &[u8]) -> Result<Content, String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn too_many_files_at_once_are_refused() {
+        let empty: Vec<(String, Vec<u8>)> = (0..=MAX_FILE_COUNT)
+            .map(|n| (format!("{n}.txt"), Vec::new()))
+            .collect();
+        let bytes = encode(&Wire::Files(empty)).unwrap();
+        assert!(decode(&bytes).is_err());
+    }
+
     use super::*;
 
     fn round_trip(wire: Wire) {

@@ -40,6 +40,10 @@ struct Stream {
     name: String,
     opener: Opener,
     player: Option<Sender<(u64, [u8; PCM_BYTES])>>,
+    /// When a player was last started: if the sound device cannot open, it
+    /// ends at once, and each datagram (200 a second) must not start
+    /// another.
+    started: Option<std::time::Instant>,
 }
 
 static KEYS: OnceLock<Sender<(StreamKey, IpAddr, String)>> = OnceLock::new();
@@ -87,6 +91,14 @@ fn receive(socket: &UdpSocket, heard: &Receiver<(StreamKey, IpAddr, String)>) {
         };
         // Keys first: the first datagrams of a stream follow its key.
         while let Ok((key, ip, name)) = heard.try_recv() {
+            // The key is sent again every 2 s: the same stream goes on,
+            // its player and its replay window kept.
+            if streams.get(&key.id).is_some_and(|stream| stream.from == ip) {
+                continue;
+            }
+            // One stream per PC: a new one replaces the PC's old one, so
+            // streams do not pile up.
+            streams.retain(|_, stream| stream.from != ip);
             streams.insert(
                 key.id,
                 Stream {
@@ -94,6 +106,7 @@ fn receive(socket: &UdpSocket, heard: &Receiver<(StreamKey, IpAddr, String)>) {
                     name,
                     opener: Opener::new(&key),
                     player: None,
+                    started: None,
                 },
             );
         }
@@ -111,7 +124,9 @@ fn receive(socket: &UdpSocket, heard: &Receiver<(StreamKey, IpAddr, String)>) {
             .player
             .as_ref()
             .is_some_and(|player| player.send(opened).is_ok());
-        if !alive {
+        let retry = std::time::Duration::from_secs(1);
+        if !alive && stream.started.is_none_or(|at| at.elapsed() > retry) {
+            stream.started = Some(std::time::Instant::now());
             let (player, sound) = mpsc::channel();
             let _ = player.send(opened);
             let (name, from) = (stream.name.clone(), stream.from);

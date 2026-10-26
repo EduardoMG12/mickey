@@ -168,7 +168,10 @@ impl Link {
                 "the peer announced {length} bytes, too many"
             )));
         }
-        let mut payload = Vec::with_capacity(length);
+        // Grown as the data arrives, not reserved from the announced
+        // length: a peer could announce 64 MiB on every link and send
+        // nothing.
+        let mut payload = Vec::with_capacity(length.min(1 << 20));
         while payload.len() < length {
             let got = open(&mut stream, &mut plain)?;
             if got == 0 || payload.len() + got > length {
