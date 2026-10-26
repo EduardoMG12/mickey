@@ -106,6 +106,16 @@ fn run(command: Command) -> Result<(), String> {
             println!("{waiting}");
             Ok(())
         }
+        Command::UpdateApply => {
+            let latest = update::latest()?;
+            if !config::version::is_newer(&latest, config::version::THIS) {
+                println!("up to date: Mickey {}", config::version::THIS);
+                return Ok(());
+            }
+            update::apply(&latest)?;
+            println!("installing: Mickey {latest}; Mickey restarts by itself");
+            Ok(())
+        }
         Command::UpdateDownload => {
             let latest = update::latest()?;
             if !config::version::is_newer(&latest, config::version::THIS) {

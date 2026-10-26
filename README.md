@@ -191,6 +191,16 @@ The settings window writes `config.toml` for you
 and follows it when another PC rewrites it. Editing it by hand works too;
 restart Mickey afterwards, or run `mickey arranged` after changing positions.
 
+### Updating
+
+When a newer Mickey is out, the tray's menu starts with **Update to
+Mickey 0.x.y**, and the settings window shows a red banner with **Update
+now**. Either downloads the release, checks that it is signed by the
+release key and unchanged, installs it and restarts Mickey. On Windows the
+system asks for an administrator once; on Linux nothing is asked. From a
+terminal: `mickey update check`, then `mickey update apply`. The PCs tab
+shows each PC's version, so one left behind stands out.
+
 ### When something goes wrong
 
 Mickey's log says what it is doing (never which keys you press):

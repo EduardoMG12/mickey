@@ -322,6 +322,8 @@ pub struct Settings {
     own_key: Option<String>,
     /// A newer Mickey the running one knows of (PRD 0013).
     update: Option<String>,
+    /// `mickey update apply`, running: its answer, once it ends.
+    updating: Option<std::sync::mpsc::Receiver<Result<String, String>>>,
     /// The PC whose Remove was clicked once: a second click removes it.
     confirm_remove: Option<String>,
     /// What the running Mickey said about the PCs; `Err` says why not.
@@ -449,6 +451,7 @@ impl Settings {
             update: ask_mickey(&["update", "status"])
                 .ok()
                 .and_then(|answer| mickey_config::version::checked(answer.trim())),
+            updating: None,
             message,
             config_changed: config_time(),
             looked: Instant::now(),
@@ -672,11 +675,33 @@ impl eframe::App for Settings {
                             mickey_config::version::THIS
                         ),
                     );
+                    if self.updating.is_some() {
+                        ui.spinner();
+                        ui.weak("Downloading and checking it…");
+                    } else if ui.button("Update now").clicked() {
+                        // Minutes, maybe, and Windows' administrator
+                        // prompt: on a thread.
+                        let (send, answer) = std::sync::mpsc::channel();
+                        std::thread::spawn(move || {
+                            let _ = send.send(ask_mickey(&["update", "apply"]));
+                        });
+                        self.updating = Some(answer);
+                    }
                     ui.hyperlink_to(
-                        "Get it",
+                        "What's new",
                         "https://github.com/EduardoMG12/mickey/releases/latest",
                     );
                 });
+                if let Some(answer) = self
+                    .updating
+                    .as_ref()
+                    .and_then(|answer| answer.try_recv().ok())
+                {
+                    self.message = answer.unwrap_or_else(|err| format!("The update failed: {err}"));
+                    self.updating = None;
+                }
+                ui.ctx()
+                    .request_repaint_after(std::time::Duration::from_millis(250));
                 ui.add_space(4.0);
             }
             // Room below the card for the Save row.

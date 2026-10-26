@@ -3,6 +3,8 @@
 #[cfg(windows)]
 pub mod acl;
 #[cfg(windows)]
+pub mod elevate;
+#[cfg(windows)]
 pub mod hooks;
 #[cfg(target_os = "linux")]
 pub mod linux;

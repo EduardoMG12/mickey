@@ -4,7 +4,12 @@
 # It asks for your password once, to let Mickey read and create input
 # devices (the input group and a udev rule); everything else stays in your
 # home directory.
+#   ./install.sh --update
+# is what Mickey runs to update itself (PRD 0013): the same, without the
+# steps that need sudo (input devices, firewall), done at the first install.
 set -eu
+update=0
+[ "${1:-}" = "--update" ] && update=1
 here=$(cd "$(dirname "$0")" && pwd)
 bin="$HOME/.local/bin"
 units="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
@@ -27,16 +32,18 @@ echo "Installing mickey and mickey-ui to $bin"
 mkdir -p "$bin"
 install -m 755 "$here/mickey" "$here/mickey-ui" "$bin/"
 
-echo "Allowing the input group to read and create input devices (needs sudo)"
-echo "  Note: every program you run as a member of the input group can read"
-echo "  your keyboard, not only Mickey. Install Mickey only on your own PCs."
-sudo install -m 644 "$here/99-mickey-uinput.rules" /etc/udev/rules.d/99-mickey-uinput.rules
-sudo udevadm control --reload
-# uinput may be built into the kernel, where the rule only applies at boot.
-sudo chgrp input /dev/uinput && sudo chmod 660 /dev/uinput
-if ! id -nG "$USER" | grep -qw input; then
-    sudo usermod -aG input "$USER"
-    relogin=1
+if [ "$update" = 0 ]; then
+    echo "Allowing the input group to read and create input devices (needs sudo)"
+    echo "  Note: every program you run as a member of the input group can read"
+    echo "  your keyboard, not only Mickey. Install Mickey only on your own PCs."
+    sudo install -m 644 "$here/99-mickey-uinput.rules" /etc/udev/rules.d/99-mickey-uinput.rules
+    sudo udevadm control --reload
+    # uinput may be built into the kernel, where the rule only applies at boot.
+    sudo chgrp input /dev/uinput && sudo chmod 660 /dev/uinput
+    if ! id -nG "$USER" | grep -qw input; then
+        sudo usermod -aG input "$USER"
+        relogin=1
+    fi
 fi
 
 echo "Adding 'Mickey settings' to your applications menu"
@@ -56,7 +63,9 @@ done
 # find it on UDP 4243 and send it their sound on UDP 4244. A firewall
 # that is on (firewalld on openSUSE and Fedora, ufw on Ubuntu when
 # enabled) would refuse them; Windows' installer lets Mickey itself in.
-if command -v firewall-cmd >/dev/null && sudo firewall-cmd --state >/dev/null 2>&1; then
+if [ "$update" = 1 ]; then
+    : # The firewall was opened at the first install.
+elif command -v firewall-cmd >/dev/null && sudo firewall-cmd --state >/dev/null 2>&1; then
     echo "Letting other PCs reach Mickey through firewalld (TCP 4242-4243, UDP 4243-4244)"
     for port in 4242/tcp 4243/tcp 4243/udp 4244/udp; do
         sudo firewall-cmd -q --permanent --add-port=$port
