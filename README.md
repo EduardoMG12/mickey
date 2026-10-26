@@ -191,6 +191,13 @@ The settings window writes `config.toml` for you
 and follows it when another PC rewrites it. Editing it by hand works too;
 restart Mickey afterwards, or run `mickey arranged` after changing positions.
 
+### When something goes wrong
+
+Mickey's log says what it is doing (never which keys you press):
+`journalctl --user -u mickey` on Linux, and
+`%LOCALAPPDATA%\mickey\mickey.log` on Windows (the previous run's is
+`mickey.log.old`). Add it to an issue when you report a problem.
+
 ## Known limits
 
 - **Screen edges only on Windows and Hyprland.** Elsewhere, use the hotkeys
