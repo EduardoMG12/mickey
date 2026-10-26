@@ -88,3 +88,11 @@ an update is waiting.
 
 - The README promised "no update checks". With the owner's decision this
   becomes: one request to GitHub's releases, which can be turned off.
+- **The Linux installer runs through `systemd-run --user`**: started from
+  Mickey directly, it sat in `mickey.service`'s cgroup, and restarting the
+  service would stop the installer that restarts it.
+- **The Windows installer also closes `mickey-ui.exe`**: an update started
+  from the settings window left its file locked.
+- **Ed25519 needed only four new crates** (`ed25519-dalek` 2, `ed25519`,
+  `signature`, `sha2`): `curve25519-dalek` was already in the tree through
+  `snow`. Version 3 would have brought a second copy.

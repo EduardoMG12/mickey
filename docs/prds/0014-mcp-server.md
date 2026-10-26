@@ -61,3 +61,12 @@ state, take safe actions, install and update**; it may never pair a PC.
 - An HTTP transport. Stdio only, so nothing listens on the network.
 
 ## Discoveries
+
+- **A client can be newer than the running Mickey** (just updated, not yet
+  restarted). The first real run of `status` read a 0.2.1 Mickey's peers
+  text with every field shifted, the monitors as a PC's name. The peers
+  parser now reads both forms (#324).
+- **`install` cannot finish alone on Linux**: the first install asks for
+  `sudo`, which needs a person at a terminal. The tool downloads and
+  checks the release, then gives the one command to run. On Windows the
+  person confirms the administrator prompt instead.
