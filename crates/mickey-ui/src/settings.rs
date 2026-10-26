@@ -742,7 +742,14 @@ impl eframe::App for Settings {
                                 ui.painter().circle_filled(spot.center(), 4.0, colour);
                                 ui.add_sized([140.0, 24.0], egui::TextEdit::singleline(&mut pc.name));
                             });
-                            ui.weak(format!("{}  {}", icon::LINK, pc.address));
+                            if info.is_some_and(|info| info.reinstalled) {
+                                // It answered with a new identity: refused until
+                                // removed and connected again (#289).
+                                ui.colored_label(theme::palette::AWAY, "New identity: reinstalled? Remove it, Save, then Connect it below.")
+                                    .on_hover_text(format!("{} answered with another identity than the one this PC paired with, so it is refused, in case it is not the same PC.", pc.address));
+                            } else {
+                                ui.weak(format!("{}  {}", icon::LINK, pc.address));
+                            }
                             ui.weak(match info.map(|info| info.monitors.len()) {
                                 Some(0) | None => "monitors unknown".to_string(),
                                 Some(1) => format!("{}  1 monitor", icon::MONITOR),
