@@ -268,8 +268,8 @@ mod idle {
         let player = std::thread::spawn(|| {
             let mut player = super::Player::open("a test").unwrap();
             let mut faint = [0u8; crate::audio_wire::PCM_BYTES];
-            for sample in faint.chunks_exact_mut(2) {
-                sample.copy_from_slice(&1i16.to_le_bytes());
+            for sample in faint.as_chunks_mut::<2>().0 {
+                *sample = 1i16.to_le_bytes();
             }
             for _ in 0..100 {
                 player.write(&faint, 1.0).unwrap();
