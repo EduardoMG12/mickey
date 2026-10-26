@@ -60,7 +60,25 @@ pub struct Config {
     #[serde(default)]
     pub audio: Audio,
     #[serde(default)]
+    pub updates: Updates,
+    #[serde(default)]
     pub this_pc: ThisPc,
+}
+
+/// `[updates]` (PRD 0013).
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct Updates {
+    /// Ask GitHub once a day whether a newer Mickey is out. Off, Mickey
+    /// never contacts the internet.
+    #[serde(default = "yes")]
+    pub check: bool,
+}
+
+impl Default for Updates {
+    fn default() -> Updates {
+        Updates { check: true }
+    }
 }
 
 /// `[this_pc]`: which roles `mickey run` plays on this machine.
@@ -780,6 +798,12 @@ mod tests {
     }
 
     #[test]
+    fn the_update_check_is_on_unless_turned_off() {
+        assert!(parse("").unwrap().updates.check);
+        assert!(!parse("[updates]\ncheck = false\n").unwrap().updates.check);
+    }
+
+    #[test]
     fn an_empty_file_has_no_peers_and_default_settings() {
         assert_eq!(
             parse("").unwrap(),
@@ -790,6 +814,7 @@ mod tests {
                 interface: Interface::default(),
                 clipboard: Clipboard::default(),
                 audio: Audio::default(),
+                updates: Updates { check: true },
                 this_pc: ThisPc::default(),
             }
         );
