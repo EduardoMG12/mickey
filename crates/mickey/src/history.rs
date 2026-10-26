@@ -8,9 +8,11 @@ use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
 const MAX_ENTRIES: usize = 50;
-/// What all entries may hold together, within the vision's 20 MB budget
-/// per PC. Images count as PNG (#190).
-const MAX_BYTES: usize = 16 << 20;
+/// What all entries may hold together. Images count as PNG (#190). The
+/// vision's budget is 20 MB resident per PC, and a running Mickey uses
+/// about 11 MB before any history (10.7 MB measured on the laptop, 0.3.0):
+/// 16 MiB of history would have gone over it.
+const MAX_BYTES: usize = 8 << 20;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Entry {
