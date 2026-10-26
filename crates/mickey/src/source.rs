@@ -225,7 +225,14 @@ fn use_hotkeys(config: &config::Config, switcher: &mut Switcher, window: &mut Du
 /// PC sits on its desktop (the mirror: if it is at `x, y` here, this PC is
 /// at `-x, -y` there), so both PCs agree. Always all of them: telling a peer
 /// what it already knows only writes the same line again.
-fn arrange(positions: &mut [Option<[i32; 2]>], peers: &mut [Peer]) -> String {
+/// Takes config.toml's positions and tells each PC online where this PC
+/// sits on its desktop. The PCs offline go into `unsent`, told as soon as
+/// they connect (#288): a layout saved while a PC was off must reach it.
+fn arrange(
+    positions: &mut [Option<[i32; 2]>],
+    peers: &mut [Peer],
+    unsent: &mut std::collections::HashSet<String>,
+) -> String {
     let config = match config::Config::load() {
         Ok(Some(config)) => config,
         Ok(None) => return "error: no config.toml".into(),
@@ -242,9 +249,17 @@ fn arrange(positions: &mut [Option<[i32; 2]>], peers: &mut [Peer]) -> String {
             && link.send(&Message::Arrange { x: -x, y: -y }).is_ok()
         {
             told += 1;
+            unsent.remove(&peer.name);
+        } else {
+            unsent.insert(peer.name.clone());
         }
     }
-    format!("ok: told {told} PC(s) about the layout")
+    let later = if unsent.is_empty() {
+        String::new()
+    } else {
+        format!("; {} more once online", unsent.len())
+    };
+    format!("ok: told {told} PC(s) about the layout{later}")
 }
 
 /// One PC from a peer's map (already in this PC's coordinates): trusted,
@@ -721,6 +736,9 @@ pub fn run(
         Vec::new()
     });
     let mut online: Vec<bool> = Vec::with_capacity(peers.len());
+    // PCs that were off when the owner saved a layout: told when they
+    // connect (#288).
+    let mut arrange_unsent: std::collections::HashSet<String> = std::collections::HashSet::new();
     loop {
         for (index, link) in back.try_iter() {
             // A peer is one PC, known by its key: another trusted PC that
@@ -750,6 +768,16 @@ pub fn run(
             peers[index].link = Some(link);
             peers[index].heard = Instant::now();
             println!("mickey: {} is online", peers[index].name);
+            // A layout saved while it was off reaches it now (#288).
+            if arrange_unsent.remove(&peers[index].name)
+                && let (Some([x, y]), Some(link)) = (positions[index], &mut peers[index].link)
+                && link.send(&Message::Arrange { x: -x, y: -y }).is_ok()
+            {
+                println!(
+                    "mickey: told {} the layout saved while it was off",
+                    peers[index].name
+                );
+            }
         }
         // Where to put the cursor here, coming back from a peer's edge.
         let mut home_at = None;
@@ -1111,7 +1139,7 @@ pub fn run(
             save_position(&peers[index].name, position);
         }
         if let Some(reply) = asked_to_arrange {
-            let _ = reply.send(arrange(&mut positions, &mut peers));
+            let _ = reply.send(arrange(&mut positions, &mut peers, &mut arrange_unsent));
             // The hotkeys saved with it: used here at once, and shared.
             if let Ok(Some(config)) = config::Config::load() {
                 use_hotkeys(&config, &mut switcher, &mut double_tap_window);
