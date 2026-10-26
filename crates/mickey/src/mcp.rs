@@ -177,6 +177,10 @@ fn pc_named(arguments: &Value) -> Result<String, String> {
     if pc.is_empty() {
         return Err("say which PC (`pc`), by its name as `status` shows it".into());
     }
+    // The control channel reads one line: a name must not carry another.
+    if pc.chars().any(char::is_control) {
+        return Err("a PC's name has no control characters".into());
+    }
     Ok(pc.to_string())
 }
 
@@ -442,6 +446,19 @@ mod tests {
         let answer = reply(call);
         assert_eq!(answer["result"]["isError"], true);
         assert_eq!(answer["result"]["content"][0]["text"], "volume is 0 to 100");
+    }
+
+    #[test]
+    fn a_name_cannot_carry_a_second_control_request() {
+        let call = r#"{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"switch_keyboard","arguments":{"pc":"Laptop\nquit"}}}"#;
+        let answer = reply(call);
+        assert_eq!(answer["result"]["isError"], true);
+        assert!(
+            answer["result"]["content"][0]["text"]
+                .as_str()
+                .unwrap()
+                .contains("control")
+        );
     }
 
     #[test]

@@ -78,6 +78,11 @@ pub fn latest() -> Result<String, String> {
 /// The body at `url`, through curl: HTTPS only, redirects followed (a
 /// release's files are served from another GitHub host).
 fn fetch(url: &str, limits: &[&str]) -> Result<Vec<u8>, String> {
+    // Windows: System32's own curl, by its full path, never one found first
+    // elsewhere.
+    #[cfg(windows)]
+    let mut curl = Command::new(crate::autostart::system_tool("curl.exe"));
+    #[cfg(not(windows))]
     let mut curl = Command::new("curl");
     curl.args(["--silent", "--show-error", "--fail", "--location"])
         .args(["--proto", "=https", "--proto-redir", "=https"])
@@ -120,27 +125,26 @@ fn release_key(text: &str) -> Option<[u8; 32]> {
     Some(key)
 }
 
-/// This system's file in a release.
-fn asset(sums: &str) -> Option<&str> {
-    sums.lines()
-        .filter_map(|line| line.split_once("  "))
-        .map(|(_, name)| name)
-        .find(|name| {
-            if cfg!(windows) {
-                name.starts_with("Mickey-Setup-") && name.ends_with(".exe")
-            } else {
-                *name == "mickey-linux-x86_64.tar.gz"
-            }
-        })
+/// This system's file in `version`'s release: an exact name, so nothing
+/// listed can point elsewhere.
+fn asset(version: &str) -> String {
+    if cfg!(windows) {
+        format!("Mickey-Setup-{version}.exe")
+    } else {
+        "mickey-linux-x86_64.tar.gz".into()
+    }
 }
 
-/// Whether `file`, called `name`, is the one the owner released: `sums`
-/// (a release's SHA256SUMS) carries a valid Ed25519 `signature` from `key`,
-/// and lists `name` with `file`'s SHA-256. Nothing else is ever installed.
+/// Whether `file`, called `name`, is `version` as the owner released it:
+/// `sums` (a release's SHA256SUMS) carries a valid Ed25519 `signature` from
+/// `key`, lists `name` with `file`'s SHA-256, and is `version`'s list (it
+/// names `version`'s Windows installer), so an older release, signed too,
+/// cannot be served as a newer one. Nothing else is ever installed.
 fn verified(
     sums: &[u8],
     signature: &[u8],
     key: &[u8; 32],
+    version: &str,
     name: &str,
     file: &[u8],
 ) -> Result<(), String> {
@@ -153,6 +157,13 @@ fn verified(
     key.verify_strict(sums, &Signature::from_bytes(&signature))
         .map_err(|_| "SHA256SUMS is not signed by the release key")?;
     let sums = std::str::from_utf8(sums).map_err(|_| "SHA256SUMS is not text")?;
+    let names_version = sums
+        .lines()
+        .filter_map(|line| line.split_once("  "))
+        .any(|(_, listed)| listed == format!("Mickey-Setup-{version}.exe"));
+    if !names_version {
+        return Err(format!("this SHA256SUMS is not Mickey {version}'s"));
+    }
     let listed = sums
         .lines()
         .filter_map(|line| line.split_once("  "))
@@ -169,6 +180,23 @@ fn verified(
     Ok(())
 }
 
+/// Where a verified release waits to be installed. On Windows, a Mickey
+/// running as administrator starts the installer without a prompt, so the
+/// file must sit where only administrators can change it (`state`, next to
+/// mickey.exe): in %APPDATA% any program of the user could swap it between
+/// the check and the start, and run as administrator.
+fn updates_dir() -> Result<std::path::PathBuf, String> {
+    #[cfg(windows)]
+    if crate::platform::acl::elevated() {
+        let state = crate::trust::dir()?;
+        if !crate::platform::acl::admin_only(&state).unwrap_or(false) {
+            return Err("Mickey runs as administrator without a folder only administrators can change: install the update by hand".into());
+        }
+        return Ok(state.join("updates"));
+    }
+    Ok(crate::identity::data_dir()?.join("updates"))
+}
+
 /// Downloads `version`'s file for this system into Mickey's data folder and
 /// checks it (`verified`). Its path, once it may be installed.
 pub fn download(version: &str) -> Result<std::path::PathBuf, String> {
@@ -181,15 +209,13 @@ pub fn download(version: &str) -> Result<std::path::PathBuf, String> {
     let small = ["--max-time", "30", "--max-filesize", "65536"];
     let sums = fetch(&format!("{base}/SHA256SUMS"), &small)?;
     let signature = fetch(&format!("{base}/SHA256SUMS.sig"), &small)?;
-    let name = asset(&String::from_utf8_lossy(&sums))
-        .ok_or("the release has no file for this system")?
-        .to_string();
+    let name = asset(&version);
     let file = fetch(
         &format!("{base}/{name}"),
         &["--max-time", "600", "--max-filesize", "209715200"],
     )?;
-    verified(&sums, &signature, &key, &name, &file)?;
-    let dir = crate::identity::data_dir()?.join("updates").join(&version);
+    verified(&sums, &signature, &key, &version, &name, &file)?;
+    let dir = updates_dir()?.join(&version);
     std::fs::create_dir_all(&dir).map_err(|err| format!("cannot make {}: {err}", dir.display()))?;
     let path = dir.join(&name);
     std::fs::write(&path, &file)
@@ -287,14 +313,17 @@ mod tests {
 
     use ed25519_dalek::{Signer, SigningKey};
 
-    /// A release signed by `signer`: its SHA256SUMS, the signature, and the file.
+    /// Version 0.3.0's release signed by `signer`: its SHA256SUMS (which,
+    /// as release.yml writes it, lists the Windows installer by version)
+    /// and the signature.
     fn release(signer: &SigningKey, file: &[u8]) -> (Vec<u8>, Vec<u8>) {
         use sha2::{Digest, Sha256};
         let hash: String = Sha256::digest(file)
             .iter()
             .map(|b| format!("{b:02x}"))
             .collect();
-        let sums = format!("{hash}  mickey-linux-x86_64.tar.gz\n").into_bytes();
+        let sums = format!("{hash}  mickey-linux-x86_64.tar.gz\n{hash}  Mickey-Setup-0.3.0.exe\n")
+            .into_bytes();
         let signature = signer.sign(&sums).to_bytes().to_vec();
         (sums, signature)
     }
@@ -306,21 +335,26 @@ mod tests {
         let file = b"the release";
         let name = "mickey-linux-x86_64.tar.gz";
         let (sums, signature) = release(&owner, file);
-        assert_eq!(verified(&sums, &signature, &key, name, file), Ok(()));
+        assert_eq!(
+            verified(&sums, &signature, &key, "0.3.0", name, file),
+            Ok(())
+        );
         // Another file than the one released.
-        assert!(verified(&sums, &signature, &key, name, b"the release!").is_err());
+        assert!(verified(&sums, &signature, &key, "0.3.0", name, b"the release!").is_err());
         // SHA256SUMS changed after signing (to list another file's hash).
         let mut changed = sums.clone();
         changed[0] ^= 1;
-        assert!(verified(&changed, &signature, &key, name, file).is_err());
+        assert!(verified(&changed, &signature, &key, "0.3.0", name, file).is_err());
         // Signed by someone else.
         let stranger = SigningKey::from_bytes(&[8; 32]);
         let (sums, signature) = release(&stranger, file);
-        assert!(verified(&sums, &signature, &key, name, file).is_err());
+        assert!(verified(&sums, &signature, &key, "0.3.0", name, file).is_err());
         // Cut short, or a name not in the list.
-        assert!(verified(&sums, &signature[..63], &key, name, file).is_err());
+        assert!(verified(&sums, &signature[..63], &key, "0.3.0", name, file).is_err());
         let (sums, signature) = release(&owner, file);
-        assert!(verified(&sums, &signature, &key, "other.tar.gz", file).is_err());
+        assert!(verified(&sums, &signature, &key, "0.3.0", "other.tar.gz", file).is_err());
+        // 0.3.0's real, signed list served as 0.3.5's: a downgrade.
+        assert!(verified(&sums, &signature, &key, "0.3.5", name, file).is_err());
     }
 
     #[test]
