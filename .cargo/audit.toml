@@ -1,0 +1,12 @@
+# cargo audit's settings (the Audit workflow runs it with --deny warnings).
+
+[advisories]
+# zvariant, zvariant_derive and zbus_names are unmaintained: merged into
+# zbus 6. They come in through zbus 5, which ksni (the Linux tray icon) still
+# needs in its newest release (0.3.7). Not vulnerabilities. Remove these once
+# ksni moves to zbus 6: https://github.com/EduardoMG12/mickey/issues/296
+ignore = [
+    "RUSTSEC-2026-0370", # zvariant
+    "RUSTSEC-2026-0371", # zbus_names
+    "RUSTSEC-2026-0372", # zvariant_derive
+]
