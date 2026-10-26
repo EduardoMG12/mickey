@@ -49,12 +49,15 @@ VIAddVersionKey /LANG=${LANG_ENGLISH} "FileVersion" "${VERSION}"
 VIAddVersionKey /LANG=${LANG_ENGLISH} "FileDescription" "Mickey installer: one keyboard and mouse for all your PCs"
 VIAddVersionKey /LANG=${LANG_ENGLISH} "LegalCopyright" "GPL-3.0-or-later"
 
+; System tools always by their full path: run by bare name, Windows looks
+; first in the installer's own folder, where an update waits and where a
+; program could have left a taskkill.exe of its own (PRD 0013).
 Section "Mickey"
   SetOutPath "$INSTDIR"
   ; A running Mickey keeps its files locked; so does an open settings
   ; window, where an update may have been started (PRD 0013).
-  nsExec::Exec 'taskkill /im mickey.exe /f'
-  nsExec::Exec 'taskkill /im mickey-ui.exe /f'
+  nsExec::Exec '"$SYSDIR\taskkill.exe" /im mickey.exe /f'
+  nsExec::Exec '"$SYSDIR\taskkill.exe" /im mickey-ui.exe /f'
   File "${BIN}\mickey.exe"
   File "${BIN}\mickey-ui.exe"
   File "start-hidden.vbs"
@@ -73,8 +76,8 @@ Section "Mickey"
   nsExec::Exec '"$INSTDIR\mickey.exe" autostart on'
 
   ; Peers connect to the target; private networks only, never public ones.
-  nsExec::Exec 'netsh advfirewall firewall delete rule name="Mickey"'
-  nsExec::Exec 'netsh advfirewall firewall add rule name="Mickey" dir=in action=allow program="$INSTDIR\mickey.exe" profile=private'
+  nsExec::Exec '"$SYSDIR\netsh.exe" advfirewall firewall delete rule name="Mickey"'
+  nsExec::Exec '"$SYSDIR\netsh.exe" advfirewall firewall add rule name="Mickey" dir=in action=allow program="$INSTDIR\mickey.exe" profile=private'
 
   CreateDirectory "$SMPROGRAMS\Mickey"
   CreateShortcut "$SMPROGRAMS\Mickey\Mickey settings.lnk" "$INSTDIR\mickey-ui.exe" "settings"
@@ -86,15 +89,15 @@ Section "Mickey"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Mickey" "UninstallString" '"$INSTDIR\uninstall.exe"'
 
   ; Start it now, elevated, as it will start at every login.
-  nsExec::Exec 'schtasks /run /tn "Mickey"'
+  nsExec::Exec '"$SYSDIR\schtasks.exe" /run /tn "Mickey"'
 SectionEnd
 
 Section "Uninstall"
-  nsExec::Exec 'taskkill /im mickey.exe /f'
-  nsExec::Exec 'taskkill /im mickey-ui.exe /f'
+  nsExec::Exec '"$SYSDIR\taskkill.exe" /im mickey.exe /f'
+  nsExec::Exec '"$SYSDIR\taskkill.exe" /im mickey-ui.exe /f'
   DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "Mickey"
   nsExec::Exec '"$INSTDIR\mickey.exe" autostart off'
-  nsExec::Exec 'netsh advfirewall firewall delete rule name="Mickey"'
+  nsExec::Exec '"$SYSDIR\netsh.exe" advfirewall firewall delete rule name="Mickey"'
   Delete "$INSTDIR\mickey.exe"
   Delete "$INSTDIR\mickey-ui.exe"
   Delete "$INSTDIR\start-hidden.vbs"
