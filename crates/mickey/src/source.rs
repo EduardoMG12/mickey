@@ -438,6 +438,7 @@ fn add_peer(
         key: None,
         latency: Latency::new(),
         monitors: Vec::new(),
+        new_key: false,
     });
     positions.push(position);
     Ok(peers.len() - 1)
@@ -501,6 +502,7 @@ fn peers_text(this_pc: &[Monitor], peers: &[Peer], online: &[bool]) -> String {
             .map(|(peer, &online)| PeerInfo {
                 name: peer.name.clone(),
                 online,
+                reinstalled: peer.new_key,
                 monitors: peer.monitors.clone(),
             })
             .collect(),
@@ -520,6 +522,9 @@ struct Peer {
     latency: Latency,
     /// What the peer reported (PRD 0005); empty until it does.
     monitors: Vec<Monitor>,
+    /// It answered with another key than the one this PC knows: refused,
+    /// and the settings say why (#289).
+    new_key: bool,
 }
 
 /// Everything the background reconnect threads need, shared read-only.
@@ -619,6 +624,7 @@ pub fn run(
             heard: start,
             latency: Latency::new(),
             monitors: Vec::new(),
+            new_key: false,
         })
         .collect();
     let shared = Arc::new(Shared { identity, trusted });
@@ -749,6 +755,7 @@ pub fn run(
                         "mickey: {} answered with another PC's key; refused. If it was reinstalled, remove it in the settings and connect again",
                         peers[index].name
                     );
+                    peers[index].new_key = true;
                     continue;
                 }
                 Some(_) => {}
@@ -765,6 +772,7 @@ pub fn run(
                 );
             }
             peers[index].key = Some(*link.peer_key());
+            peers[index].new_key = false;
             peers[index].link = Some(link);
             peers[index].heard = Instant::now();
             println!("mickey: {} is online", peers[index].name);

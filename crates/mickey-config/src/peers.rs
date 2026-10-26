@@ -21,6 +21,10 @@ pub struct Monitor {
 pub struct PeerInfo {
     pub name: String,
     pub online: bool,
+    /// It answered with another identity than the one this PC knows (it
+    /// was reinstalled?), so it is refused until removed and connected
+    /// again (#289). Shown as the state `reinstalled`.
+    pub reinstalled: bool,
     pub monitors: Vec<Monitor>,
 }
 
@@ -65,7 +69,11 @@ impl Peers {
     pub fn to_text(&self) -> String {
         let mut lines = vec![format!("this\t{}", monitors_to_text(&self.this_pc))];
         for peer in &self.peers {
-            let state = if peer.online { "online" } else { "offline" };
+            let state = match (peer.online, peer.reinstalled) {
+                (true, _) => "online",
+                (false, true) => "reinstalled",
+                (false, false) => "offline",
+            };
             lines.push(format!(
                 "peer\t{state}\t{}\t{}",
                 peer.name,
@@ -84,6 +92,7 @@ impl Peers {
                 ["peer", state, name, monitors] => peers.peers.push(PeerInfo {
                     name: name.to_string(),
                     online: *state == "online",
+                    reinstalled: *state == "reinstalled",
                     monitors: monitors_from_text(monitors)?,
                 }),
                 // A peer with no monitors ends in a tab, which trimming the
@@ -91,6 +100,7 @@ impl Peers {
                 ["peer", state, name] => peers.peers.push(PeerInfo {
                     name: name.to_string(),
                     online: *state == "online",
+                    reinstalled: *state == "reinstalled",
                     monitors: Vec::new(),
                 }),
                 _ => return None,
@@ -102,6 +112,23 @@ impl Peers {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_reinstalled_pc_is_its_own_state() {
+        let peers = Peers {
+            this_pc: vec![],
+            peers: vec![PeerInfo {
+                name: "Notebook".into(),
+                online: false,
+                reinstalled: true,
+                monitors: vec![],
+            }],
+        };
+        let text = peers.to_text();
+        assert!(text.contains("peer\treinstalled\tNotebook"), "{text}");
+        let back = Peers::from_text(&text).unwrap();
+        assert!(back.peers[0].reinstalled && !back.peers[0].online);
+    }
+
     use super::*;
 
     #[test]
@@ -116,6 +143,7 @@ mod tests {
             peers: vec![PeerInfo {
                 name: "Windows".into(),
                 online: true,
+                reinstalled: false,
                 monitors: vec![
                     Monitor {
                         x: 0,
