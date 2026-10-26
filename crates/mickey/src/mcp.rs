@@ -86,7 +86,8 @@ fn tools() -> Vec<Tool> {
             },
             run: |arguments| {
                 let pc = pc_named(arguments)?;
-                let key = key_of(&pc)?;
+                // The values first, so a wrong one is named as such
+                // whatever the PC.
                 let volume = match arguments.get("volume") {
                     None => None,
                     Some(volume) => Some(
@@ -100,6 +101,7 @@ fn tools() -> Vec<Tool> {
                     .get("muted")
                     .map(|muted| muted.as_bool().ok_or("muted is true or false"))
                     .transpose()?;
+                let key = key_of(&pc)?;
                 change_audio(|audio| {
                     if let Some(volume) = volume {
                         audio.volumes.insert(key.clone(), volume);
@@ -432,6 +434,14 @@ mod tests {
             answered("error: no PC named X".into()),
             Err("no PC named X".into())
         );
+    }
+
+    #[test]
+    fn a_volume_out_of_range_is_named_before_the_pc_is_looked_up() {
+        let call = r#"{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"set_volume","arguments":{"pc":"No Such PC","volume":500}}}"#;
+        let answer = reply(call);
+        assert_eq!(answer["result"]["isError"], true);
+        assert_eq!(answer["result"]["content"][0]["text"], "volume is 0 to 100");
     }
 
     #[test]
