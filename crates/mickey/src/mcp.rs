@@ -32,12 +32,151 @@ struct Tool {
 }
 
 fn tools() -> Vec<Tool> {
-    vec![Tool {
-        name: "status",
-        description: "Mickey on this PC: its version, which PC has the keyboard and mouse, every paired PC (online or not, and its Mickey version), who listens to every PC's sound, and whether a newer Mickey is out.",
-        input: no_arguments,
-        run: |_| status(),
-    }]
+    vec![
+        Tool {
+            name: "status",
+            description: "Mickey on this PC: its version, which PC has the keyboard and mouse, every paired PC (online or not, and its Mickey version), who listens to every PC's sound, and whether a newer Mickey is out.",
+            input: no_arguments,
+            run: |_| status(),
+        },
+        Tool {
+            name: "switch_keyboard",
+            description: "Move the keyboard and mouse to a paired PC, by its name as `status` shows it, or back to this PC with \"this PC\".",
+            input: || pc_argument("The PC to move the keyboard and mouse to, or \"this PC\"."),
+            run: |arguments| {
+                let pc = pc_named(arguments)?;
+                let answer = if is_this_pc(&pc) {
+                    ask("home")?
+                } else {
+                    ask(&format!("go {pc}"))?
+                };
+                answered(answer)
+            },
+        },
+        Tool {
+            name: "set_listener",
+            description: "Choose the PC whose speakers or headphones play every PC's sound, by its name as `status` shows it, \"this PC\", or \"nobody\" (each PC plays its own). Every PC learns the choice.",
+            input: || pc_argument("The PC that listens, \"this PC\", or \"nobody\"."),
+            run: |arguments| {
+                let pc = pc_named(arguments)?;
+                let listener = if pc.eq_ignore_ascii_case("nobody") {
+                    None
+                } else {
+                    Some(key_of(&pc)?)
+                };
+                change_audio(|audio| audio.listener = listener)?;
+                Ok(format!("Listening to every PC's sound: {pc}."))
+            },
+        },
+        Tool {
+            name: "set_volume",
+            description: "Set how loud one PC plays on the listener, 0 to 100, and whether it is muted. By its name as `status` shows it, or \"this PC\".",
+            input: || {
+                json!({
+                    "type": "object",
+                    "properties": {
+                        "pc": { "type": "string", "description": "The PC whose sound to change." },
+                        "volume": { "type": "integer", "minimum": 0, "maximum": 100 },
+                        "muted": { "type": "boolean" },
+                    },
+                    "required": ["pc"],
+                    "additionalProperties": false,
+                })
+            },
+            run: |arguments| {
+                let pc = pc_named(arguments)?;
+                let key = key_of(&pc)?;
+                let volume = match arguments.get("volume") {
+                    None => None,
+                    Some(volume) => Some(
+                        volume
+                            .as_u64()
+                            .filter(|v| *v <= 100)
+                            .ok_or("volume is 0 to 100")? as u8,
+                    ),
+                };
+                let muted = arguments
+                    .get("muted")
+                    .map(|muted| muted.as_bool().ok_or("muted is true or false"))
+                    .transpose()?;
+                change_audio(|audio| {
+                    if let Some(volume) = volume {
+                        audio.volumes.insert(key.clone(), volume);
+                    }
+                    match muted {
+                        Some(true) if !audio.muted.contains(&key) => audio.muted.push(key.clone()),
+                        Some(false) => audio.muted.retain(|muted| *muted != key),
+                        _ => {}
+                    }
+                })?;
+                Ok(format!("{pc}'s sound changed."))
+            },
+        },
+    ]
+}
+
+/// The schema of a tool that takes one PC.
+fn pc_argument(description: &str) -> Value {
+    json!({
+        "type": "object",
+        "properties": { "pc": { "type": "string", "description": description } },
+        "required": ["pc"],
+        "additionalProperties": false,
+    })
+}
+
+fn pc_named(arguments: &Value) -> Result<String, String> {
+    let pc = arguments
+        .get("pc")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or("");
+    if pc.is_empty() {
+        return Err("say which PC (`pc`), by its name as `status` shows it".into());
+    }
+    Ok(pc.to_string())
+}
+
+fn is_this_pc(pc: &str) -> bool {
+    pc.eq_ignore_ascii_case("this PC") || pc.eq_ignore_ascii_case("this")
+}
+
+/// Mickey answers `error: …` when it could not.
+fn answered(answer: String) -> Result<String, String> {
+    match answer.strip_prefix("error: ") {
+        Some(why) => Err(why.to_string()),
+        None => Ok(answer),
+    }
+}
+
+/// The public key (hex) of the PC called `pc` here, or of this PC.
+fn key_of(pc: &str) -> Result<String, String> {
+    if is_this_pc(pc) {
+        let identity = identity::Identity::load_or_create(&identity::data_dir()?)?;
+        return Ok(trust::to_hex(identity.public()));
+    }
+    let config = config::Config::load()?.ok_or("Mickey has no config.toml yet")?;
+    let peer = config
+        .peers
+        .iter()
+        .find(|peer| peer.name.eq_ignore_ascii_case(pc))
+        .ok_or_else(|| format!("no paired PC is called {pc:?}; `status` lists them"))?;
+    peer.key
+        .clone()
+        .ok_or_else(|| format!("{pc} has not connected yet, so its sound is not known"))
+}
+
+/// Changes `[audio]` in config.toml as a choice made now, and tells the
+/// running Mickey, which uses it and shares it with every PC (as the
+/// settings window's Save does).
+fn change_audio(change: impl FnOnce(&mut config::Audio)) -> Result<(), String> {
+    let path = config::path()?;
+    let text = std::fs::read_to_string(&path).unwrap_or_default();
+    let mut audio = config::parse(&text)?.audio;
+    change(&mut audio);
+    audio.since = config::now_seconds();
+    config::write(&path, &config::set_audio(&text, &audio)?)?;
+    answered(ask("arranged")?).map(|_| ())
 }
 
 fn no_arguments() -> Value {
@@ -220,7 +359,31 @@ mod tests {
             .map(|tool| tool["name"].as_str().unwrap())
             .collect();
         assert!(names.contains(&"status"), "{names:?}");
-        assert!(!names.iter().any(|name| name.contains("pair")));
+        assert!(
+            !names
+                .iter()
+                .any(|name| name.contains("pair") || name.contains("forget"))
+        );
+        for wanted in ["switch_keyboard", "set_listener", "set_volume"] {
+            assert!(names.contains(&wanted), "{wanted} missing from {names:?}");
+        }
+    }
+
+    #[test]
+    fn a_tool_without_its_pc_says_what_is_missing() {
+        let call = r#"{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"switch_keyboard","arguments":{}}}"#;
+        let answer = reply(call);
+        assert_eq!(answer["result"]["isError"], true);
+        assert!(
+            answer["result"]["content"][0]["text"]
+                .as_str()
+                .unwrap()
+                .contains("which PC")
+        );
+        assert_eq!(
+            answered("error: no PC named X".into()),
+            Err("no PC named X".into())
+        );
     }
 
     #[test]
