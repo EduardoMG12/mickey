@@ -19,3 +19,8 @@ eframe = { version = "0.37", default-features = false, features = [
     "wayland",
     "x11",
 ] }
+
+# The Ratão icon inside the Windows .exe (build.rs): compiles a resource
+# with the resource compiler the target uses (windres or rc.exe).
+[build-dependencies]
+embed-resource = "3"

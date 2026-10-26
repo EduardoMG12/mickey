@@ -6,6 +6,9 @@
 
 Unicode true
 !include "MUI2.nsh"
+; The Ratão on the installer and the uninstaller.
+!define MUI_ICON "..\..\assets\icons\mickey.ico"
+!define MUI_UNICON "..\..\assets\icons\mickey.ico"
 
 !ifndef VERSION
   !define VERSION "0.0.0"
