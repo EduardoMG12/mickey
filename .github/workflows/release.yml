@@ -64,6 +64,11 @@ jobs:
         run: choco install nsis -y --no-progress
       - name: Build the installer
         shell: bash
+        # Windows' Python writes cp1252 by default, and crate authors' names
+        # (an "ł") broke the licenses file: every Windows release build
+        # failed, v0.2.0 included.
+        env:
+          PYTHONUTF8: "1"
         run: |
           version="${GITHUB_REF_NAME#v}"
           case "$GITHUB_REF" in refs/tags/*) ;; *) version=0.0.0-test ;; esac
