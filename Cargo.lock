@@ -1626,7 +1626,7 @@ dependencies = [
 
 [[package]]
 name = "mickey"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "arboard",
  "embed-resource",
@@ -1645,7 +1645,7 @@ dependencies = [
 
 [[package]]
 name = "mickey-config"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "serde",
  "toml",
@@ -1653,7 +1653,7 @@ dependencies = [
 
 [[package]]
 name = "mickey-ui"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "eframe",
  "embed-resource",
