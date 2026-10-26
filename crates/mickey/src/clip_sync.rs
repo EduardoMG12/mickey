@@ -156,7 +156,7 @@ enum Job {
 impl Mover {
     pub fn start(keeper: Keeper) -> Mover {
         let (jobs, todo) = mpsc::channel();
-        thread::spawn(move || {
+        crate::threads::spawn("clip mover", move || {
             let mut links: HashMap<usize, Link> = HashMap::new();
             // The latest map and listener, for links that open after they
             // were shared.

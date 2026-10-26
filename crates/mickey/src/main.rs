@@ -36,6 +36,7 @@ mod secure;
 mod sound;
 mod source;
 mod speakers;
+mod threads;
 mod transport;
 mod tray;
 mod tray_picture;
@@ -384,7 +385,9 @@ fn run_from_config() -> Result<(), String> {
     let target = this_pc.controlled.then(|| {
         let (listen, found, keeper) = (this_pc.listen, found.clone(), keeper.clone());
         let trusted = trusted.clone();
-        std::thread::spawn(move || target(listen, trusted, controlled_sender, found, keeper))
+        crate::threads::spawn("target", move || {
+            target(listen, trusted, controlled_sender, found, keeper)
+        })
     });
     if source_wanted {
         let hotkeys = hotkey::Hotkey::from_config(&config.hotkeys()?);
@@ -515,7 +518,7 @@ fn target(
         let Some(slot) = Slot::take(&input_slots) else {
             continue;
         };
-        on_its_thread(move || {
+        on_its_thread("serve source", move || {
             let _slot = slot;
             serve_source(stream, peer, &identity, &trusted, &emitter, &around);
         });
@@ -552,8 +555,11 @@ impl Drop for Slot {
 
 /// Runs `work` on a new thread; when none can be made, says so instead
 /// of panicking (`thread::spawn` would end the accept loop).
-fn on_its_thread(work: impl FnOnce() + Send + 'static) {
-    if let Err(err) = std::thread::Builder::new().spawn(work) {
+fn on_its_thread(name: &str, work: impl FnOnce() + Send + 'static) {
+    if let Err(err) = std::thread::Builder::new()
+        .name(name.to_string())
+        .spawn(work)
+    {
         eprintln!("mickey: cannot start a thread for a connection: {err}");
     }
 }
@@ -580,7 +586,7 @@ fn serve_clipboard(
     let (identity, trusted, controlled) = (identity.clone(), trusted.clone(), controlled.clone());
     let (sources, grants) = (sources.clone(), grants.clone());
     let shown = Shown::default();
-    std::thread::spawn(move || {
+    crate::threads::spawn("data accept", move || {
         let slots = std::sync::Arc::default();
         for stream in listener.incoming().flatten() {
             let Some(slot) = Slot::take(&slots) else {
@@ -592,7 +598,7 @@ fn serve_clipboard(
             let Ok(from) = stream.peer_addr().map(|address| address.ip()) else {
                 continue;
             };
-            on_its_thread(move || {
+            on_its_thread("data link", move || {
                 let _slot = slot;
                 let is_trusted = |key: &[u8; 32]| {
                     trusted
@@ -616,13 +622,15 @@ fn serve_clipboard(
                                 let (text, sources, shown) =
                                     (text.to_string(), sources.clone(), shown.clone());
                                 let mirror = kind == group::MIRROR;
-                                std::thread::spawn(move || {
+                                crate::threads::spawn("switcher here", move || {
                                     show_switcher_here(&text, from, &sources, &shown, mirror)
                                 });
                             }
                             group::CLOSE => {
                                 let shown = shown.clone();
-                                std::thread::spawn(move || window::close(&shown));
+                                crate::threads::spawn("switcher close", move || {
+                                    window::close(&shown)
+                                });
                             }
                             group::HOTKEYS => {
                                 let _ =
@@ -714,7 +722,7 @@ fn show_switcher_here(
     if mirror {
         // A copy only shows: nobody waits for an answer.
         let slot = shown.clone();
-        std::thread::spawn(move || window::run(&args, &slot));
+        crate::threads::spawn("switcher pick", move || window::run(&args, &slot));
         return;
     }
     // 255: closed without a pick.

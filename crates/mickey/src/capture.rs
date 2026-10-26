@@ -7,7 +7,6 @@ use std::io;
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::mpsc::Sender;
-use std::thread;
 
 const EV_SYN: u16 = 0;
 const EV_KEY: u16 = 1;
@@ -139,7 +138,7 @@ pub fn spawn_readers<T: From<InputEvent> + Send + 'static>(
         let touchpad =
             (found.kind == Kind::Touchpad).then(|| Touchpad::new(found.resolution, touchpad_speed));
         let mut translator = Translator::new(found.hi_res_wheel, touchpad);
-        thread::spawn(move || {
+        crate::threads::spawn("capture", move || {
             let mut batch = Vec::with_capacity(64);
             while device.read_events(&mut batch).is_ok() {
                 let mut closed = false;

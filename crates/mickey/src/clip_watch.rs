@@ -36,7 +36,7 @@ pub fn start(
 
 #[cfg(windows)]
 fn windows_counter(changed: Sender<()>) {
-    thread::spawn(move || {
+    crate::threads::spawn("clip watch", move || {
         let mut last = crate::platform::windows::clipboard_sequence();
         loop {
             thread::sleep(Duration::from_millis(250));
@@ -53,7 +53,7 @@ fn windows_counter(changed: Sender<()>) {
 
 #[cfg(not(windows))]
 fn poll_text(changed: Sender<()>, text: impl Fn() -> Option<String> + Send + 'static) {
-    thread::spawn(move || {
+    crate::threads::spawn("clip watch", move || {
         let mut last = text();
         loop {
             thread::sleep(Duration::from_secs(1));
@@ -104,7 +104,9 @@ mod wayland {
             return Err("the compositor has no data-control".into());
         };
         manager.get_data_device(seat, &handle, ());
-        std::thread::spawn(move || while queue.blocking_dispatch(&mut watch).is_ok() {});
+        crate::threads::spawn("clip watch", move || {
+            while queue.blocking_dispatch(&mut watch).is_ok() {}
+        });
         Ok(())
     }
 

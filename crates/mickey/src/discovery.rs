@@ -143,7 +143,7 @@ pub fn start(me: Announce) -> Result<Table, String> {
 
     let packet = me.encode();
     let answer = packet.clone();
-    thread::spawn(move || {
+    crate::threads::spawn("discovery send", move || {
         loop {
             // A network that is down now may be up in a moment: keep
             // trying, and look at the networks again every time.
@@ -154,7 +154,7 @@ pub fn start(me: Announce) -> Result<Table, String> {
         }
     });
     let heard = table.clone();
-    thread::spawn(move || {
+    crate::threads::spawn("discovery hear", move || {
         let mut buf = [0u8; 128];
         // When each address was last answered, so two PCs answering each
         // other send one packet every `EVERY`, not a storm. By address, not

@@ -137,7 +137,7 @@ mod windows {
             let (raw_sender, raw) = std::sync::mpsc::channel();
             hooks::start(raw_sender).map_err(|err| format!("cannot install the hooks: {err}"))?;
             let anchor = Arc::clone(&self.anchor);
-            std::thread::spawn(move || {
+            crate::threads::spawn("input translate", move || {
                 for event in raw {
                     let anchor = *anchor.lock().unwrap_or_else(|p| p.into_inner());
                     if let Some(event) = translate(event, anchor)
