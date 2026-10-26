@@ -21,6 +21,8 @@ it says **not recorded**. Words such as *peer*, *source*, *target* and
 | [0006](0006-egui-in-a-separate-ui-process.md) | egui (eframe) for every window, in a separate `mickey-ui` program | Accepted |
 | [0007](0007-peers-identified-by-public-key.md) | Peers identified by public key; group introductions asked once | Accepted |
 | [0008](0008-shared-audio.md) | Shared audio: one listener chosen by hand, per-OS silencing, an adaptive jitter buffer | Accepted |
+| [0009](0009-windows-administrator-mode.md) | Windows: administrator mode only from Program Files, an admin-only trust list, redirection trust | Accepted |
+| [0010](0010-releases-and-license.md) | Releases: one Linux tarball built for glibc 2.35, an NSIS installer; GPL-3.0-or-later | Accepted |
 
 ## Writing a new one
 
