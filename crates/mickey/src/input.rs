@@ -7,8 +7,12 @@ use std::sync::mpsc::Sender;
 
 #[cfg(target_os = "linux")]
 pub use linux::Input;
+#[cfg(target_os = "linux")]
+pub use linux::cursor_now;
 #[cfg(windows)]
 pub use windows::Input;
+#[cfg(windows)]
+pub use windows::cursor_now;
 
 #[cfg(target_os = "linux")]
 mod linux {
@@ -23,6 +27,12 @@ mod linux {
     /// While this lives, the devices are taken from the desktop.
     pub struct Grabbed<'a> {
         _grabs: Vec<Grab<'a>>,
+    }
+
+    /// Where the cursor is: a question to Hyprland, which may take a
+    /// few milliseconds (#187).
+    pub fn cursor_now() -> Option<(i32, i32)> {
+        crate::monitors::hyprland::cursor().ok()
     }
 
     impl Input {
@@ -73,10 +83,6 @@ mod linux {
         }
 
         /// Where the cursor is on this desktop, if the compositor says.
-        pub fn cursor(&self) -> Option<(i32, i32)> {
-            crate::monitors::hyprland::cursor().ok()
-        }
-
         pub fn grab(&self) -> Result<Grabbed<'_>, String> {
             let grabs = self
                 .devices
@@ -119,6 +125,12 @@ mod windows {
         }
     }
 
+    /// Where the cursor is: a local call, cheap.
+    pub fn cursor_now() -> Option<(i32, i32)> {
+        let point = hooks::cursor_pos();
+        Some((point.x, point.y))
+    }
+
     impl Input {
         pub fn open() -> Result<Input, String> {
             println!("mickey: capturing the keyboard and mouse with low-level hooks");
@@ -156,11 +168,6 @@ mod windows {
 
         pub fn button_down(&self) -> bool {
             hooks::button_down()
-        }
-
-        pub fn cursor(&self) -> Option<(i32, i32)> {
-            let point = hooks::cursor_pos();
-            Some((point.x, point.y))
         }
 
         /// Pins the cursor where it is and starts swallowing.
