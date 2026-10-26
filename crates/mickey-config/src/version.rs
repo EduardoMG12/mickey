@@ -27,11 +27,13 @@ pub fn is_newer(other: &str, than: &str) -> bool {
     }
 }
 
-/// `text` if it is a version, as a peer may show it: a peer's word is not
-/// trusted, so anything else (too long, odd characters) is dropped.
+/// `text` if it is a version, written as Mickey writes one: `0.3.0`, never
+/// a release tag's `v0.3.0` (a download URL adds its own `v`). A peer's
+/// word is not trusted, so anything else (too long, odd characters) is
+/// dropped.
 pub fn checked(text: &str) -> Option<String> {
-    parse(text)?;
-    (text.len() <= 24).then(|| text.trim().to_string())
+    let (major, minor, patch) = parse(text)?;
+    (text.len() <= 24).then(|| format!("{major}.{minor}.{patch}"))
 }
 
 #[cfg(test)]
@@ -52,6 +54,9 @@ mod tests {
             assert!(!is_newer(odd, "0.0.1"), "{odd:?}");
         }
         assert_eq!(checked("0.2.1"), Some("0.2.1".into()));
+        // GitHub's tag, as the update check reads it (`v0.3.0` once made
+        // the download URL `.../download/vv0.3.0`).
+        assert_eq!(checked("v0.3.0"), Some("0.3.0".into()));
         assert_eq!(checked("0.2.1\u{202e}"), None);
         assert_eq!(checked("99999999999999999999.0.0"), None);
     }
