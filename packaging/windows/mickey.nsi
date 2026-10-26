@@ -22,6 +22,9 @@ OutFile "Mickey-Setup-${VERSION}.exe"
 InstallDir "$PROGRAMFILES64\Mickey"
 RequestExecutionLevel admin
 
+; Everything the installer changes on this PC, said before it does it.
+!define MUI_WELCOMEPAGE_TITLE "Mickey ${VERSION}"
+!define MUI_WELCOMEPAGE_TEXT "Mickey shares one keyboard, mouse, clipboard and sound between your PCs.$\r$\n$\r$\nThis installer will:$\r$\n- put Mickey in Program Files;$\r$\n- start it when you sign in, as administrator, so it can also type into programs that run as administrator (a scheduled task);$\r$\n- let other PCs reach it through Windows Firewall, on private networks only;$\r$\n- add Mickey to the Start menu.$\r$\n$\r$\nOnce a day Mickey asks GitHub whether a newer version is out; you can turn that off in its settings. The uninstaller removes all of it."
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES

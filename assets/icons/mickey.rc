@@ -1,3 +1,45 @@
 // The Ratão as the programs' own icon on Windows (Explorer, Start menu,
-// the Apps list, a pinned taskbar button), from build.rs.
+// the Apps list, a pinned taskbar button), and what the programs are:
+// name, version and description, shown in a file's Properties → Details
+// and checked by code signing. build.rs passes the version from
+// Cargo.toml (VERSION_MAJOR, _MINOR, _PATCH) and, for mickey-ui, MICKEY_UI.
+
+#define TEXT2(x) #x
+#define TEXT(x) TEXT2(x)
+#define VERSION_TEXT TEXT(VERSION_MAJOR.VERSION_MINOR.VERSION_PATCH)
+
+#ifdef MICKEY_UI
+#define FILE_NAME "mickey-ui.exe"
+#define FILE_DESCRIPTION "Mickey settings and windows"
+#else
+#define FILE_NAME "mickey.exe"
+#define FILE_DESCRIPTION "Mickey: one keyboard and mouse for all your PCs"
+#endif
+
 1 ICON "mickey.ico"
+
+1 VERSIONINFO
+FILEVERSION VERSION_MAJOR, VERSION_MINOR, VERSION_PATCH, 0
+PRODUCTVERSION VERSION_MAJOR, VERSION_MINOR, VERSION_PATCH, 0
+FILEOS 0x40004
+FILETYPE 0x1
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904B0"
+        BEGIN
+            VALUE "ProductName", "Mickey"
+            VALUE "FileDescription", FILE_DESCRIPTION
+            VALUE "FileVersion", VERSION_TEXT
+            VALUE "ProductVersion", VERSION_TEXT
+            VALUE "OriginalFilename", FILE_NAME
+            VALUE "InternalName", FILE_NAME
+            VALUE "CompanyName", "Mickey contributors"
+            VALUE "LegalCopyright", "GPL-3.0-or-later"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END
