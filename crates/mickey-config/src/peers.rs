@@ -110,9 +110,20 @@ impl Peers {
                 }
                 // A peer with no monitors ends in a tab, which trimming the
                 // answer takes away.
-                ["peer", state, version, name] => {
+                ["peer", state, version, name]
+                    if *version == "-" || crate::version::checked(version).is_some() =>
+                {
                     peers.peers.push(peer(state, version, name, Vec::new()))
                 }
+                // A Mickey from before PRD 0013 sends no version: a client
+                // newer than the running Mickey (just updated, not yet
+                // restarted) still reads it.
+                ["peer", state, name, monitors] => {
+                    peers
+                        .peers
+                        .push(peer(state, "-", name, monitors_from_text(monitors)?))
+                }
+                ["peer", state, name] => peers.peers.push(peer(state, "-", name, Vec::new())),
                 _ => return None,
             }
         }
@@ -193,6 +204,15 @@ mod tests {
         // The same text with the trailing tab trimmed, as a caller may do.
         assert_eq!(Peers::from_text(text.trim()), Peers::from_text(text));
         assert_eq!(Peers::from_text("nonsense"), None);
+        // From a Mickey before versions were sent.
+        let old = "this\t1536x864+0+0\npeer\tonline\tWindows\t2560x1080+0+0\npeer\toffline\tTeste";
+        let old = Peers::from_text(old).unwrap();
+        assert_eq!(old.peers[0].name, "Windows");
+        assert_eq!(old.peers[0].monitors.len(), 1);
+        assert_eq!(
+            (old.peers[1].name.as_str(), old.peers[1].version.as_deref()),
+            ("Teste", None)
+        );
         assert_eq!(Peers::from_text("this\t10x10"), None);
     }
 }
