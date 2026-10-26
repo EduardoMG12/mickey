@@ -50,10 +50,14 @@ fn main() {
     // Before anything is written: as administrator, never through a
     // junction a user made (see `refuse_user_junctions`).
     #[cfg(windows)]
-    if platform::acl::elevated()
-        && let Err(err) = platform::acl::refuse_user_junctions()
-    {
-        eprintln!("mickey: cannot refuse users' junctions: {err}");
+    let junctions = !platform::acl::elevated() || platform::acl::refuse_user_junctions().is_ok();
+    // Started hidden at logon (no console): what Mickey prints goes to a
+    // log file, after the line above so it too is written safely.
+    #[cfg(windows)]
+    platform::log_file::when_hidden();
+    #[cfg(windows)]
+    if !junctions {
+        eprintln!("mickey: cannot refuse users' junctions");
     }
     let result = std::env::args_os()
         .skip(1)
