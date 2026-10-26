@@ -22,6 +22,7 @@ use crate::secure::Link;
 use crate::transport;
 use crate::tray::{self, Tray};
 use crate::trust;
+use crate::update;
 use crate::window;
 use mickey_config as config;
 use mickey_config::peers::{PeerInfo, Peers};
@@ -582,6 +583,8 @@ pub struct Services {
     /// The clipboard, and its history (PRD 0011).
     pub keeper: Option<Keeper>,
     pub history: Option<history::Shared>,
+    /// A newer Mickey, found by the daily check or heard from a peer.
+    pub updates: Option<update::Updates>,
 }
 
 /// Captures local input and sends it to the focused peer. Every peer gets
@@ -602,6 +605,7 @@ pub fn run(
         found,
         keeper,
         history,
+        updates,
     } = services;
     // Two sources would both capture the keyboard and fight over the grab.
     if control::source_running() {
@@ -722,6 +726,7 @@ pub fn run(
             .iter()
             .map(|peer| (peer.name.clone(), peer.link.is_some()))
             .collect(),
+        update: None,
     };
     let tray = Tray::start(first, clicks)
         .inspect_err(|err| eprintln!("mickey: {err}"))
@@ -876,9 +881,11 @@ pub fn run(
             }
         }
         let here = in_control.here();
+        let waiting_update = updates.as_ref().and_then(update::Updates::waiting);
         let changed = published.as_ref().is_none_or(|last: &Status| {
             last.focus != focus
                 || last.here != here
+                || last.update != waiting_update
                 // A PC the group added makes the list longer.
                 || last.peers.len() != peers.len()
                 || last
@@ -895,6 +902,7 @@ pub fn run(
                     .iter()
                     .map(|peer| (peer.name.clone(), peer.link.is_some()))
                     .collect(),
+                update: waiting_update,
             };
             if let Some(control) = &control {
                 control.publish(status.clone());
@@ -1070,6 +1078,8 @@ pub fn run(
                 });
             }
             Ok(Wake::Tray(tray::Click::Settings)) => open_window("settings"),
+            // The settings window says how to update, until it can do it.
+            Ok(Wake::Tray(tray::Click::Update)) => open_window("settings"),
             Ok(Wake::Tray(tray::Click::History)) => open_window("history"),
             Ok(Wake::Tray(tray::Click::ListenHere)) => {
                 match listen_here(shared.identity.public()) {
@@ -1156,6 +1166,10 @@ pub fn run(
             let _ = reply.send("error: no keys were pressed".into());
         }
         if let Some((from, version)) = heard_version {
+            // A peer on a newer Mickey: there is an update for this PC.
+            if let Some(updates) = &updates {
+                updates.heard(&version);
+            }
             for peer in peers.iter_mut().filter(|peer| peer.address.ip() == from) {
                 peer.version = Some(version.clone());
             }

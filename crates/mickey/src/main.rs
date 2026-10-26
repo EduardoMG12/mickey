@@ -98,6 +98,14 @@ fn run(command: Command) -> Result<(), String> {
             println!("{}", if autostart::is_on() { "on" } else { "off" });
             Ok(())
         }
+        Command::UpdateStatus => {
+            let waiting = control::request("update")?
+                .next()
+                .and_then(Result::ok)
+                .ok_or("mickey is not running")?;
+            println!("{waiting}");
+            Ok(())
+        }
         Command::UpdateCheck => {
             let latest = update::latest()?;
             let this = config::version::THIS;
@@ -286,6 +294,7 @@ fn run(command: Command) -> Result<(), String> {
                     found: None,
                     keeper: clipboard::Keeper::start().ok(),
                     history: None,
+                    updates: None,
                 },
             )
         }
@@ -404,6 +413,9 @@ fn run_from_config() -> Result<(), String> {
     });
     if source_wanted {
         let hotkeys = hotkey::Hotkey::from_config(&config.hotkeys()?);
+        // A newer Mickey: checked once a day, and heard from peers (PRD 0013).
+        let updates = update::Updates::default();
+        update::start(updates.clone());
         let result = source::run(
             config.peers,
             hotkeys,
@@ -421,6 +433,7 @@ fn run_from_config() -> Result<(), String> {
                     .filter(|_| keep_history(config.clipboard.history))
                     .map(history::record),
                 keeper,
+                updates: Some(updates),
             },
         );
         match (result, target) {

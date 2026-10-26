@@ -44,6 +44,8 @@ pub struct Form {
     /// Keep a clipboard history here: always, never (another manager keeps
     /// it), or `None`, only when no other manager runs.
     pub history: Option<bool>,
+    /// Ask GitHub once a day for a newer Mickey (PRD 0013).
+    pub check_updates: bool,
     /// Who listens (PRD 0012): a PC's public key; `None`, nobody.
     pub listener: Option<String>,
     /// Where this PC's own sound goes.
@@ -94,6 +96,7 @@ impl Form {
             position: config.interface.switcher_position.clone(),
             vertical: config.interface.switcher_vertical,
             history: config.clipboard.history,
+            check_updates: config.updates.check,
             listener: config.audio.listener.clone(),
             mode: config.audio.mode,
             volumes: config.audio.volumes.clone(),
@@ -200,6 +203,9 @@ impl Form {
             Some(false) => {
                 out += "\n[clipboard]\nhistory = false    # another clipboard manager keeps the history\n"
             }
+        }
+        if !self.check_updates {
+            out += "\n[updates]\ncheck = false    # never ask GitHub for a newer Mickey\n";
         }
         out += "\n[touchpad]\n";
         out += &format!("speed = {}    # higher is faster\n", self.speed);
@@ -314,6 +320,8 @@ pub struct Settings {
     fingerprint: String,
     /// This PC's public key, to mark it in "Who listens".
     own_key: Option<String>,
+    /// A newer Mickey the running one knows of (PRD 0013).
+    update: Option<String>,
     /// The PC whose Remove was clicked once: a second click removes it.
     confirm_remove: Option<String>,
     /// What the running Mickey said about the PCs; `Err` says why not.
@@ -438,6 +446,9 @@ impl Settings {
             autostart: ask_mickey(&["autostart", "status"])
                 .is_ok_and(|answer| answer.trim() == "on"),
             autostart_change: None,
+            update: ask_mickey(&["update", "status"])
+                .ok()
+                .and_then(|answer| mickey_config::version::checked(answer.trim())),
             message,
             config_changed: config_time(),
             looked: Instant::now(),
@@ -651,6 +662,23 @@ impl eframe::App for Settings {
                 theme::tab(ui, &mut self.tab, Tab::Look, icon::PALETTE, "General");
             });
             ui.add_space(4.0);
+            // Hard to miss (PRD 0013): most releases fix security or speed.
+            if let Some(version) = &self.update {
+                ui.horizontal(|ui| {
+                    ui.colored_label(
+                        theme::palette::AWAY,
+                        format!(
+                            "Mickey {version} is out; this PC runs {}.",
+                            mickey_config::version::THIS
+                        ),
+                    );
+                    ui.hyperlink_to(
+                        "Get it",
+                        "https://github.com/EduardoMG12/mickey/releases/latest",
+                    );
+                });
+                ui.add_space(4.0);
+            }
             // Room below the card for the Save row.
             let height = (ui.available_height() - 52.0).max(120.0);
             theme::card(ui, |ui| {
@@ -1083,6 +1111,12 @@ impl Settings {
             ui.radio_value(&mut form.history, choice, text);
         }
         ui.weak("Other managers: cliphist, CopyQ, Klipper, GPaste, Windows' Win+V. The clipboard is shared either way. Applies after a restart.");
+        ui.add_space(12.0);
+        ui.checkbox(
+            &mut form.check_updates,
+            "Check for a newer Mickey once a day",
+        );
+        ui.weak("Most releases fix security or speed. The check asks GitHub which release is the latest and sends nothing about you. Off, Mickey never contacts the internet.");
     }
 }
 
@@ -1240,7 +1274,7 @@ mod tests {
     #[test]
     fn what_the_form_writes_parses_back_to_the_same_form() {
         let original = config::parse(
-            "[[peer]]\nname = \"Windows \\\"main\\\"\"\naddress = \"192.0.2.10:4242\"\nhotkey = \"AltGr+RightShift+1\"\nposition = [-1920, 0]\nkey = \"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"\n\n[hotkeys]\nhome = \"AltGr+RightShift+H\"\n\n[interface]\nswitcher_position = \"top-left\"\n\n[clipboard]\nhistory = false\n\n[audio]\nlistener = \"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"\nmode = \"both\"\n\n[this_pc]\ncontrolled = false\nname = \"Desk\"\n",
+            "[[peer]]\nname = \"Windows \\\"main\\\"\"\naddress = \"192.0.2.10:4242\"\nhotkey = \"AltGr+RightShift+1\"\nposition = [-1920, 0]\nkey = \"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"\n\n[hotkeys]\nhome = \"AltGr+RightShift+H\"\n\n[interface]\nswitcher_position = \"top-left\"\n\n[clipboard]\nhistory = false\n\n[updates]\ncheck = false\n\n[audio]\nlistener = \"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"\nmode = \"both\"\n\n[this_pc]\ncontrolled = false\nname = \"Desk\"\n",
         )
         .unwrap();
         let form = Form::from_config(&original);
@@ -1249,6 +1283,10 @@ mod tests {
         assert!(
             reread.clipboard.history == Some(false),
             "the history setting survives a save"
+        );
+        assert!(
+            !reread.updates.check,
+            "turning the update check off survives a save"
         );
         assert_eq!(
             reread.audio, original.audio,

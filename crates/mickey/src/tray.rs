@@ -20,11 +20,28 @@ pub enum Click {
     History,
     /// Make this PC the one that listens (PRD 0012).
     ListenHere,
+    /// A newer Mickey is out: update to it (PRD 0013).
+    Update,
     Quit,
 }
 
-/// The dot and the tooltip for a status.
+/// The dot and the tooltip for a status; a waiting update comes first in
+/// the tooltip, so it is hard to miss (PRD 0013).
 pub fn looks(status: &Status) -> (Dot, String) {
+    let (dot, tip) = keyboard_looks(status);
+    match &status.update {
+        Some(version) => (dot, format!("Update to Mickey {version} · {tip}")),
+        None => (dot, tip),
+    }
+}
+
+/// The menu's first item, while an update waits.
+fn update_label(status: &Status) -> Option<String> {
+    let version = status.update.as_ref()?;
+    Some(format!("Update to Mickey {version}"))
+}
+
+fn keyboard_looks(status: &Status) -> (Dot, String) {
     if !status.peers.iter().any(|(_, online)| *online) {
         return (Dot::Alone, "No other PC connected".into());
     }
@@ -92,7 +109,12 @@ impl ksni::Tray for Icon {
             }
             .into()
         };
-        let mut menu = vec![item("This PC".into(), true, Click::Home)];
+        let mut menu = Vec::new();
+        if let Some(label) = update_label(&self.status) {
+            menu.push(item(label, true, Click::Update));
+            menu.push(ksni::MenuItem::Separator);
+        }
+        menu.push(item("This PC".into(), true, Click::Home));
         for (index, (name, online)) in self.status.peers.iter().enumerate() {
             menu.push(item(name.clone(), *online, Click::Go(index)));
         }
@@ -156,6 +178,8 @@ const QUIT: u32 = 1001;
 const HISTORY: u32 = 1002;
 #[cfg(windows)]
 const LISTEN: u32 = 1003;
+#[cfg(windows)]
+const UPDATE: u32 = 1004;
 
 #[cfg(windows)]
 impl Tray {
@@ -167,6 +191,7 @@ impl Tray {
                 SETTINGS => Click::Settings,
                 HISTORY => Click::History,
                 LISTEN => Click::ListenHere,
+                UPDATE => Click::Update,
                 QUIT => Click::Quit,
                 1 => Click::Home,
                 peer => Click::Go(peer as usize - 2),
@@ -223,7 +248,12 @@ fn look(status: &Status) -> crate::platform::tray::Look {
         enabled,
         id,
     };
-    let mut menu = vec![item("This PC", true, 1)];
+    let mut menu = Vec::new();
+    if let Some(label) = update_label(status) {
+        menu.push(item(&label, true, UPDATE));
+        menu.push(item("", true, 0));
+    }
+    menu.push(item("This PC", true, 1));
     for (index, (name, online)) in status.peers.iter().enumerate() {
         menu.push(item(name, *online, index as u32 + 2));
     }
@@ -248,7 +278,23 @@ mod tests {
             focus,
             here,
             peers: vec![("Windows".into(), online)],
+            update: None,
         }
+    }
+
+    #[test]
+    fn a_waiting_update_leads_the_tooltip_and_the_menu() {
+        let mut waiting = status(None, true, true);
+        assert_eq!(update_label(&waiting), None);
+        waiting.update = Some("0.2.2".into());
+        assert_eq!(
+            looks(&waiting).1,
+            "Update to Mickey 0.2.2 · In control: this PC"
+        );
+        assert_eq!(
+            update_label(&waiting).as_deref(),
+            Some("Update to Mickey 0.2.2")
+        );
     }
 
     #[test]

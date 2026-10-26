@@ -82,6 +82,9 @@ pub struct Status {
     /// 0009).
     pub here: bool,
     pub peers: Vec<(String, bool)>,
+    /// A newer Mickey to update to (PRD 0013). Not in the status line,
+    /// which bars such as Waybar read: asked for with `update`.
+    pub update: Option<String>,
 }
 
 impl Status {
@@ -117,7 +120,12 @@ impl Status {
         if focus.is_some_and(|peer| peer >= peers.len()) {
             return None;
         }
-        Some(Status { focus, here, peers })
+        Some(Status {
+            focus,
+            here,
+            peers,
+            update: None,
+        })
     }
 
     /// For people: `mickey status`.
@@ -414,6 +422,10 @@ fn accept<T: From<Request>>(
                     let _ = writeln!(stream, "{}", status.to_line());
                 }
             }
+            "update" => {
+                let waiting = status.and_then(|status| status.update);
+                let _ = writeln!(stream, "{}", waiting.as_deref().unwrap_or("none"));
+            }
             "follow" => {
                 if let Some(status) = status {
                     let _ = writeln!(stream, "{}", status.to_line());
@@ -514,6 +526,7 @@ mod tests {
             focus: Some(1),
             here: false,
             peers: vec![("Windows A".into(), true), ("Win: B".into(), false)],
+            update: None,
         }
     }
 
@@ -540,7 +553,8 @@ mod tests {
             Some(Status {
                 focus: None,
                 here: true,
-                peers: vec![]
+                peers: vec![],
+                update: None,
             })
         );
     }
