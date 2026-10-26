@@ -119,7 +119,12 @@ impl TrustedPeers {
     /// fingerprint>`, #184). Returns whether one was found.
     pub fn forget(&mut self, wanted: &str) -> Result<bool, String> {
         let normalize = |text: &str| text.replace('-', "").to_ascii_uppercase();
-        let wanted = normalize(wanted);
+        // A public key (64 hex digits, as config.toml and the settings keep
+        // it) stands for its fingerprint.
+        let wanted = match from_hex(wanted) {
+            Some(key) => normalize(&fingerprint(&key)),
+            None => normalize(wanted),
+        };
         let before = self.peers.len();
         let introduced = |note: &str| {
             note.split_once(" via ")
@@ -373,6 +378,19 @@ mod tests {
         trusted.add([7; 32], "test").unwrap();
         let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode, 0o600);
+    }
+
+    #[test]
+    fn forget_takes_a_public_key_too() {
+        let dir = temp_dir("forget-key");
+        let mut trusted = TrustedPeers::load(&dir).unwrap();
+        trusted.add([3; 32], "").unwrap();
+        trusted.add([4; 32], "").unwrap();
+        // As config.toml and the settings keep it (the settings' Remove).
+        assert!(trusted.forget(&to_hex(&[3; 32])).unwrap());
+        assert!(!trusted.is_trusted(&[3; 32]));
+        assert!(trusted.is_trusted(&[4; 32]));
+        fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

@@ -314,6 +314,8 @@ pub struct Settings {
     fingerprint: String,
     /// This PC's public key, to mark it in "Who listens".
     own_key: Option<String>,
+    /// The PC whose Remove was clicked once: a second click removes it.
+    confirm_remove: Option<String>,
     /// What the running Mickey said about the PCs; `Err` says why not.
     peers: Result<Peers, String>,
     asked: Instant,
@@ -423,6 +425,7 @@ impl Settings {
             own_key: ask_mickey(&["id", "--key"])
                 .ok()
                 .map(|key| key.trim().to_string()),
+            confirm_remove: None,
             peers: load_peers(),
             asked: Instant::now(),
             pairing: None,
@@ -508,6 +511,16 @@ impl Settings {
         if shared(&self.form) != shared(&self.saved) {
             self.form.since = config::now_seconds();
         }
+        // PCs removed since the last save: no longer trusted either, once
+        // this is written (Undo before then forgets nothing).
+        let kept: Vec<Option<String>> = self.form.pcs.iter().map(|pc| pc.key.clone()).collect();
+        let removed: Vec<String> = self
+            .saved
+            .pcs
+            .iter()
+            .filter_map(|pc| pc.key.clone())
+            .filter(|key| !kept.contains(&Some(key.clone())))
+            .collect();
         let text = self.form.to_toml();
         // The same check `mickey` makes when it reads the file.
         if let Err(err) = config::parse(&text) {
@@ -517,6 +530,11 @@ impl Settings {
         let written = config::path().and_then(|path| config::write(&path, &text));
         self.message = match written {
             Ok(()) => {
+                for key in &removed {
+                    if let Err(err) = ask_mickey(&["forget", key]) {
+                        eprintln!("mickey-ui: could not stop trusting a removed PC: {err}");
+                    }
+                }
                 self.saved = self.form.clone();
                 // Our own write is not news.
                 self.config_changed = config_time();
@@ -713,6 +731,7 @@ impl eframe::App for Settings {
                         ui.weak("None yet: connect one from the list below.");
                     }
                     let mut remove = None;
+                    let confirm = &mut self.confirm_remove;
                     egui::Grid::new("pcs").num_columns(6).spacing([10.0, 8.0]).show(ui, |ui| {
                         for (i, pc) in form.pcs.iter_mut().enumerate() {
                             let info = online(&pc.name);
@@ -736,8 +755,19 @@ impl eframe::App for Settings {
                                     ui.weak("volume: once connected");
                                 }
                             }
-                            if ui.button(format!("{}  Remove", icon::TRASH)).clicked() {
-                                remove = Some(i);
+                            // Removing stops trusting it too (on Save): asked twice.
+                            if confirm.as_deref() == Some(pc.name.as_str()) {
+                                ui.horizontal(|ui| {
+                                    if ui.button(format!("{}  Remove: it can no longer control this PC", icon::TRASH)).clicked() {
+                                        remove = Some(i);
+                                        *confirm = None;
+                                    }
+                                    if ui.button("Cancel").clicked() {
+                                        *confirm = None;
+                                    }
+                                });
+                            } else if ui.button(format!("{}  Remove", icon::TRASH)).clicked() {
+                                *confirm = Some(pc.name.clone());
                             }
                             ui.end_row();
                         }

@@ -187,9 +187,10 @@ fn run(command: Command) -> Result<(), String> {
             Ok(())
         }
         Command::Forget { fingerprint } => {
-            // The list only administrators can change: the running Mickey
-            // changes it.
-            if !trust::can_change() {
+            // The running Mickey changes it, so it stops trusting that PC at
+            // once (its list is in memory); and only it may when the list is
+            // one only administrators can change.
+            if control::source_running() || !trust::can_change() {
                 let answer = control::request(&format!("forget {fingerprint}"))?
                     .next()
                     .ok_or("Mickey did not answer")?
