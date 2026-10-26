@@ -16,6 +16,9 @@ it says **not recorded**. Words such as *peer*, *source*, *target* and
 | [0001](0001-rust-for-daemon-and-windows.md) | Rust for the whole project, daemon and windows alike | Accepted |
 | [0002](0002-noise-xx-and-pairing-code.md) | Noise `XX` for every link, and a six-digit pairing code | Accepted |
 | [0003](0003-tcp-links-udp-audio.md) | TCP for input and data, UDP sealed datagrams for audio | Accepted |
+| [0004](0004-symmetric-peers.md) | Symmetric peers: every PC runs both the source and the target side | Accepted |
+| [0005](0005-input-below-the-desktop.md) | Input below the desktop: evdev and uinput on Linux, hooks and SendInput on Windows | Accepted |
+| [0006](0006-egui-in-a-separate-ui-process.md) | egui (eframe) for every window, in a separate `mickey-ui` program | Accepted |
 
 ## Writing a new one
 
