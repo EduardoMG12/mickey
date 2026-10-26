@@ -54,7 +54,7 @@ Download the latest release from the repository's **Releases** page:
   `mickey-linux-x86_64.tar.gz` and run `./install.sh`. It asks for your
   password once: the `input` group and a udev rule let Mickey read your
   keyboard and create its virtual one, and if firewalld or ufw is on it
-  opens TCP 4242 and UDP 4243. Mickey goes to `~/.local/bin` and starts
+  opens TCP 4242-4243 and UDP 4243-4244. Mickey goes to `~/.local/bin` and starts
   with your desktop session. If it had to add you to the `input` group,
   restart the PC once. `./uninstall.sh` removes everything.
 
@@ -251,8 +251,9 @@ Everything you type crosses the network, so:
   encrypted handshake itself: if both show the same code, no one is in
   between. Trust is by key, never by address; reconnects never ask again.
   `mickey forget <fingerprint>` removes a PC.
-- **The group:** a PC that one of your paired PCs introduces is trusted
-  too, so one pairing reaches the whole group.
+- **The group:** when one of your paired PCs introduces another PC, Mickey
+  asks you once whether to let it in; nothing is trusted on another PC's
+  word alone.
 - **Never logged or stored:** what you type, and what you copy (only its
   kind and size).
 - **Not covered:** someone who can already log in as you (they can read the

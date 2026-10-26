@@ -48,10 +48,10 @@ speakers stay silent the whole time.
   first spike (below).
 - **Send it as small encrypted UDP datagrams**, 5 ms of 48 kHz stereo
   16-bit PCM each (960 bytes, under any MTU): no head-of-line blocking,
-  so one lost packet costs 5 ms of sound, not a stall. Encrypted with the
-  peers' Noise session keys, each datagram carrying its counter as the
-  nonce (snow's stateless transport), so a lost or reordered datagram does
-  not break the next. Uncompressed: 1.5 Mbit/s per PC is fine on a LAN; a
+  so one lost packet costs 5 ms of sound, not a stall. Encrypted with a
+  random per-stream key handed over the data link, each datagram carrying
+  its counter as the nonce, so a lost or reordered datagram does not break
+  the next (see *Discoveries*: the Noise session keys were the first plan). Uncompressed: 1.5 Mbit/s per PC is fine on a LAN; a
   codec (Opus) only if Wi-Fi shows it is needed.
 - **Play it with a jitter buffer** per sending PC on the listener: it
   starts at 2 packets (10 ms), grows when packets arrive late and shrinks
@@ -92,6 +92,15 @@ speakers stay silent the whole time.
    grab: never leave the owner without sound).
 
 ## Discoveries
+
+- **Audio uses its own key, not the Noise session keys.** The plan was
+  snow's stateless transport over the peers' session keys. The code
+  (`audio_wire.rs`) instead seals each datagram with ChaCha20-Poly1305
+  under a random key the sender makes per stream and hands to the
+  listener as a kind 22 payload over the already-encrypted data link,
+  resent every 2 s (see protocol.md, *Audio datagrams*). The datagrams
+  stay independent of the input link's Noise state, and a replay window
+  drops copies.
 
 - **Windows: loopback capture ignores the output's mute and volume**
   (#265, spike on the owner's Windows 10 22H2). A quiet 440 Hz tone
