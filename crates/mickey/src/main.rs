@@ -657,6 +657,13 @@ fn serve_clipboard(
                                 let _ =
                                     controlled.send(source::TargetNews::Audio(text.to_string()));
                             }
+                            group::VERSION => {
+                                // A peer's word: shown only if it is a version.
+                                if let Some(version) = config::version::checked(text) {
+                                    let _ = controlled
+                                        .send(source::TargetNews::Version { from, version });
+                                }
+                            }
                             _ => {}
                         };
                         let _ = clip_sync::answer(

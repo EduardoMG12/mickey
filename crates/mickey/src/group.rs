@@ -1,7 +1,7 @@
 //! The group map (PRD 0005, 0010): every PC a running Mickey knows, so a
 //! PC paired with one member, or moved in one PC's Layout, is known to all.
-//! The owner decided that a PC the group introduces is trusted (a member
-//! already trusted vouches for it).
+//! A PC the group introduces is let in only once the owner says so
+//! (#184).
 //!
 //! A map is a sender's view: positions are in its desktop's coordinates,
 //! and it is in the map itself at 0,0. One line per PC, tab-separated:
@@ -34,6 +34,9 @@ pub const AUDIO: u8 = 21;
 /// The first byte of an audio stream's key (PRD 0012): the sending PC's
 /// `StreamKey` in hex, so the listener can open its datagrams.
 pub const AUDIO_KEY: u8 = 22;
+/// The first byte of the sender's Mickey version (PRD 0013), sent as its
+/// data link opens, so every PC knows which PCs are behind.
+pub const VERSION: u8 = 23;
 
 /// Whether `ip` is on a local network: private IPv4 ranges, link-local,
 /// the 100.64.0.0/10 range VPNs such as Tailscale use, IPv6 unique-local

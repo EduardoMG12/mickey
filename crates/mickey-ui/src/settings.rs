@@ -802,10 +802,22 @@ impl Settings {
                 } else {
                     ui.weak(format!("{}  {}", icon::LINK, pc.address));
                 }
-                ui.weak(match info.map(|info| info.monitors.len()) {
-                    Some(0) | None => "monitors unknown".to_string(),
-                    Some(1) => format!("{}  1 monitor", icon::MONITOR),
-                    Some(n) => format!("{}  {n} monitors", icon::MONITOR),
+                ui.horizontal(|ui| {
+                    ui.weak(match info.map(|info| info.monitors.len()) {
+                        Some(0) | None => "monitors unknown".to_string(),
+                        Some(1) => format!("{}  1 monitor", icon::MONITOR),
+                        Some(n) => format!("{}  {n} monitors", icon::MONITOR),
+                    });
+                    // Its Mickey version (PRD 0013): one behind this PC
+                    // stands out, since releases fix security and speed.
+                    if let Some(version) = info.and_then(|info| info.version.as_deref()) {
+                        if mickey_config::version::is_newer(mickey_config::version::THIS, version) {
+                            ui.colored_label(theme::palette::AWAY, format!("{version}, update it"))
+                                .on_hover_text(format!("This PC runs {}. Update Mickey on {} too.", mickey_config::version::THIS, pc.name));
+                        } else {
+                            ui.weak(version);
+                        }
+                    }
                 });
                 ui.add_sized([170.0, 24.0], egui::TextEdit::singleline(&mut pc.hotkey).hint_text("own hotkey"));
                 match &pc.key {

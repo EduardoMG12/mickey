@@ -13,6 +13,7 @@
 pub mod audio;
 pub mod chord;
 pub mod peers;
+pub mod version;
 
 pub use audio::{Audio, SoundMode, now_seconds};
 

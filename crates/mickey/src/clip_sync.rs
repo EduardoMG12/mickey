@@ -172,7 +172,11 @@ impl Mover {
                         if link.set_read_timeout(Some(ANSWER_WAIT)).is_err() {
                             continue;
                         }
-                        let sent = [&map, &audio]
+                        let version = crate::group::tagged(
+                            crate::group::VERSION,
+                            mickey_config::version::THIS,
+                        );
+                        let sent = [Some(&version), map.as_ref(), audio.as_ref()]
                             .into_iter()
                             .flatten()
                             .all(|bytes| link.send_bulk(bytes).is_ok());
