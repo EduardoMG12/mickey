@@ -43,6 +43,7 @@ mod transport;
 mod tray;
 mod tray_picture;
 mod trust;
+mod update;
 mod window;
 
 use cli::Command;
@@ -95,6 +96,16 @@ fn run(command: Command) -> Result<(), String> {
         }
         Command::Autostart(None) => {
             println!("{}", if autostart::is_on() { "on" } else { "off" });
+            Ok(())
+        }
+        Command::UpdateCheck => {
+            let latest = update::latest()?;
+            let this = config::version::THIS;
+            if config::version::is_newer(&latest, this) {
+                println!("update: Mickey {latest} is out; this PC runs {this}");
+            } else {
+                println!("up to date: Mickey {this}");
+            }
             Ok(())
         }
         Command::Id => {

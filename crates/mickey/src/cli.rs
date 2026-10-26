@@ -33,6 +33,7 @@ usage:
   mickey clipboard [test]            say what kind of thing is copied (never what);
                                      test copies a short test text
   mickey forget <fingerprint>        stop trusting a paired machine
+  mickey update check                ask GitHub whether a newer Mickey is out
   mickey --version                   show which Mickey this is
 ";
 
@@ -65,6 +66,8 @@ pub enum Command {
     IdKey,
     /// Start with the system: `Some(on)` sets it, `None` asks.
     Autostart(Option<bool>),
+    /// Ask GitHub whether a newer Mickey is out (PRD 0013).
+    UpdateCheck,
     Status {
         waybar: bool,
     },
@@ -94,6 +97,7 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
         [command] if command == "run" => Ok(Command::Run),
         [command] if command == "monitors" => Ok(Command::Monitors),
         [command] if command == "peers" => Ok(Command::Peers),
+        [command, word] if command == "update" && word == "check" => Ok(Command::UpdateCheck),
         [command] if command == "autostart" => Ok(Command::Autostart(None)),
         [command, word] if command == "autostart" => match word.as_str() {
             "on" => Ok(Command::Autostart(Some(true))),
