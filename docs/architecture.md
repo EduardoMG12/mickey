@@ -109,7 +109,8 @@ anything about focus; every other thread feeds it through one channel of
 | Connect, one per peer | `connect_first`, `reconnect` | TCP connect, Noise handshake, pairing if needed, `Hello`; hands the link to the main loop. Retries every 5 s |
 | Peer reader, one per connected peer | `read_peer` | Reads what the peer sends back (`Pong`, `Monitors`, `Leave`, `Refused`, `Picked`) |
 | Mover | `clip_sync::Mover::start` | Owns every outgoing data link; moves the clipboard when the focus moves, sends the group map, hotkeys and switcher cards |
-| Target | `main.rs` `target`, then `serve_source` | Accepts input links and serves **one source at a time** on this same thread: pairing on this side, then `transport::serve`: decrypt, track held keys, emit |
+| Target accept loop | `main.rs` `target` | Accepts input links |
+| Serve, one per connected source | `main.rs` `serve_source` | Pairing on this side, then `transport::serve`: decrypt, track held keys, emit |
 | Data link accept, and one per data link | `main.rs` `serve_clipboard` | `clip_sync::answer`: answers `Ask`, writes received content, passes kinds 16 and up on |
 | Switcher shown for a peer | `show_switcher_here` | Runs `mickey-ui switcher` and sends the pick back as `Picked` |
 | Discovery, two | `discovery::start` | One broadcasts this PC every 3 s on UDP 4243, one listens and fills the table |
@@ -164,7 +165,7 @@ sequenceDiagram
     participant Cap as Capture thread, PC A
     participant Main as Source main loop, PC A
     participant Link as secure.rs Link
-    participant Serve as Target thread (serve_source), PC B
+    participant Serve as serve_source thread, PC B
     participant Emit as Emitter, PC B
     Dev->>Cap: evdev event, or a hook callback on Windows
     Cap->>Main: Wake Input, Key code 30 pressed
