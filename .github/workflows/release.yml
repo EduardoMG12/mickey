@@ -87,13 +87,27 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v4
+        with:
+          path: source
       - name: Create the release
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
         run: |
           # Checksums, so a download can be checked (sha256sum -c SHA256SUMS).
           cp linux/mickey-linux-x86_64.tar.gz windows/Mickey-Setup-*.exe .
           sha256sum mickey-linux-x86_64.tar.gz Mickey-Setup-*.exe > SHA256SUMS
+          # Signed (PRD 0013): Mickey installs an update only with a valid
+          # signature. No key, no release.
+          if [ -z "$RELEASE_SIGNING_KEY" ]; then
+            echo "RELEASE_SIGNING_KEY is not set: run tools/release-key/new-key.sh" >&2
+            exit 1
+          fi
+          key="$(mktemp)"
+          printf '%s\n' "$RELEASE_SIGNING_KEY" > "$key"
+          source/tools/release-key/sign.sh "$key" SHA256SUMS
+          rm -f "$key"
           gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
             --title "Mickey $GITHUB_REF_NAME" --generate-notes \
-            mickey-linux-x86_64.tar.gz Mickey-Setup-*.exe SHA256SUMS
+            mickey-linux-x86_64.tar.gz Mickey-Setup-*.exe SHA256SUMS SHA256SUMS.sig
