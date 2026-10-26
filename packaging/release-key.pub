@@ -1,3 +1,4 @@
-# The Ed25519 public key that signs Mickey's releases (PRD 0013). Not made
-# yet: run tools/release-key/new-key.sh, which writes it here. Until then
-# Mickey cannot verify an update and never installs one.
+# The Ed25519 public key that signs Mickey's releases (PRD 0013),
+# made by tools/release-key/new-key.sh. Mickey installs an update only
+# when its SHA256SUMS carries a valid signature from this key.
+d5cbc9a4c2b7b0b7c173827cd7be585adaa046cdf3c269b73c9f82600aa05602
