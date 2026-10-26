@@ -518,7 +518,7 @@ fn target(
         let Some(slot) = Slot::take(&input_slots) else {
             continue;
         };
-        on_its_thread(move || {
+        on_its_thread("serve source", move || {
             let _slot = slot;
             serve_source(stream, peer, &identity, &trusted, &emitter, &around);
         });
@@ -555,8 +555,11 @@ impl Drop for Slot {
 
 /// Runs `work` on a new thread; when none can be made, says so instead
 /// of panicking (`thread::spawn` would end the accept loop).
-fn on_its_thread(work: impl FnOnce() + Send + 'static) {
-    if let Err(err) = std::thread::Builder::new().spawn(work) {
+fn on_its_thread(name: &str, work: impl FnOnce() + Send + 'static) {
+    if let Err(err) = std::thread::Builder::new()
+        .name(name.to_string())
+        .spawn(work)
+    {
         eprintln!("mickey: cannot start a thread for a connection: {err}");
     }
 }
@@ -595,7 +598,7 @@ fn serve_clipboard(
             let Ok(from) = stream.peer_addr().map(|address| address.ip()) else {
                 continue;
             };
-            on_its_thread(move || {
+            on_its_thread("data link", move || {
                 let _slot = slot;
                 let is_trusted = |key: &[u8; 32]| {
                     trusted
