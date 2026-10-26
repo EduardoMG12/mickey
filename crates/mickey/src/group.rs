@@ -113,7 +113,14 @@ pub fn encode(sender: &Member, others: &[Member]) -> String {
 
 /// Reads a map that came from `from`. Anything from the network may be
 /// garbage: a bad line makes the whole map an error.
+/// The most PCs a group map may name, as many as discovery keeps: more is
+/// no real group, and each unknown one could become a question on screen.
+pub const MAX_MEMBERS: usize = 64;
+
 pub fn decode(text: &str, from: IpAddr) -> Result<Vec<Member>, String> {
+    if text.lines().count() > MAX_MEMBERS {
+        return Err(format!("a group map of more than {MAX_MEMBERS} PCs"));
+    }
     text.lines()
         .map(|line| {
             let bad = || format!("a bad group map line: {line:?}");
@@ -168,6 +175,20 @@ pub fn as_seen_by(members: &[Member], me: &[u8; 32]) -> Vec<Member> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_map_naming_too_many_pcs_is_refused() {
+        let line = format!("{}\tPC\t:4242\t-", "ab".repeat(32));
+        let many = vec![line; MAX_MEMBERS + 1].join("\n");
+        let from: IpAddr = "192.0.2.1".parse().unwrap();
+        assert!(decode(&many, from).is_err());
+        let enough = many
+            .lines()
+            .take(MAX_MEMBERS)
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert_eq!(decode(&enough, from).unwrap().len(), MAX_MEMBERS);
+    }
+
     #[test]
     fn only_local_addresses_may_join() {
         for local in [

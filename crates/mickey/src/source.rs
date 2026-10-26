@@ -332,7 +332,14 @@ fn audio_target(
 /// to let `member` join, as `introducer` (who sent the map) says it is in
 /// the group. A yes comes back as `Wake::Accepted`; anything else leaves
 /// it out.
+/// Whether a "let this PC in?" question is on screen (see `ask_to_join`).
+static JOIN_ASKING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 fn ask_to_join(member: group::Member, by: [u8; 32], introducer: String, wake: &Sender<Wake>) {
+    use std::sync::atomic::Ordering;
+    if JOIN_ASKING.swap(true, Ordering::SeqCst) {
+        return;
+    }
     let wake = wake.clone();
     crate::threads::spawn("ask to join", move || {
         let ui = std::env::current_exe()
@@ -352,6 +359,7 @@ fn ask_to_join(member: group::Member, by: [u8; 32], introducer: String, wake: &S
                 member.name
             ),
         }
+        JOIN_ASKING.store(false, Ordering::SeqCst);
     });
 }
 
@@ -1272,7 +1280,13 @@ pub fn run(
                 // A PC this one never paired with joins only once the
                 // person here says so (#184), asked once per run.
                 if !trusted {
-                    if group::is_local(member.address.ip()) && asked.insert(member.key) {
+                    // One question on screen at a time: a paired PC could
+                    // send map after map of made-up PCs. The others are
+                    // asked when a later map names them again.
+                    if group::is_local(member.address.ip())
+                        && !JOIN_ASKING.load(std::sync::atomic::Ordering::SeqCst)
+                        && asked.insert(member.key)
+                    {
                         let introducer =
                             peers.iter().find(|peer| peer.key == Some(by)).map_or_else(
                                 || crate::identity::fingerprint(&by),
