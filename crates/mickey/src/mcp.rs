@@ -14,6 +14,7 @@
 use crate::control::{self, Status};
 use crate::identity;
 use crate::trust;
+use crate::update;
 use mickey_config::{self as config, peers::Peers, version};
 use serde_json::{Value, json};
 use std::io::{BufRead, Write};
@@ -111,6 +112,46 @@ fn tools() -> Vec<Tool> {
                 })?;
                 Ok(format!("{pc}'s sound changed."))
             },
+        },
+        Tool {
+            name: "check_update",
+            description: "Ask GitHub now whether a newer Mickey is out than the one on this PC.",
+            input: no_arguments,
+            run: |_| {
+                let latest = update::latest()?;
+                Ok(if version::is_newer(&latest, version::THIS) {
+                    format!(
+                        "Mickey {latest} is out; this PC runs {}. `apply_update` installs it.",
+                        version::THIS
+                    )
+                } else {
+                    format!("Mickey {} is the latest.", version::THIS)
+                })
+            },
+        },
+        Tool {
+            name: "apply_update",
+            description: "Download the newer Mickey, check that the owner's release key signed it, and install it; Mickey restarts by itself. On Windows the user must confirm an administrator prompt. Ask the user before calling it.",
+            input: no_arguments,
+            run: |_| {
+                let latest = update::latest()?;
+                if !version::is_newer(&latest, version::THIS) {
+                    return Ok(format!(
+                        "Mickey {} is the latest: nothing to do.",
+                        version::THIS
+                    ));
+                }
+                update::apply(&latest)?;
+                Ok(format!(
+                    "Installing Mickey {latest}, checked against the release key; Mickey restarts by itself."
+                ))
+            },
+        },
+        Tool {
+            name: "install",
+            description: "Install Mickey on this PC from the latest release, checked against the owner's release key. On Windows it runs the installer (the user confirms an administrator prompt); on Linux it downloads and checks it, then gives the one command the user runs in a terminal (it asks for their password once).",
+            input: no_arguments,
+            run: |_| update::install_latest(),
         },
     ]
 }
@@ -364,7 +405,14 @@ mod tests {
                 .iter()
                 .any(|name| name.contains("pair") || name.contains("forget"))
         );
-        for wanted in ["switch_keyboard", "set_listener", "set_volume"] {
+        for wanted in [
+            "switch_keyboard",
+            "set_listener",
+            "set_volume",
+            "check_update",
+            "apply_update",
+            "install",
+        ] {
             assert!(names.contains(&wanted), "{wanted} missing from {names:?}");
         }
     }

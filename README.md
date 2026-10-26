@@ -201,6 +201,15 @@ system asks for an administrator once; on Linux nothing is asked. From a
 terminal: `mickey update check`, then `mickey update apply`. The PCs tab
 shows each PC's version, so one left behind stands out.
 
+### For AI agents (MCP)
+
+`mickey mcp` is a Model Context Protocol server, so an agent such as
+Claude Code can see and drive the Mickey on its own PC:
+`claude mcp add mickey -- mickey mcp`. Its tools: `status`,
+`switch_keyboard`, `set_listener`, `set_volume`, `check_update`,
+`apply_update` and `install`. It never pairs a PC (you compare the codes
+yourself), never types or presses keys, and never reads your clipboard.
+
 ### When something goes wrong
 
 Mickey's log says what it is doing (never which keys you press):
