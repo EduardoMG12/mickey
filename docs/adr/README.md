@@ -19,6 +19,8 @@ it says **not recorded**. Words such as *peer*, *source*, *target* and
 | [0004](0004-symmetric-peers.md) | Symmetric peers: every PC runs both the source and the target side | Accepted |
 | [0005](0005-input-below-the-desktop.md) | Input below the desktop: evdev and uinput on Linux, hooks and SendInput on Windows | Accepted |
 | [0006](0006-egui-in-a-separate-ui-process.md) | egui (eframe) for every window, in a separate `mickey-ui` program | Accepted |
+| [0007](0007-peers-identified-by-public-key.md) | Peers identified by public key; group introductions asked once | Accepted |
+| [0008](0008-shared-audio.md) | Shared audio: one listener chosen by hand, per-OS silencing, an adaptive jitter buffer | Accepted |
 
 ## Writing a new one
 
