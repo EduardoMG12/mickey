@@ -719,6 +719,7 @@ fn serve_clipboard(
                             link,
                             || clip_sync::may_read(&grants, from),
                             || keeper.read(),
+                            || clip_sync::may_write(&grants, from),
                             |content| keeper.write(content),
                             group,
                         );

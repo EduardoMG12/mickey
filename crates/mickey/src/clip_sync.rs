@@ -18,6 +18,7 @@ pub fn answer(
     mut link: Link,
     may_read: impl Fn() -> bool,
     read: impl Fn() -> Option<Content>,
+    may_write: impl Fn() -> bool,
     write: impl Fn(Content),
     other: impl Fn(u8, &str),
 ) -> io::Result<()> {
@@ -40,9 +41,20 @@ pub fn answer(
                 };
                 link.send_bulk(&encode_or_nothing(&reply))?;
             }
-            Wire::Content(content) => write(content),
+            // Only from the source whose keyboard is on this PC, which
+            // brings its clipboard along; files are not even saved
+            // otherwise.
+            Wire::Content(content) => {
+                if may_write() {
+                    write(content);
+                } else {
+                    eprintln!("mickey: a clipboard from a PC not in control here was refused");
+                }
+            }
             Wire::Files(files) => {
-                if let Some(paths) = save(files) {
+                if !may_write() {
+                    eprintln!("mickey: files from a PC not in control here were refused");
+                } else if let Some(paths) = save(files) {
                     write(Content::Files(paths));
                 }
             }
@@ -79,6 +91,11 @@ impl ClipGrant {
         self.here = here;
     }
 
+    /// Whether the source's keyboard is on this PC now.
+    pub fn in_control(&self) -> bool {
+        self.here
+    }
+
     /// Whether an ask is allowed now; it uses the permission up.
     pub fn take(&mut self, now: Instant) -> bool {
         self.until.take().is_some_and(|until| now <= until)
@@ -105,6 +122,27 @@ pub fn may_read(grants: &Grants, ip: std::net::IpAddr) -> bool {
             .unwrap_or_else(|p| p.into_inner())
             .get_mut(&ip)
             .is_some_and(|grant| grant.take(Instant::now()));
+        if allowed || started.elapsed() > std::time::Duration::from_millis(500) {
+            return allowed;
+        }
+        thread::sleep(std::time::Duration::from_millis(25));
+    }
+}
+
+/// Whether the source at `ip` may put something in this PC's clipboard
+/// now: only while its keyboard is here, which is when it brings its
+/// clipboard along. Before, any paired PC could replace a copied address or
+/// command at any time (found in the security review after 0.3.0). The
+/// clipboard and the focus change travel on different links, so the change
+/// is waited for, briefly, as for `may_read`.
+pub fn may_write(grants: &Grants, ip: std::net::IpAddr) -> bool {
+    let started = Instant::now();
+    loop {
+        let allowed = grants
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .get(&ip)
+            .is_some_and(ClipGrant::in_control);
         if allowed || started.elapsed() > std::time::Duration::from_millis(500) {
             return allowed;
         }
@@ -355,6 +393,17 @@ mod tests {
     use std::thread;
 
     #[test]
+    fn only_the_source_in_control_may_write() {
+        let grants = Grants::default();
+        let ip: std::net::IpAddr = "192.0.2.5".parse().unwrap();
+        assert!(!may_write(&grants, ip), "a PC never in control");
+        focus_changed(&grants, ip, true);
+        assert!(may_write(&grants, ip));
+        focus_changed(&grants, ip, false);
+        assert!(!may_write(&grants, ip), "its keyboard left");
+    }
+
+    #[test]
     fn the_target_answers_and_takes_what_it_is_sent() {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap();
@@ -369,6 +418,8 @@ mod tests {
                 // The keyboard just left the target.
                 || true,
                 || Some(Content::Text("from the target".into())),
+                // The source's keyboard is here.
+                || true,
                 |content| target_written.lock().unwrap().push(content),
                 |_, _| {},
             );
