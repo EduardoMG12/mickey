@@ -1,0 +1,3 @@
+// The Ratão as the programs' own icon on Windows (Explorer, Start menu,
+// the Apps list, a pinned taskbar button), from build.rs.
+1 ICON "mickey.ico"
