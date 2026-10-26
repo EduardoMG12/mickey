@@ -651,353 +651,29 @@ impl eframe::App for Settings {
                 theme::tab(ui, &mut self.tab, Tab::Look, icon::PALETTE, "General");
             });
             ui.add_space(4.0);
-            let form = &mut self.form;
             // Room below the card for the Save row.
             let height = (ui.available_height() - 52.0).max(120.0);
             theme::card(ui, |ui| {
-            ui.set_min_size(egui::vec2(ui.available_width(), height - 24.0));
-            ui.set_max_height(height - 24.0);
-            let canvas = egui::vec2(ui.available_width(), height - 70.0);
-            egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-            match self.tab {
-                Tab::ThisPc => {
-                    egui::Grid::new("this-pc")
-                        .num_columns(2)
-                        .spacing([16.0, 12.0])
-                        .show(ui, |ui| {
-                            ui.label(format!("{}  Name", icon::LAPTOP));
-                            ui.add(
-                                egui::TextEdit::singleline(&mut form.name)
-                                    .hint_text("the computer's name")
-                                    .desired_width(260.0),
-                            );
-                            ui.end_row();
-                            ui.label(format!("{}  Fingerprint", icon::SHIELD));
-                            ui.label(egui::RichText::new(&self.fingerprint).monospace().weak());
-                            ui.end_row();
-                        });
-                    ui.add_space(10.0);
-                    ui.checkbox(
-                        &mut form.controls_others,
-                        "Control other PCs with this keyboard and mouse",
-                    );
-                    ui.checkbox(&mut form.controlled, "Let paired PCs control this one");
-                    let mut wanted = self.autostart;
-                    let busy = self.autostart_change.is_some();
-                    let changed = ui
-                        .add_enabled(!busy, egui::Checkbox::new(&mut wanted, "Start Mickey when this PC starts"))
-                        .changed();
-                    if changed {
-                        // Applied at once, not on Save; on a thread, since
-                        // Windows may show its administrator prompt.
-                        let (send, answers) = std::sync::mpsc::channel();
-                        std::thread::spawn(move || {
-                            let word = if wanted { "on" } else { "off" };
-                            let _ = send.send(ask_mickey(&["autostart", word]));
-                        });
-                        self.autostart_change = Some(answers);
-                    }
-                    if let Some(answer) = self.autostart_change.as_ref().and_then(|answers| answers.try_recv().ok()) {
-                        self.autostart_change = None;
-                        self.autostart = ask_mickey(&["autostart", "status"]).is_ok_and(|answer| answer.trim() == "on");
-                        if let Err(err) = answer {
-                            self.message = format!("Could not change starting with this PC: {err}");
-                        }
-                    }
-                    ui.add_space(10.0);
-                    ui.horizontal(|ui| {
-                        ui.spacing_mut().slider_width = 220.0;
-                        ui.label(format!("{}  Touchpad speed", icon::LAPTOP));
-                        ui.add(egui::Slider::new(&mut form.speed, 1..=200));
+                ui.set_min_size(egui::vec2(ui.available_width(), height - 24.0));
+                ui.set_max_height(height - 24.0);
+                let canvas = egui::vec2(ui.available_width(), height - 70.0);
+                egui::ScrollArea::vertical()
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| match self.tab {
+                        Tab::ThisPc => self.this_pc_tab(ui),
+                        Tab::Pcs => self.pcs_tab(ui),
+                        Tab::Layout => self.layout_tab(ui, canvas),
+                        Tab::Hotkeys => self.hotkeys_tab(ui),
+                        Tab::Look => self.general_tab(ui),
                     });
-                    ui.add_space(12.0);
-                    sound(ui, form, self.own_key.as_deref());
-                    ui.add_space(10.0);
-                    egui::CollapsingHeader::new("Advanced").show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.label(format!("{}  Listen on", icon::LINK));
-                            ui.add(egui::TextEdit::singleline(&mut form.listen).desired_width(200.0));
-                        });
-                        ui.weak("Where the other PCs connect. 0.0.0.0:4242 (every network of this PC) suits almost everyone.");
-                    });
-                }
-                Tab::Pcs => {
-                    // What the window last heard: who is online, their monitors.
-                    let online = |name: &str| {
-                        self.peers.as_ref().ok().and_then(|peers| peers.peers.iter().find(|peer| peer.name == name))
-                    };
-                    ui.label(egui::RichText::new(format!("{}  Your PCs", icon::DESKTOP)).size(16.0).strong());
-                    if form.pcs.is_empty() {
-                        ui.weak("None yet: connect one from the list below.");
-                    }
-                    let mut remove = None;
-                    let confirm = &mut self.confirm_remove;
-                    egui::Grid::new("pcs").num_columns(6).spacing([10.0, 8.0]).show(ui, |ui| {
-                        for (i, pc) in form.pcs.iter_mut().enumerate() {
-                            let info = online(&pc.name);
-                            let up = info.is_some_and(|info| info.online);
-                            ui.horizontal(|ui| {
-                                let (spot, _) = ui.allocate_exact_size(egui::vec2(10.0, 10.0), egui::Sense::hover());
-                                let colour = if up { theme::palette::HERE } else { theme::palette::FUR };
-                                ui.painter().circle_filled(spot.center(), 4.0, colour);
-                                ui.add_sized([140.0, 24.0], egui::TextEdit::singleline(&mut pc.name));
-                            });
-                            if info.is_some_and(|info| info.reinstalled) {
-                                // It answered with a new identity: refused until
-                                // removed and connected again (#289).
-                                ui.colored_label(theme::palette::AWAY, "New identity: reinstalled? Remove it, Save, then Connect it below.")
-                                    .on_hover_text(format!("{} answered with another identity than the one this PC paired with, so it is refused, in case it is not the same PC.", pc.address));
-                            } else {
-                                ui.weak(format!("{}  {}", icon::LINK, pc.address));
-                            }
-                            ui.weak(match info.map(|info| info.monitors.len()) {
-                                Some(0) | None => "monitors unknown".to_string(),
-                                Some(1) => format!("{}  1 monitor", icon::MONITOR),
-                                Some(n) => format!("{}  {n} monitors", icon::MONITOR),
-                            });
-                            ui.add_sized([170.0, 24.0], egui::TextEdit::singleline(&mut pc.hotkey).hint_text("own hotkey"));
-                            match &pc.key {
-                                Some(key) => volume(ui, key, &mut form.volumes, &mut form.muted),
-                                None => {
-                                    ui.weak("volume: once connected");
-                                }
-                            }
-                            // Removing stops trusting it too (on Save): asked twice.
-                            if confirm.as_deref() == Some(pc.name.as_str()) {
-                                ui.horizontal(|ui| {
-                                    if ui.button(format!("{}  Remove: it can no longer control this PC", icon::TRASH)).clicked() {
-                                        remove = Some(i);
-                                        *confirm = None;
-                                    }
-                                    if ui.button("Cancel").clicked() {
-                                        *confirm = None;
-                                    }
-                                });
-                            } else if ui.button(format!("{}  Remove", icon::TRASH)).clicked() {
-                                *confirm = Some(pc.name.clone());
-                            }
-                            ui.end_row();
-                        }
-                    });
-                    if let Some(i) = remove {
-                        form.pcs.remove(i);
-                    }
-
-                    ui.add_space(12.0);
-                    ui.label(egui::RichText::new(format!("{}  On this network", icon::SEARCH)).size(16.0).strong());
-                    ui.horizontal(|ui| {
-                        if ui.button(format!("{}  Let a new PC pair (2 min)", icon::LINK)).clicked() {
-                            self.message = match ask_mickey(&["pairing"]) {
-                                Ok(_) => "For 2 minutes, a new PC may ask to pair with this one. Check the code on both.".into(),
-                                Err(err) => format!("Could not open pairing: {err}"),
-                            };
-                        }
-                        ui.weak("Needed on this PC when the new PC is the one that connects.");
-                    });
-                    let known: Vec<&str> = form.pcs.iter().map(|pc| pc.address.as_str()).collect();
-                    let nearby: Vec<&Nearby> = self
-                        .nearby
-                        .iter()
-                        .filter(|pc| !known.contains(&pc.address.as_str()))
-                        .collect();
-                    if nearby.is_empty() {
-                        ui.weak("No other PC running Mickey heard yet. Start Mickey on it; it shows up here within seconds.");
-                    }
-                    let mut connect = None;
-                    egui::Grid::new("nearby").num_columns(4).spacing([10.0, 8.0]).show(ui, |ui| {
-                        for pc in nearby {
-                            ui.label(egui::RichText::new(format!("{}  {}", icon::LAPTOP, pc.name)).strong());
-                            ui.weak(&pc.address);
-                            ui.weak(pc.fingerprint.get(..9).unwrap_or(&pc.fingerprint));
-                            if ui.add(theme::primary(icon::LINK, "Connect")).clicked() {
-                                connect = Some((pc.address.clone(), pc.name.clone()));
-                            }
-                            ui.end_row();
-                        }
-                    });
-                    if let Some((address, name)) = connect {
-                        self.message = match ask_mickey(&["connect", &address, &name]) {
-                            Ok(answer) => {
-                                let answer = answer.trim().trim_start_matches("mickey: ").to_string();
-                                // "pairing with <name>: check …": Mickey may have
-                                // named it differently from the list.
-                                self.pairing = pairing_with(&answer).map(|name| (name, Instant::now()));
-                                answer
-                            }
-                            Err(err) => format!("Could not connect: {err}"),
-                        };
-                    }
-
-                    ui.add_space(12.0);
-                    egui::CollapsingHeader::new("Add by address…").show(ui, |ui| {
-                        ui.weak("Only if the PC does not show up above (another network, say).");
-                        if ui.button(format!("{}  Add a PC", icon::PLUS)).clicked() {
-                            form.pcs.push(PcRow {
-                                name: "New PC".into(),
-                                address: format!("192.168.0.2:{}", config::DEFAULT_PORT),
-                                hotkey: String::new(),
-                                position: None,
-                                key: None,
-                            });
-                        }
-                        ui.weak("Then edit its address in Your PCs, and Save.");
-                    });
-                }
-                Tab::Layout => {
-                    // Mickey may still be starting: ask again every 2 s.
-                    if self.peers.is_err() && self.asked.elapsed() > Duration::from_secs(2) {
-                        self.peers = load_peers();
-                        self.asked = Instant::now();
-                    }
-                    if self.peers.is_err() {
-                        ui.ctx().request_repaint_after(Duration::from_secs(2));
-                    }
-                    match &self.peers {
-                        Ok(_) => ui.weak("Drag a PC to where it sits; it snaps against the nearest monitor. Then Save."),
-                        Err(err) => ui.colored_label(
-                            ui.visuals().warn_fg_color,
-                            format!("Waiting for Mickey to list the monitors ({err})"),
-                        ),
-                    };
-                    let empty = Peers::default();
-                    let peers = self.peers.as_ref().unwrap_or(&empty);
-                    layout::show(ui, canvas, peers, &mut form.pcs, &mut self.drag);
-                }
-                Tab::Hotkeys => {
-                    ui.weak("Record, then press the keys together, or tap one key twice for the double tap. You can also type the names.");
-                    ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new(format!("{}  Always home:", crate::theme::icon::SHIELD)).strong());
-                        ui.weak("hold");
-                        crate::theme::keycaps(ui, "RightShift", false, false);
-                        ui.weak("alone 3 s, or with");
-                        crate::theme::keycaps(ui, "AltGr", false, false);
-                        ui.weak("2 s, and let go: works whatever is set here");
-                    });
-                    let held = game_keys(form);
-                    if !held.is_empty() {
-                        ui.colored_label(
-                            crate::theme::palette::AWAY,
-                            format!(
-                                "{}  {} in a hotkey: while another PC has the keyboard, Mickey holds {} back until the next key, so games that use {} (crouch, walk, jump) may feel late there.",
-                                crate::theme::icon::SHIELD,
-                                held.join(", "),
-                                if held.len() == 1 { "it" } else { "them" },
-                                if held.len() == 1 { "it" } else { "them" },
-                            ),
-                        );
-                    }
-                    ui.add_space(4.0);
-                    // What the recording in progress gave, if it is done.
-                    if let Some((row, answer)) = &self.recording
-                        && let Ok(result) = answer.try_recv()
-                    {
-                        let row = *row;
-                        self.recording = None;
-                        self.message = recorded(form, row, result);
-                    }
-                    let busy = self.recording.as_ref().map(|(row, _)| *row);
-                    egui::Grid::new("hotkeys")
-                        .num_columns(5)
-                        .min_col_width(60.0)
-                        .spacing([10.0, 12.0])
-                        .show(ui, |ui| {
-                            for (row, (label, default)) in HOTKEY_ROWS.iter().enumerate() {
-                                ui.label(egui::RichText::new(*label).strong());
-                                let double = row == DOUBLE_TAP_ROW;
-                                let value = hotkey_field(form, row);
-                                if self.typing == Some(row) {
-                                    let hint = if default.is_empty() { "none" } else { default };
-                                    let field = ui.add(
-                                        egui::TextEdit::singleline(value).hint_text(hint).desired_width(260.0),
-                                    );
-                                    field.request_focus();
-                                    if ui.button(format!("{}  Done", icon::CHECK)).clicked()
-                                        || ui.input(|input| input.key_pressed(egui::Key::Enter))
-                                    {
-                                        self.typing = None;
-                                    }
-                                } else {
-                                    // The keys as keys; an empty setting shows its default, faded.
-                                    let shown = if value.trim().is_empty() && !double { default } else { value.trim() };
-                                    theme::keycaps(ui, shown, double, value.trim().is_empty());
-                                    if ui.button("Type").clicked() {
-                                        self.typing = Some(row);
-                                    }
-                                }
-                                if busy == Some(row) {
-                                    ui.colored_label(theme::palette::BRUISE, "Press the keys…");
-                                    ui.ctx().request_repaint_after(Duration::from_millis(100));
-                                } else if ui
-                                    .add_enabled(busy.is_none(), egui::Button::new(format!("{}  Record", icon::KEYBOARD)))
-                                    .clicked()
-                                {
-                                    let (send, answer) = std::sync::mpsc::channel();
-                                    std::thread::spawn(move || {
-                                        let _ = send.send(ask_mickey(&["record"]));
-                                    });
-                                    self.recording = Some((row, answer));
-                                }
-                                if ui.button(format!("{}  Default", icon::UNDO)).clicked() {
-                                    // Empty means the default, except the double tap,
-                                    // where empty turns it off.
-                                    *hotkey_field(form, row) = if row == DOUBLE_TAP_ROW {
-                                        config::DEFAULT_DOUBLE_TAP.to_string()
-                                    } else {
-                                        String::new()
-                                    };
-                                }
-                                ui.end_row();
-                            }
-                        });
-                    ui.add_space(8.0);
-                    ui.horizontal(|ui| {
-                        ui.spacing_mut().slider_width = 220.0;
-                        ui.label("Double tap: both taps within");
-                        ui.add(
-                            egui::Slider::new(&mut form.double_tap_ms, config::DOUBLE_TAP_MS)
-                                .suffix(" ms")
-                                .step_by(50.0),
-                        );
-                    });
-                    ui.weak("Only keys nobody types alone can be a double tap: Shift, Ctrl, Alt, AltGr, Super, F1–F12.");
-                    ui.add_space(6.0);
-                    ui.weak("Each PC also gets the next number: the hotkey + 1, + 2… goes straight to it.");
-                }
-                Tab::Look => {
-                    egui::ComboBox::from_label("Switcher position")
-                        .selected_text(form.position.clone())
-                        .show_ui(ui, |ui| {
-                            for position in SWITCHER_POSITIONS {
-                                ui.selectable_value(
-                                    &mut form.position,
-                                    position.to_string(),
-                                    position,
-                                );
-                            }
-                        });
-                    ui.weak("Where the switcher window appears when the hotkey opens it.");
-                    ui.add_space(8.0);
-                    ui.checkbox(&mut form.vertical, "Show the PCs in a column");
-                    ui.add_space(8.0);
-                    switcher_order(ui, form);
-                    ui.add_space(12.0);
-                    ui.label("History of copies on this PC");
-                    for (choice, text) in [
-                        (None, "Automatic: only when no other clipboard manager runs"),
-                        (Some(true), "Always keep one"),
-                        (Some(false), "Never: another manager keeps it"),
-                    ] {
-                        ui.radio_value(&mut form.history, choice, text);
-                    }
-                    ui.weak("Other managers: cliphist, CopyQ, Klipper, GPaste, Windows' Win+V. The clipboard is shared either way. Applies after a restart.");
-                }
-            }
-            });
             });
             ui.add_space(6.0);
             ui.horizontal(|ui| {
                 let changed = self.form != self.saved;
-                if ui.add_enabled(changed, theme::primary(icon::SAVE, "Save")).clicked() {
+                if ui
+                    .add_enabled(changed, theme::primary(icon::SAVE, "Save"))
+                    .clicked()
+                {
                     self.save();
                 }
                 if ui
@@ -1009,6 +685,392 @@ impl eframe::App for Settings {
                 ui.label(&self.message);
             });
         });
+    }
+}
+
+/// Each tab of the settings window, drawn inside its card.
+impl Settings {
+    /// This PC: its name, port, clipboard and sound.
+    fn this_pc_tab(&mut self, ui: &mut egui::Ui) {
+        use crate::theme::icon;
+        let form = &mut self.form;
+        egui::Grid::new("this-pc")
+            .num_columns(2)
+            .spacing([16.0, 12.0])
+            .show(ui, |ui| {
+                ui.label(format!("{}  Name", icon::LAPTOP));
+                ui.add(
+                    egui::TextEdit::singleline(&mut form.name)
+                        .hint_text("the computer's name")
+                        .desired_width(260.0),
+                );
+                ui.end_row();
+                ui.label(format!("{}  Fingerprint", icon::SHIELD));
+                ui.label(egui::RichText::new(&self.fingerprint).monospace().weak());
+                ui.end_row();
+            });
+        ui.add_space(10.0);
+        ui.checkbox(
+            &mut form.controls_others,
+            "Control other PCs with this keyboard and mouse",
+        );
+        ui.checkbox(&mut form.controlled, "Let paired PCs control this one");
+        let mut wanted = self.autostart;
+        let busy = self.autostart_change.is_some();
+        let changed = ui
+            .add_enabled(
+                !busy,
+                egui::Checkbox::new(&mut wanted, "Start Mickey when this PC starts"),
+            )
+            .changed();
+        if changed {
+            // Applied at once, not on Save; on a thread, since
+            // Windows may show its administrator prompt.
+            let (send, answers) = std::sync::mpsc::channel();
+            std::thread::spawn(move || {
+                let word = if wanted { "on" } else { "off" };
+                let _ = send.send(ask_mickey(&["autostart", word]));
+            });
+            self.autostart_change = Some(answers);
+        }
+        if let Some(answer) = self
+            .autostart_change
+            .as_ref()
+            .and_then(|answers| answers.try_recv().ok())
+        {
+            self.autostart_change = None;
+            self.autostart =
+                ask_mickey(&["autostart", "status"]).is_ok_and(|answer| answer.trim() == "on");
+            if let Err(err) = answer {
+                self.message = format!("Could not change starting with this PC: {err}");
+            }
+        }
+        ui.add_space(10.0);
+        ui.horizontal(|ui| {
+            ui.spacing_mut().slider_width = 220.0;
+            ui.label(format!("{}  Touchpad speed", icon::LAPTOP));
+            ui.add(egui::Slider::new(&mut form.speed, 1..=200));
+        });
+        ui.add_space(12.0);
+        sound(ui, form, self.own_key.as_deref());
+        ui.add_space(10.0);
+        egui::CollapsingHeader::new("Advanced").show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(format!("{}  Listen on", icon::LINK));
+                ui.add(egui::TextEdit::singleline(&mut form.listen).desired_width(200.0));
+            });
+            ui.weak("Where the other PCs connect. 0.0.0.0:4242 (every network of this PC) suits almost everyone.");
+        });
+    }
+
+    /// PCs: the paired PCs, their volumes, and the PCs nearby to connect.
+    fn pcs_tab(&mut self, ui: &mut egui::Ui) {
+        use crate::theme::{self, icon};
+        let form = &mut self.form;
+        // What the window last heard: who is online, their monitors.
+        let online = |name: &str| {
+            self.peers
+                .as_ref()
+                .ok()
+                .and_then(|peers| peers.peers.iter().find(|peer| peer.name == name))
+        };
+        ui.label(
+            egui::RichText::new(format!("{}  Your PCs", icon::DESKTOP))
+                .size(16.0)
+                .strong(),
+        );
+        if form.pcs.is_empty() {
+            ui.weak("None yet: connect one from the list below.");
+        }
+        let mut remove = None;
+        let confirm = &mut self.confirm_remove;
+        egui::Grid::new("pcs").num_columns(6).spacing([10.0, 8.0]).show(ui, |ui| {
+            for (i, pc) in form.pcs.iter_mut().enumerate() {
+                let info = online(&pc.name);
+                let up = info.is_some_and(|info| info.online);
+                ui.horizontal(|ui| {
+                    let (spot, _) = ui.allocate_exact_size(egui::vec2(10.0, 10.0), egui::Sense::hover());
+                    let colour = if up { theme::palette::HERE } else { theme::palette::FUR };
+                    ui.painter().circle_filled(spot.center(), 4.0, colour);
+                    ui.add_sized([140.0, 24.0], egui::TextEdit::singleline(&mut pc.name));
+                });
+                if info.is_some_and(|info| info.reinstalled) {
+                    // It answered with a new identity: refused until
+                    // removed and connected again (#289).
+                    ui.colored_label(theme::palette::AWAY, "New identity: reinstalled? Remove it, Save, then Connect it below.")
+                        .on_hover_text(format!("{} answered with another identity than the one this PC paired with, so it is refused, in case it is not the same PC.", pc.address));
+                } else {
+                    ui.weak(format!("{}  {}", icon::LINK, pc.address));
+                }
+                ui.weak(match info.map(|info| info.monitors.len()) {
+                    Some(0) | None => "monitors unknown".to_string(),
+                    Some(1) => format!("{}  1 monitor", icon::MONITOR),
+                    Some(n) => format!("{}  {n} monitors", icon::MONITOR),
+                });
+                ui.add_sized([170.0, 24.0], egui::TextEdit::singleline(&mut pc.hotkey).hint_text("own hotkey"));
+                match &pc.key {
+                    Some(key) => volume(ui, key, &mut form.volumes, &mut form.muted),
+                    None => {
+                        ui.weak("volume: once connected");
+                    }
+                }
+                // Removing stops trusting it too (on Save): asked twice.
+                if confirm.as_deref() == Some(pc.name.as_str()) {
+                    ui.horizontal(|ui| {
+                        if ui.button(format!("{}  Remove: it can no longer control this PC", icon::TRASH)).clicked() {
+                            remove = Some(i);
+                            *confirm = None;
+                        }
+                        if ui.button("Cancel").clicked() {
+                            *confirm = None;
+                        }
+                    });
+                } else if ui.button(format!("{}  Remove", icon::TRASH)).clicked() {
+                    *confirm = Some(pc.name.clone());
+                }
+                ui.end_row();
+            }
+        });
+        if let Some(i) = remove {
+            form.pcs.remove(i);
+        }
+
+        ui.add_space(12.0);
+        ui.label(
+            egui::RichText::new(format!("{}  On this network", icon::SEARCH))
+                .size(16.0)
+                .strong(),
+        );
+        ui.horizontal(|ui| {
+            if ui.button(format!("{}  Let a new PC pair (2 min)", icon::LINK)).clicked() {
+                self.message = match ask_mickey(&["pairing"]) {
+                    Ok(_) => "For 2 minutes, a new PC may ask to pair with this one. Check the code on both.".into(),
+                    Err(err) => format!("Could not open pairing: {err}"),
+                };
+            }
+            ui.weak("Needed on this PC when the new PC is the one that connects.");
+        });
+        let known: Vec<&str> = form.pcs.iter().map(|pc| pc.address.as_str()).collect();
+        let nearby: Vec<&Nearby> = self
+            .nearby
+            .iter()
+            .filter(|pc| !known.contains(&pc.address.as_str()))
+            .collect();
+        if nearby.is_empty() {
+            ui.weak("No other PC running Mickey heard yet. Start Mickey on it; it shows up here within seconds.");
+        }
+        let mut connect = None;
+        egui::Grid::new("nearby")
+            .num_columns(4)
+            .spacing([10.0, 8.0])
+            .show(ui, |ui| {
+                for pc in nearby {
+                    ui.label(
+                        egui::RichText::new(format!("{}  {}", icon::LAPTOP, pc.name)).strong(),
+                    );
+                    ui.weak(&pc.address);
+                    ui.weak(pc.fingerprint.get(..9).unwrap_or(&pc.fingerprint));
+                    if ui.add(theme::primary(icon::LINK, "Connect")).clicked() {
+                        connect = Some((pc.address.clone(), pc.name.clone()));
+                    }
+                    ui.end_row();
+                }
+            });
+        if let Some((address, name)) = connect {
+            self.message = match ask_mickey(&["connect", &address, &name]) {
+                Ok(answer) => {
+                    let answer = answer.trim().trim_start_matches("mickey: ").to_string();
+                    // "pairing with <name>: check …": Mickey may have
+                    // named it differently from the list.
+                    self.pairing = pairing_with(&answer).map(|name| (name, Instant::now()));
+                    answer
+                }
+                Err(err) => format!("Could not connect: {err}"),
+            };
+        }
+
+        ui.add_space(12.0);
+        egui::CollapsingHeader::new("Add by address…").show(ui, |ui| {
+            ui.weak("Only if the PC does not show up above (another network, say).");
+            if ui.button(format!("{}  Add a PC", icon::PLUS)).clicked() {
+                form.pcs.push(PcRow {
+                    name: "New PC".into(),
+                    address: format!("192.168.0.2:{}", config::DEFAULT_PORT),
+                    hotkey: String::new(),
+                    position: None,
+                    key: None,
+                });
+            }
+            ui.weak("Then edit its address in Your PCs, and Save.");
+        });
+    }
+
+    /// Layout: where each PC's screens sit.
+    fn layout_tab(&mut self, ui: &mut egui::Ui, canvas: egui::Vec2) {
+        let form = &mut self.form;
+        // Mickey may still be starting: ask again every 2 s.
+        if self.peers.is_err() && self.asked.elapsed() > Duration::from_secs(2) {
+            self.peers = load_peers();
+            self.asked = Instant::now();
+        }
+        if self.peers.is_err() {
+            ui.ctx().request_repaint_after(Duration::from_secs(2));
+        }
+        match &self.peers {
+            Ok(_) => ui.weak(
+                "Drag a PC to where it sits; it snaps against the nearest monitor. Then Save.",
+            ),
+            Err(err) => ui.colored_label(
+                ui.visuals().warn_fg_color,
+                format!("Waiting for Mickey to list the monitors ({err})"),
+            ),
+        };
+        let empty = Peers::default();
+        let peers = self.peers.as_ref().unwrap_or(&empty);
+        layout::show(ui, canvas, peers, &mut form.pcs, &mut self.drag);
+    }
+
+    /// Hotkeys: the keys that move the keyboard between PCs.
+    fn hotkeys_tab(&mut self, ui: &mut egui::Ui) {
+        use crate::theme::{self, icon};
+        let form = &mut self.form;
+        ui.weak("Record, then press the keys together, or tap one key twice for the double tap. You can also type the names.");
+        ui.horizontal(|ui| {
+            ui.label(
+                egui::RichText::new(format!("{}  Always home:", crate::theme::icon::SHIELD))
+                    .strong(),
+            );
+            ui.weak("hold");
+            crate::theme::keycaps(ui, "RightShift", false, false);
+            ui.weak("alone 3 s, or with");
+            crate::theme::keycaps(ui, "AltGr", false, false);
+            ui.weak("2 s, and let go: works whatever is set here");
+        });
+        let held = game_keys(form);
+        if !held.is_empty() {
+            ui.colored_label(
+                crate::theme::palette::AWAY,
+                format!(
+                    "{}  {} in a hotkey: while another PC has the keyboard, Mickey holds {} back until the next key, so games that use {} (crouch, walk, jump) may feel late there.",
+                    crate::theme::icon::SHIELD,
+                    held.join(", "),
+                    if held.len() == 1 { "it" } else { "them" },
+                    if held.len() == 1 { "it" } else { "them" },
+                ),
+            );
+        }
+        ui.add_space(4.0);
+        // What the recording in progress gave, if it is done.
+        if let Some((row, answer)) = &self.recording
+            && let Ok(result) = answer.try_recv()
+        {
+            let row = *row;
+            self.recording = None;
+            self.message = recorded(form, row, result);
+        }
+        let busy = self.recording.as_ref().map(|(row, _)| *row);
+        egui::Grid::new("hotkeys")
+            .num_columns(5)
+            .min_col_width(60.0)
+            .spacing([10.0, 12.0])
+            .show(ui, |ui| {
+                for (row, (label, default)) in HOTKEY_ROWS.iter().enumerate() {
+                    ui.label(egui::RichText::new(*label).strong());
+                    let double = row == DOUBLE_TAP_ROW;
+                    let value = hotkey_field(form, row);
+                    if self.typing == Some(row) {
+                        let hint = if default.is_empty() { "none" } else { default };
+                        let field = ui.add(
+                            egui::TextEdit::singleline(value)
+                                .hint_text(hint)
+                                .desired_width(260.0),
+                        );
+                        field.request_focus();
+                        if ui.button(format!("{}  Done", icon::CHECK)).clicked()
+                            || ui.input(|input| input.key_pressed(egui::Key::Enter))
+                        {
+                            self.typing = None;
+                        }
+                    } else {
+                        // The keys as keys; an empty setting shows its default, faded.
+                        let shown = if value.trim().is_empty() && !double {
+                            default
+                        } else {
+                            value.trim()
+                        };
+                        theme::keycaps(ui, shown, double, value.trim().is_empty());
+                        if ui.button("Type").clicked() {
+                            self.typing = Some(row);
+                        }
+                    }
+                    if busy == Some(row) {
+                        ui.colored_label(theme::palette::BRUISE, "Press the keys…");
+                        ui.ctx().request_repaint_after(Duration::from_millis(100));
+                    } else if ui
+                        .add_enabled(
+                            busy.is_none(),
+                            egui::Button::new(format!("{}  Record", icon::KEYBOARD)),
+                        )
+                        .clicked()
+                    {
+                        let (send, answer) = std::sync::mpsc::channel();
+                        std::thread::spawn(move || {
+                            let _ = send.send(ask_mickey(&["record"]));
+                        });
+                        self.recording = Some((row, answer));
+                    }
+                    if ui.button(format!("{}  Default", icon::UNDO)).clicked() {
+                        // Empty means the default, except the double tap,
+                        // where empty turns it off.
+                        *hotkey_field(form, row) = if row == DOUBLE_TAP_ROW {
+                            config::DEFAULT_DOUBLE_TAP.to_string()
+                        } else {
+                            String::new()
+                        };
+                    }
+                    ui.end_row();
+                }
+            });
+        ui.add_space(8.0);
+        ui.horizontal(|ui| {
+            ui.spacing_mut().slider_width = 220.0;
+            ui.label("Double tap: both taps within");
+            ui.add(
+                egui::Slider::new(&mut form.double_tap_ms, config::DOUBLE_TAP_MS)
+                    .suffix(" ms")
+                    .step_by(50.0),
+            );
+        });
+        ui.weak("Only keys nobody types alone can be a double tap: Shift, Ctrl, Alt, AltGr, Super, F1–F12.");
+        ui.add_space(6.0);
+        ui.weak("Each PC also gets the next number: the hotkey + 1, + 2… goes straight to it.");
+    }
+
+    /// General: the switcher, the tray and the look.
+    fn general_tab(&mut self, ui: &mut egui::Ui) {
+        let form = &mut self.form;
+        egui::ComboBox::from_label("Switcher position")
+            .selected_text(form.position.clone())
+            .show_ui(ui, |ui| {
+                for position in SWITCHER_POSITIONS {
+                    ui.selectable_value(&mut form.position, position.to_string(), position);
+                }
+            });
+        ui.weak("Where the switcher window appears when the hotkey opens it.");
+        ui.add_space(8.0);
+        ui.checkbox(&mut form.vertical, "Show the PCs in a column");
+        ui.add_space(8.0);
+        switcher_order(ui, form);
+        ui.add_space(12.0);
+        ui.label("History of copies on this PC");
+        for (choice, text) in [
+            (None, "Automatic: only when no other clipboard manager runs"),
+            (Some(true), "Always keep one"),
+            (Some(false), "Never: another manager keeps it"),
+        ] {
+            ui.radio_value(&mut form.history, choice, text);
+        }
+        ui.weak("Other managers: cliphist, CopyQ, Klipper, GPaste, Windows' Win+V. The clipboard is shared either way. Applies after a restart.");
     }
 }
 
