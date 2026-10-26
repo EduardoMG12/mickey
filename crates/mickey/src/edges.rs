@@ -19,6 +19,48 @@ fn on_screen(monitors: &[Monitor], (x, y): (i32, i32)) -> bool {
 /// 8 ms later.
 pub const EDGE_CHECK: std::time::Duration = std::time::Duration::from_millis(8);
 
+/// Asks where the cursor is on a thread of its own, so the thread that
+/// injects the mouse never waits for the compositor (#187): one answer took
+/// 2.7 ms at p99 on Hyprland, and every event behind it waited too. Motion
+/// goes in with `push`; whether it pushed off this desktop comes back, a
+/// moment later, from `answer`. The thread ends with this.
+pub struct EdgeWatch {
+    pushed: std::sync::mpsc::Sender<(i32, i32)>,
+    answers: std::sync::mpsc::Receiver<Option<(i32, i32)>>,
+}
+
+impl EdgeWatch {
+    pub fn start(monitors: Vec<Monitor>, cursor: fn() -> Option<(i32, i32)>) -> EdgeWatch {
+        let (pushed, motion) = std::sync::mpsc::channel::<(i32, i32)>();
+        let (answer, answers) = std::sync::mpsc::channel();
+        crate::threads::spawn("edge check", move || {
+            while let Ok(mut delta) = motion.recv() {
+                // Motion that came while the last question was out joins in.
+                for (dx, dy) in motion.try_iter() {
+                    delta = (delta.0.saturating_add(dx), delta.1.saturating_add(dy));
+                }
+                let off = cursor().and_then(|at| beyond(&monitors, at, delta));
+                if answer.send(off).is_err() {
+                    break;
+                }
+            }
+        });
+        EdgeWatch { pushed, answers }
+    }
+
+    /// Hands motion over, without waiting.
+    pub fn push(&self, delta: (i32, i32)) {
+        let _ = self.pushed.send(delta);
+    }
+
+    /// The newest answer, if one came since the last call: the pixel off
+    /// this desktop the cursor is pushing onto, or `Some(None)` when it is
+    /// not pushing off.
+    pub fn answer(&self) -> Option<Option<(i32, i32)>> {
+        self.answers.try_iter().last()
+    }
+}
+
 /// Motion summed between two edge checks.
 #[derive(Debug)]
 pub struct Throttle {
@@ -81,6 +123,43 @@ pub fn back(home: &[Monitor], [x, y]: [i32; 2], point: (i32, i32)) -> Option<(i3
 
 #[cfg(test)]
 mod tests {
+    /// #187's measurement, on a real Hyprland: how long the thread that
+    /// injects the mouse waits per event at 1000 Hz, when the edge check
+    /// runs on its own thread. `cargo test --release edge_watch_cost --
+    /// --ignored --nocapture`, in a Hyprland session.
+    #[cfg(target_os = "linux")]
+    #[test]
+    #[ignore = "needs a Hyprland session"]
+    fn edge_watch_cost() {
+        let screen = [Monitor {
+            x: 0,
+            y: 0,
+            width: 1920,
+            height: 1080,
+        }];
+        let cursor = || crate::monitors::hyprland::cursor().ok();
+        let watch = EdgeWatch::start(screen.to_vec(), cursor);
+        let mut throttle = Throttle::new();
+        let mut waits = Vec::new();
+        for _ in 0..8000 {
+            let started = std::time::Instant::now();
+            if let Some(delta) = throttle.feed((1, 0)) {
+                watch.push(delta);
+            }
+            let _ = watch.answer();
+            waits.push(started.elapsed().as_micros());
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        waits.sort();
+        let at = |q: f64| waits[((waits.len() as f64 * q) as usize).min(waits.len() - 1)];
+        println!(
+            "an event waits: p99 {} us, p99.9 {} us, max {} us",
+            at(0.99),
+            at(0.999),
+            waits[waits.len() - 1]
+        );
+    }
+
     #[test]
     fn motion_is_summed_and_checked_at_most_every_8_ms() {
         let start = std::time::Instant::now();

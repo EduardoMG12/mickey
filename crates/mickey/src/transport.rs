@@ -147,6 +147,7 @@ pub fn serve(
     // The last Leave sent, so pushing against a wall sends it once.
     let mut left = None;
     let mut edge_check = edges::Throttle::new();
+    let edge = edges::EdgeWatch::start(monitors.to_vec(), cursor);
     let mut refused_at = None;
     let mut keys = HeldSet::new();
     let mut buttons = HeldSet::new();
@@ -176,7 +177,11 @@ pub fn serve(
                 if let InputEvent::Motion { dx, dy } = event
                     && let Some(delta) = edge_check.feed((dx, dy))
                 {
-                    let off = cursor().and_then(|at| edges::beyond(monitors, at, delta));
+                    edge.push(delta);
+                }
+                // An answer about earlier motion, if one came: the cursor
+                // is still being pushed, so acting on it now is in time.
+                if let Some(off) = edge.answer() {
                     // Never mid-drag: a button held would stay held over
                     // there, and the drag would end on the wrong PC
                     // (PRD 0005). Pushing on after letting go crosses.
@@ -364,6 +369,9 @@ mod tests {
         // EDGE_CHECK, with the motion summed in between.
         thread::sleep(edges::EDGE_CHECK + std::time::Duration::from_millis(2));
         link.send(&push).unwrap();
+        // The answer comes from the edge thread: the next motion carries it.
+        thread::sleep(std::time::Duration::from_millis(20));
+        link.send(&push).unwrap();
         assert_eq!(link.recv().unwrap(), Message::Leave { x: 1536, y: 284 });
         // Only once: the next message is the pong, not a second Leave.
         link.send(&Message::Ping { id: 7 }).unwrap();
@@ -412,6 +420,8 @@ mod tests {
         // Let go and push on: now it leaves.
         link.send(&left_button(false)).unwrap();
         wait();
+        link.send(&push).unwrap();
+        thread::sleep(std::time::Duration::from_millis(20));
         link.send(&push).unwrap();
         assert_eq!(link.recv().unwrap(), Message::Leave { x: 1536, y: 284 });
         drop(link);
