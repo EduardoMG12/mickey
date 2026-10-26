@@ -453,7 +453,12 @@ mod tests {
         let call = r#"{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"switch_keyboard","arguments":{"pc":"Laptop\nquit"}}}"#;
         let answer = reply(call);
         assert_eq!(answer["result"]["isError"], true);
-        assert!(answer["result"]["content"][0]["text"].as_str().unwrap().contains("control"));
+        assert!(
+            answer["result"]["content"][0]["text"]
+                .as_str()
+                .unwrap()
+                .contains("control")
+        );
     }
 
     #[test]
