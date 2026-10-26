@@ -57,6 +57,8 @@ enum Wake {
     Tray(tray::Click),
     /// The peer at this address placed itself on this PC's desktop.
     Arranged(std::net::IpAddr, [i32; 2]),
+    /// The peer at this address runs this Mickey version.
+    Version(std::net::IpAddr, String),
     /// A peer's group map (PRD 0010), and who sent it.
     Group(Vec<group::Member>, [u8; 32]),
     /// A peer's hotkeys, to take.
@@ -439,6 +441,7 @@ fn add_peer(
         latency: Latency::new(),
         monitors: Vec::new(),
         new_key: false,
+        version: None,
     });
     positions.push(position);
     Ok(peers.len() - 1)
@@ -503,6 +506,7 @@ fn peers_text(this_pc: &[Monitor], peers: &[Peer], online: &[bool]) -> String {
                 name: peer.name.clone(),
                 online,
                 reinstalled: peer.new_key,
+                version: peer.version.clone(),
                 monitors: peer.monitors.clone(),
             })
             .collect(),
@@ -525,6 +529,8 @@ struct Peer {
     /// It answered with another key than the one this PC knows: refused,
     /// and the settings say why (#289).
     new_key: bool,
+    /// The Mickey version it runs, once its data link said (PRD 0013).
+    version: Option<String>,
 }
 
 /// Everything the background reconnect threads need, shared read-only.
@@ -554,6 +560,11 @@ pub enum TargetNews {
     Hotkeys(String),
     /// Who listens, as a peer shared it (PRD 0012).
     Audio(String),
+    /// The Mickey version the peer at this address runs (PRD 0013).
+    Version {
+        from: std::net::IpAddr,
+        version: String,
+    },
 }
 
 /// What the rest of Mickey shares with the source. Each is optional:
@@ -625,6 +636,7 @@ pub fn run(
             latency: Latency::new(),
             monitors: Vec::new(),
             new_key: false,
+            version: None,
         })
         .collect();
     let shared = Arc::new(Shared { identity, trusted });
@@ -690,6 +702,7 @@ pub fn run(
                     TargetNews::Group { members, by } => Wake::Group(members, by),
                     TargetNews::Hotkeys(lines) => Wake::Hotkeys(lines),
                     TargetNews::Audio(lines) => Wake::Audio(lines),
+                    TargetNews::Version { from, version } => Wake::Version(from, version),
                 };
                 if wake.send(woken).is_err() {
                     return;
@@ -983,6 +996,7 @@ pub fn run(
         let mut accepted = None;
         let mut heard_hotkeys = None;
         let mut heard_audio = None;
+        let mut heard_version = None;
         // A PC to connect to from the settings: handled below, like `join`.
         let mut connecting = None;
         let mut asked_to_arrange = None;
@@ -1029,6 +1043,7 @@ pub fn run(
             Ok(Wake::Accepted(member, by)) => accepted = Some((member, by)),
             Ok(Wake::Hotkeys(lines)) => heard_hotkeys = Some(lines),
             Ok(Wake::Audio(lines)) => heard_audio = Some(lines),
+            Ok(Wake::Version(from, version)) => heard_version = Some((from, version)),
             Ok(Wake::Control(request)) if request.order == Order::Arranged => {
                 asked_to_arrange = Some(request.reply);
             }
@@ -1139,6 +1154,11 @@ pub fn run(
             && let Some((_, reply, _)) = recording.take()
         {
             let _ = reply.send("error: no keys were pressed".into());
+        }
+        if let Some((from, version)) = heard_version {
+            for peer in peers.iter_mut().filter(|peer| peer.address.ip() == from) {
+                peer.version = Some(version.clone());
+            }
         }
         if let Some((from, position)) = placed
             && let Some(index) = peers.iter().position(|peer| peer.address.ip() == from)

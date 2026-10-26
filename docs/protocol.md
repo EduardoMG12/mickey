@@ -173,6 +173,7 @@ clipboard's (`clip_wire.rs`); 16 and up are passed to the target's
 | 20 | Close | none | S → T: a pick was made, close the switcher or copy shown for me |
 | 21 | Audio | the shared `[audio]` lines: `listener`, `volumes`, `muted`, `since` | S → T, on every new data link and after the owner changes them; taken only if newer than the receiver's (`since`) |
 | 22 | Audio key | a stream's id and key, in hex | S → T, to the PC that listens, when sending starts and every 2 s while it lasts |
+| 23 | Version | the sender's Mickey version, `0.2.1` (PRD 0013) | S → T, first on every new data link; shown only if it parses as a version; older Mickeys ignore it |
 
 A group map line is `<public key, 64 hex>`, `<name>`, `<ip:port>` (or
 `:port` for the sender itself) and `<x,y>` or `-`, separated by tabs

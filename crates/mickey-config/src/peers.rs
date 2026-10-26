@@ -25,6 +25,8 @@ pub struct PeerInfo {
     /// was reinstalled?), so it is refused until removed and connected
     /// again (#289). Shown as the state `reinstalled`.
     pub reinstalled: bool,
+    /// The Mickey version it runs, once it said (PRD 0013).
+    pub version: Option<String>,
     pub monitors: Vec<Monitor>,
 }
 
@@ -65,6 +67,17 @@ fn split_position(text: &str) -> Option<(i32, i32)> {
     Some((text[..cut].parse().ok()?, text[cut + 1..].parse().ok()?))
 }
 
+/// One `peer` line's fields, read back.
+fn peer(state: &str, version: &str, name: &str, monitors: Vec<Monitor>) -> PeerInfo {
+    PeerInfo {
+        name: name.to_string(),
+        online: state == "online",
+        reinstalled: state == "reinstalled",
+        version: crate::version::checked(version),
+        monitors,
+    }
+}
+
 impl Peers {
     pub fn to_text(&self) -> String {
         let mut lines = vec![format!("this\t{}", monitors_to_text(&self.this_pc))];
@@ -75,7 +88,8 @@ impl Peers {
                 (false, false) => "offline",
             };
             lines.push(format!(
-                "peer\t{state}\t{}\t{}",
+                "peer\t{state}\t{}\t{}\t{}",
+                peer.version.as_deref().unwrap_or("-"),
                 peer.name,
                 monitors_to_text(&peer.monitors)
             ));
@@ -89,20 +103,27 @@ impl Peers {
             let fields: Vec<&str> = line.split('\t').collect();
             match fields.as_slice() {
                 ["this", monitors] => peers.this_pc = monitors_from_text(monitors)?,
-                ["peer", state, name, monitors] => peers.peers.push(PeerInfo {
-                    name: name.to_string(),
-                    online: *state == "online",
-                    reinstalled: *state == "reinstalled",
-                    monitors: monitors_from_text(monitors)?,
-                }),
+                ["peer", state, version, name, monitors] => {
+                    peers
+                        .peers
+                        .push(peer(state, version, name, monitors_from_text(monitors)?))
+                }
                 // A peer with no monitors ends in a tab, which trimming the
                 // answer takes away.
-                ["peer", state, name] => peers.peers.push(PeerInfo {
-                    name: name.to_string(),
-                    online: *state == "online",
-                    reinstalled: *state == "reinstalled",
-                    monitors: Vec::new(),
-                }),
+                ["peer", state, version, name]
+                    if *version == "-" || crate::version::checked(version).is_some() =>
+                {
+                    peers.peers.push(peer(state, version, name, Vec::new()))
+                }
+                // A Mickey from before PRD 0013 sends no version: a client
+                // newer than the running Mickey (just updated, not yet
+                // restarted) still reads it.
+                ["peer", state, name, monitors] => {
+                    peers
+                        .peers
+                        .push(peer(state, "-", name, monitors_from_text(monitors)?))
+                }
+                ["peer", state, name] => peers.peers.push(peer(state, "-", name, Vec::new())),
                 _ => return None,
             }
         }
@@ -120,11 +141,12 @@ mod tests {
                 name: "Notebook".into(),
                 online: false,
                 reinstalled: true,
+                version: None,
                 monitors: vec![],
             }],
         };
         let text = peers.to_text();
-        assert!(text.contains("peer\treinstalled\tNotebook"), "{text}");
+        assert!(text.contains("peer\treinstalled\t-\tNotebook"), "{text}");
         let back = Peers::from_text(&text).unwrap();
         assert!(back.peers[0].reinstalled && !back.peers[0].online);
     }
@@ -144,6 +166,7 @@ mod tests {
                 name: "Windows".into(),
                 online: true,
                 reinstalled: false,
+                version: Some("0.2.1".into()),
                 monitors: vec![
                     Monitor {
                         x: 0,
@@ -176,11 +199,20 @@ mod tests {
 
     #[test]
     fn an_offline_peer_without_monitors_and_bad_lines() {
-        let text = "this\t1536x864+0+0\npeer\toffline\tTeste\t\n";
+        let text = "this\t1536x864+0+0\npeer\toffline\t-\tTeste\t\n";
         assert_eq!(Peers::from_text(text).unwrap().peers[0].monitors, []);
         // The same text with the trailing tab trimmed, as a caller may do.
         assert_eq!(Peers::from_text(text.trim()), Peers::from_text(text));
         assert_eq!(Peers::from_text("nonsense"), None);
+        // From a Mickey before versions were sent.
+        let old = "this\t1536x864+0+0\npeer\tonline\tWindows\t2560x1080+0+0\npeer\toffline\tTeste";
+        let old = Peers::from_text(old).unwrap();
+        assert_eq!(old.peers[0].name, "Windows");
+        assert_eq!(old.peers[0].monitors.len(), 1);
+        assert_eq!(
+            (old.peers[1].name.as_str(), old.peers[1].version.as_deref()),
+            ("Teste", None)
+        );
         assert_eq!(Peers::from_text("this\t10x10"), None);
     }
 }
