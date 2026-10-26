@@ -48,8 +48,10 @@ VIAddVersionKey /LANG=${LANG_ENGLISH} "LegalCopyright" "GPL-3.0-or-later"
 
 Section "Mickey"
   SetOutPath "$INSTDIR"
-  ; A running Mickey keeps its files locked.
+  ; A running Mickey keeps its files locked; so does an open settings
+  ; window, where an update may have been started (PRD 0013).
   nsExec::Exec 'taskkill /im mickey.exe /f'
+  nsExec::Exec 'taskkill /im mickey-ui.exe /f'
   File "${BIN}\mickey.exe"
   File "${BIN}\mickey-ui.exe"
   File "start-hidden.vbs"

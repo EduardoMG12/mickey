@@ -26,6 +26,7 @@ mod identity;
 mod input;
 mod jitter;
 mod latency;
+mod mcp;
 mod monitors;
 // The Linux build never translates keys for Windows.
 #[cfg_attr(not(windows), allow(dead_code))]
@@ -104,6 +105,17 @@ fn run(command: Command) -> Result<(), String> {
                 .and_then(Result::ok)
                 .ok_or("mickey is not running")?;
             println!("{waiting}");
+            Ok(())
+        }
+        Command::Mcp => mcp::serve(),
+        Command::UpdateApply => {
+            let latest = update::latest()?;
+            if !config::version::is_newer(&latest, config::version::THIS) {
+                println!("up to date: Mickey {}", config::version::THIS);
+                return Ok(());
+            }
+            update::apply(&latest)?;
+            println!("installing: Mickey {latest}; Mickey restarts by itself");
             Ok(())
         }
         Command::UpdateDownload => {

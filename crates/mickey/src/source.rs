@@ -1078,8 +1078,18 @@ pub fn run(
                 });
             }
             Ok(Wake::Tray(tray::Click::Settings)) => open_window("settings"),
-            // The settings window says how to update, until it can do it.
-            Ok(Wake::Tray(tray::Click::Update)) => open_window("settings"),
+            // Downloading takes a while: on its own thread. A failure opens
+            // the settings, whose banner offers the update again.
+            Ok(Wake::Tray(tray::Click::Update)) => {
+                if let Some(version) = updates.as_ref().and_then(update::Updates::waiting) {
+                    crate::threads::spawn("update", move || {
+                        if let Err(err) = update::apply(&version) {
+                            eprintln!("mickey: the update failed: {err}");
+                            open_window("settings");
+                        }
+                    });
+                }
+            }
             Ok(Wake::Tray(tray::Click::History)) => open_window("history"),
             Ok(Wake::Tray(tray::Click::ListenHere)) => {
                 match listen_here(shared.identity.public()) {

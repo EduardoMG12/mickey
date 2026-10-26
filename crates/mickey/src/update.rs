@@ -197,6 +197,81 @@ pub fn download(version: &str) -> Result<std::path::PathBuf, String> {
     Ok(path)
 }
 
+/// Downloads `version`, checks it (`download`) and installs it. The
+/// running Mickey is then stopped and started again by the installer, the
+/// normal way, which releases every grab (hard rule 8).
+pub fn apply(version: &str) -> Result<(), String> {
+    let path = download(version)?;
+    install(&path)
+}
+
+/// Linux: unpacks the tarball and runs its `install.sh --update` (no sudo)
+/// in a unit of its own, so restarting Mickey's service does not stop it.
+#[cfg(target_os = "linux")]
+fn install(tarball: &std::path::Path) -> Result<(), String> {
+    let script = unpack(tarball)?;
+    let started = Command::new("systemd-run")
+        .args(["--user", "--collect", "--quiet", "--unit", "mickey-update"])
+        .arg(&script)
+        .arg("--update")
+        .status()
+        .map_err(|err| format!("cannot run systemd-run: {err}"))?;
+    if !started.success() {
+        return Err("cannot start the installer".into());
+    }
+    Ok(())
+}
+
+/// Unpacks a verified Linux release next to it; its `install.sh`.
+#[cfg(target_os = "linux")]
+fn unpack(tarball: &std::path::Path) -> Result<std::path::PathBuf, String> {
+    let dir = tarball.parent().ok_or("the download has no folder")?;
+    let unpacked = Command::new("tar")
+        .arg("-xzf")
+        .arg(tarball)
+        .arg("-C")
+        .arg(dir)
+        .status()
+        .map_err(|err| format!("cannot run tar: {err}"))?;
+    if !unpacked.success() {
+        return Err("cannot unpack the release".into());
+    }
+    Ok(dir.join("mickey-linux-x86_64").join("install.sh"))
+}
+
+/// A first install on a PC (the MCP server's `install`): the latest
+/// release, downloaded and checked like an update. What happened, for the
+/// person to read.
+pub fn install_latest() -> Result<String, String> {
+    let latest = latest()?;
+    let path = download(&latest)?;
+    #[cfg(target_os = "linux")]
+    {
+        // The first install asks for sudo once (input devices, firewall):
+        // that needs the person at a terminal, never an agent.
+        let script = unpack(&path)?;
+        Ok(format!(
+            "Mickey {latest} is downloaded and its signature checked. To install it, run this in a terminal (it asks for your password once):\n{}",
+            script.display()
+        ))
+    }
+    #[cfg(windows)]
+    {
+        install(&path)?;
+        Ok(format!(
+            "Installing Mickey {latest}: confirm Windows' administrator prompt. Mickey then starts by itself."
+        ))
+    }
+}
+
+/// Windows: runs the installer silently (`/S`) as administrator; Windows
+/// asks the owner once. The installer stops Mickey, replaces it and starts
+/// it again.
+#[cfg(windows)]
+fn install(installer: &std::path::Path) -> Result<(), String> {
+    crate::platform::elevate::run_as_admin(installer, "/S").map_err(|err| err.to_string())
+}
+
 /// The value of `"tag_name"` in GitHub's answer. A full JSON parser for one
 /// field would be a dependency for nothing; the tag never holds a quote.
 fn tag_name(json: &str) -> Option<&str> {

@@ -29,6 +29,11 @@ png = "0.18"
 ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
 sha2 = { version = "0.10", default-features = false }
 
+# The MCP server (PRD 0014) reads and writes JSON-RPC messages. A hand-
+# written JSON parser for untrusted input is where bugs hide; serde is
+# already in the tree for TOML.
+serde_json = "1"
+
 # The tray icon on Linux (PRD 0009): the StatusNotifierItem protocol over
 # D-Bus, too large to write by hand. Without tokio: its blocking API runs on
 # the small async-io executor, on a thread of its own.
