@@ -228,7 +228,7 @@ impl Icon {
             .set(shared)
             .map_err(|_| io::Error::other("the tray icon is already shown"))?;
         let (ready, started) = std::sync::mpsc::channel();
-        let thread = thread::spawn(move || run(&ready));
+        let thread = crate::threads::spawn("tray window", move || run(&ready));
         started
             .recv()
             .map_err(|_| io::Error::other("the tray thread stopped"))??;

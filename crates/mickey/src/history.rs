@@ -128,7 +128,7 @@ pub fn record(keeper: crate::clipboard::Keeper) -> Shared {
     let how = crate::clip_watch::start(changed, move || text_keeper.read_text());
     println!("mickey: clipboard history through {how}");
     let kept = Arc::clone(&history);
-    std::thread::spawn(move || {
+    crate::threads::spawn("history", move || {
         for () in changes {
             if let Some(content) = keeper.read() {
                 kept.lock()

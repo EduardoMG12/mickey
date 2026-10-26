@@ -24,7 +24,6 @@ use std::io::{self, BufRead, BufReader, Write};
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
-use std::thread;
 use std::time::Duration;
 
 /// A follower that stops reading is dropped instead of slowing the source.
@@ -373,8 +372,12 @@ impl Control {
         let (followers_in, followers) = mpsc::channel();
         let (updates, updates_out) = mpsc::channel();
         let shared = Arc::clone(&latest);
-        thread::spawn(move || accept(listener, &shared, &followers_in, &requests));
-        thread::spawn(move || publish(updates_out, followers, &latest));
+        crate::threads::spawn("control accept", move || {
+            accept(listener, &shared, &followers_in, &requests)
+        });
+        crate::threads::spawn("control publish", move || {
+            publish(updates_out, followers, &latest)
+        });
         Ok(Control { updates })
     }
 
@@ -582,7 +585,7 @@ mod tests {
             "a second source is refused"
         );
         control.publish(status());
-        thread::sleep(Duration::from_millis(50));
+        std::thread::sleep(Duration::from_millis(50));
 
         let mut answer = request_at(&Endpoint::at(path.clone()), "status").unwrap();
         assert_eq!(answer.next().unwrap().unwrap(), status().to_line());
@@ -601,7 +604,7 @@ mod tests {
         assert!(bad.next().unwrap().unwrap().starts_with("error"));
 
         // An order reaches the main loop, and its answer reaches the client.
-        let client = thread::spawn(move || {
+        let client = std::thread::spawn(move || {
             request_at(&Endpoint::at(path), "go Windows A")
                 .unwrap()
                 .next()

@@ -97,7 +97,7 @@ impl Keeper {
     pub fn start() -> Result<Keeper, String> {
         let mut board = Clipboard::open()?;
         let (jobs, todo) = std::sync::mpsc::channel();
-        std::thread::spawn(move || {
+        crate::threads::spawn("clipboard", move || {
             for job in todo {
                 match job {
                     Job::Read(answer) => {

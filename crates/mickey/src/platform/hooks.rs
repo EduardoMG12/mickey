@@ -12,7 +12,6 @@ use std::io;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::mpsc::{self, Sender};
 use std::sync::{Mutex, OnceLock};
-use std::thread;
 
 const WH_KEYBOARD_LL: i32 = 13;
 /// Thread messages that turn the mouse hook on and off (`WM_APP` + n).
@@ -248,7 +247,7 @@ pub fn start(events: Sender<HookEvent>) -> io::Result<()> {
         .set(shared)
         .map_err(|_| io::Error::other("the hooks are already running"))?;
     let (ready, installed) = mpsc::channel();
-    thread::spawn(move || {
+    crate::threads::spawn("input hooks", move || {
         // Windows waits for this thread on every key and mouse event, and
         // skips the hook if it is late: under load (a game) a late hook
         // means input lag locally and lost key releases on the target. The

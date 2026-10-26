@@ -331,7 +331,7 @@ fn audio_target(
 /// it out.
 fn ask_to_join(member: group::Member, by: [u8; 32], introducer: String, wake: &Sender<Wake>) {
     let wake = wake.clone();
-    thread::spawn(move || {
+    crate::threads::spawn("ask to join", move || {
         let ui = std::env::current_exe()
             .map(|exe| exe.with_file_name(format!("mickey-ui{}", std::env::consts::EXE_SUFFIX)));
         let answer = ui.and_then(|ui| {
@@ -682,7 +682,7 @@ pub fn run(
     let mut published = None;
     {
         let wake = wake.clone();
-        thread::spawn(move || {
+        crate::threads::spawn("target news", move || {
             for news in controlled {
                 let woken = match news {
                     TargetNews::Controlled(here) => Wake::Controlled(here),
@@ -715,7 +715,7 @@ pub fn run(
         .ok();
     {
         let wake = wake.clone();
-        thread::spawn(move || {
+        crate::threads::spawn("tray clicks", move || {
             for click in picked {
                 if wake.send(Wake::Tray(click)).is_err() {
                     return;
@@ -1372,8 +1372,8 @@ fn connect_first(
     back: &Sender<(usize, Link)>,
 ) {
     let (shared, back) = (Arc::clone(shared), back.clone());
-    thread::spawn(
-        move || match connect_and_pair(&shared.identity, &shared.trusted, &name, to) {
+    crate::threads::spawn("connect", move || {
+        match connect_and_pair(&shared.identity, &shared.trusted, &name, to) {
             Ok(link) => {
                 let _ = back.send((index, link));
             }
@@ -1381,8 +1381,8 @@ fn connect_first(
                 println!("mickey: {name} ({to}) is offline: {err}");
                 reconnect(index, to, &shared, &back);
             }
-        },
-    );
+        }
+    });
 }
 
 /// Connects, asks to pair if the key is unknown, and waits for the peer to
@@ -1421,15 +1421,15 @@ fn open_data_link(
     mover: &Mover,
 ) {
     let (shared, mover) = (Arc::clone(shared), mover.clone());
-    thread::spawn(
-        move || match transport::connect_data(input, &shared.identity) {
+    crate::threads::spawn("open data link", move || {
+        match transport::connect_data(input, &shared.identity) {
             Ok(link) if *link.peer_key() == key => mover.link(index, link),
             Ok(_) => eprintln!(
                 "mickey: the data port of {input} answered with another PC's key; no shared clipboard with it"
             ),
             Err(err) => eprintln!("mickey: no shared clipboard with {input}: {err}"),
-        },
-    );
+        }
+    });
 }
 
 /// Retries a trusted peer in the background until it answers, then hands
@@ -1437,7 +1437,7 @@ fn open_data_link(
 /// trusted is left alone.
 fn reconnect(index: usize, to: SocketAddr, shared: &Arc<Shared>, back: &Sender<(usize, Link)>) {
     let (shared, back) = (Arc::clone(shared), back.clone());
-    thread::spawn(move || {
+    crate::threads::spawn("reconnect", move || {
         loop {
             thread::sleep(RETRY_EVERY);
             let Ok(mut link) = transport::connect(to, &shared.identity) else {
@@ -1525,7 +1525,7 @@ fn open_switcher(
 ) {
     let args = switcher_args(cards, interface, false);
     let (wake, slot) = (wake.clone(), slot.clone());
-    thread::spawn(move || {
+    crate::threads::spawn("switcher", move || {
         let pick = match window::run(&args, &slot) {
             // The window prints the card's id; 0 is this PC.
             window::Outcome::Answered(text) => text
@@ -1558,7 +1558,7 @@ fn read_peer(index: usize, link: &Link, news: &Sender<(usize, News)>, start: Ins
     let (Ok(mut reader), news) = (link.try_clone(), news.clone()) else {
         return;
     };
-    thread::spawn(move || {
+    crate::threads::spawn("peer reader", move || {
         while let Ok(message) = reader.recv() {
             let item = match message {
                 Message::Pong { id } => News::RoundTrip(latency::round_trip(start, id)),

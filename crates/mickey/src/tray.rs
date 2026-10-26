@@ -176,7 +176,7 @@ impl Tray {
         let icon = crate::platform::tray::Icon::start(look(&status), Box::new(picked))
             .map(Tray)
             .map_err(|err| format!("no tray icon: {err}"))?;
-        std::thread::spawn(keep_in_sight);
+        crate::threads::spawn("tray", keep_in_sight);
         Ok(icon)
     }
 
