@@ -16,6 +16,8 @@ mod edges;
 mod emit;
 mod event;
 mod focus;
+#[cfg(test)]
+mod fuzz;
 mod group;
 mod held;
 mod history;
