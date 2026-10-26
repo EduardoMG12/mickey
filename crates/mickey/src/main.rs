@@ -461,7 +461,8 @@ fn follow_for_waybar() -> ! {
     }
 }
 
-/// Serves one source at a time, forever, injecting what it sends.
+/// Serves every source that connects, each on its own thread (at most
+/// `MAX_CONNECTIONS` at once), forever, injecting what they send.
 /// `controlled` hears whether a source's keyboard and mouse control this PC;
 /// `found`, when discovery runs, names a PC asking to pair; `keeper`, when
 /// the clipboard is reachable, lets paired PCs read and write it.

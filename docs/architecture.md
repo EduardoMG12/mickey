@@ -131,8 +131,10 @@ others.
 ## The platform layer
 
 All `unsafe` code lives in `crates/mickey/src/platform/`, each block with a
-`// SAFETY:` comment. The bindings are hand-written; there is no `libc`,
-`evdev` or `windows-sys` crate.
+`// SAFETY:` comment. The bindings for input are hand-written; there is no `libc`,
+`evdev` or `windows-sys` crate. Shared audio is the exception on Windows:
+WASAPI is COM, so it goes through Microsoft's `windows` crate and `wasapi`
+(PRD 0012).
 
 | File | OS | What it wraps |
 |---|---|---|
