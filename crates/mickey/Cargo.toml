@@ -22,6 +22,13 @@ arboard = { version = "3", default-features = false, features = ["image-data", "
 # the tree through arboard.
 png = "0.18"
 
+# Updates (PRD 0013): checking the release's signature (Ed25519) and the
+# download's hash (SHA-256) before anything is installed. Hand-written
+# crypto is how such checks go wrong; curve25519-dalek, which Ed25519
+# builds on, is already in the tree through snow.
+ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
+sha2 = { version = "0.10", default-features = false }
+
 # The tray icon on Linux (PRD 0009): the StatusNotifierItem protocol over
 # D-Bus, too large to write by hand. Without tokio: its blocking API runs on
 # the small async-io executor, on a thread of its own.

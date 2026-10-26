@@ -69,12 +69,22 @@ pub fn start(updates: Updates) {
 
 /// The latest release's version, as GitHub tags it (`v0.2.2`).
 pub fn latest() -> Result<String, String> {
+    let json = fetch(LATEST, &["--max-time", "20"])?;
+    let json = String::from_utf8_lossy(&json);
+    let tag = tag_name(&json).ok_or("GitHub's answer names no release")?;
+    version::checked(tag).ok_or_else(|| format!("the latest release, {tag:?}, is not a version"))
+}
+
+/// The body at `url`, through curl: HTTPS only, redirects followed (a
+/// release's files are served from another GitHub host).
+fn fetch(url: &str, limits: &[&str]) -> Result<Vec<u8>, String> {
     let mut curl = Command::new("curl");
     curl.args(["--silent", "--show-error", "--fail", "--location"])
-        .args(["--max-time", "20", "--proto", "=https"])
+        .args(["--proto", "=https", "--proto-redir", "=https"])
+        .args(limits)
         .args(["--user-agent", &format!("mickey/{}", version::THIS)])
         .args(["--header", "Accept: application/vnd.github+json"])
-        .arg(LATEST);
+        .arg(url);
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -87,9 +97,104 @@ pub fn latest() -> Result<String, String> {
     if !answer.status.success() {
         return Err(String::from_utf8_lossy(&answer.stderr).trim().to_string());
     }
-    let json = String::from_utf8_lossy(&answer.stdout);
-    let tag = tag_name(&json).ok_or("GitHub's answer names no release")?;
-    version::checked(tag).ok_or_else(|| format!("the latest release, {tag:?}, is not a version"))
+    Ok(answer.stdout)
+}
+
+/// The public key that signs releases, built in (`packaging/release-key.pub`,
+/// made by `tools/release-key/new-key.sh`).
+const RELEASE_KEY: &str = include_str!("../../../packaging/release-key.pub");
+
+/// The release key's 32 bytes; `None` until the owner made one.
+fn release_key(text: &str) -> Option<[u8; 32]> {
+    let hex = text
+        .lines()
+        .find(|line| !line.starts_with('#') && !line.trim().is_empty())?;
+    let hex = hex.trim();
+    if hex.len() != 64 {
+        return None;
+    }
+    let mut key = [0u8; 32];
+    for (byte, pair) in key.iter_mut().zip(hex.as_bytes().chunks(2)) {
+        *byte = u8::from_str_radix(std::str::from_utf8(pair).ok()?, 16).ok()?;
+    }
+    Some(key)
+}
+
+/// This system's file in a release.
+fn asset(sums: &str) -> Option<&str> {
+    sums.lines()
+        .filter_map(|line| line.split_once("  "))
+        .map(|(_, name)| name)
+        .find(|name| {
+            if cfg!(windows) {
+                name.starts_with("Mickey-Setup-") && name.ends_with(".exe")
+            } else {
+                *name == "mickey-linux-x86_64.tar.gz"
+            }
+        })
+}
+
+/// Whether `file`, called `name`, is the one the owner released: `sums`
+/// (a release's SHA256SUMS) carries a valid Ed25519 `signature` from `key`,
+/// and lists `name` with `file`'s SHA-256. Nothing else is ever installed.
+fn verified(
+    sums: &[u8],
+    signature: &[u8],
+    key: &[u8; 32],
+    name: &str,
+    file: &[u8],
+) -> Result<(), String> {
+    use ed25519_dalek::{Signature, VerifyingKey};
+    use sha2::{Digest, Sha256};
+    let key = VerifyingKey::from_bytes(key).map_err(|_| "the release key is not a valid key")?;
+    let signature: [u8; 64] = signature
+        .try_into()
+        .map_err(|_| "the signature is not 64 bytes")?;
+    key.verify_strict(sums, &Signature::from_bytes(&signature))
+        .map_err(|_| "SHA256SUMS is not signed by the release key")?;
+    let sums = std::str::from_utf8(sums).map_err(|_| "SHA256SUMS is not text")?;
+    let listed = sums
+        .lines()
+        .filter_map(|line| line.split_once("  "))
+        .find(|(_, listed)| *listed == name)
+        .map(|(hash, _)| hash)
+        .ok_or_else(|| format!("{name} is not in SHA256SUMS"))?;
+    let hash: String = Sha256::digest(file)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    if hash != listed {
+        return Err(format!("{name} is not the file that was released"));
+    }
+    Ok(())
+}
+
+/// Downloads `version`'s file for this system into Mickey's data folder and
+/// checks it (`verified`). Its path, once it may be installed.
+pub fn download(version: &str) -> Result<std::path::PathBuf, String> {
+    let key = release_key(RELEASE_KEY).ok_or(
+        "this Mickey has no release key, so it cannot check an update: install the new one by hand",
+    )?;
+    let version = version::checked(version).ok_or("not a version")?;
+    let base = format!("https://github.com/EduardoMG12/mickey/releases/download/v{version}");
+    // Small files: a short limit. The release itself: a few minutes.
+    let small = ["--max-time", "30", "--max-filesize", "65536"];
+    let sums = fetch(&format!("{base}/SHA256SUMS"), &small)?;
+    let signature = fetch(&format!("{base}/SHA256SUMS.sig"), &small)?;
+    let name = asset(&String::from_utf8_lossy(&sums))
+        .ok_or("the release has no file for this system")?
+        .to_string();
+    let file = fetch(
+        &format!("{base}/{name}"),
+        &["--max-time", "600", "--max-filesize", "209715200"],
+    )?;
+    verified(&sums, &signature, &key, &name, &file)?;
+    let dir = crate::identity::data_dir()?.join("updates").join(&version);
+    std::fs::create_dir_all(&dir).map_err(|err| format!("cannot make {}: {err}", dir.display()))?;
+    let path = dir.join(&name);
+    std::fs::write(&path, &file)
+        .map_err(|err| format!("cannot write {}: {err}", path.display()))?;
+    Ok(path)
 }
 
 /// The value of `"tag_name"` in GitHub's answer. A full JSON parser for one
@@ -104,6 +209,55 @@ fn tag_name(json: &str) -> Option<&str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use ed25519_dalek::{Signer, SigningKey};
+
+    /// A release signed by `signer`: its SHA256SUMS, the signature, and the file.
+    fn release(signer: &SigningKey, file: &[u8]) -> (Vec<u8>, Vec<u8>) {
+        use sha2::{Digest, Sha256};
+        let hash: String = Sha256::digest(file)
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        let sums = format!("{hash}  mickey-linux-x86_64.tar.gz\n").into_bytes();
+        let signature = signer.sign(&sums).to_bytes().to_vec();
+        (sums, signature)
+    }
+
+    #[test]
+    fn a_signed_release_is_installed_and_any_change_is_refused() {
+        let owner = SigningKey::from_bytes(&[7; 32]);
+        let key = owner.verifying_key().to_bytes();
+        let file = b"the release";
+        let name = "mickey-linux-x86_64.tar.gz";
+        let (sums, signature) = release(&owner, file);
+        assert_eq!(verified(&sums, &signature, &key, name, file), Ok(()));
+        // Another file than the one released.
+        assert!(verified(&sums, &signature, &key, name, b"the release!").is_err());
+        // SHA256SUMS changed after signing (to list another file's hash).
+        let mut changed = sums.clone();
+        changed[0] ^= 1;
+        assert!(verified(&changed, &signature, &key, name, file).is_err());
+        // Signed by someone else.
+        let stranger = SigningKey::from_bytes(&[8; 32]);
+        let (sums, signature) = release(&stranger, file);
+        assert!(verified(&sums, &signature, &key, name, file).is_err());
+        // Cut short, or a name not in the list.
+        assert!(verified(&sums, &signature[..63], &key, name, file).is_err());
+        let (sums, signature) = release(&owner, file);
+        assert!(verified(&sums, &signature, &key, "other.tar.gz", file).is_err());
+    }
+
+    #[test]
+    fn the_release_key_is_read_from_its_file() {
+        assert_eq!(release_key("# not made yet\n"), None);
+        assert_eq!(
+            release_key(&format!("# key\n{}\n", "ab".repeat(32))),
+            Some([0xab; 32])
+        );
+        assert_eq!(release_key("abcd\n"), None);
+        assert_eq!(release_key(&"zz".repeat(32)), None);
+    }
 
     #[test]
     fn the_tag_is_read_from_githubs_answer() {

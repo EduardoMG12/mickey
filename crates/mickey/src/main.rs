@@ -106,6 +106,19 @@ fn run(command: Command) -> Result<(), String> {
             println!("{waiting}");
             Ok(())
         }
+        Command::UpdateDownload => {
+            let latest = update::latest()?;
+            if !config::version::is_newer(&latest, config::version::THIS) {
+                println!("up to date: Mickey {}", config::version::THIS);
+                return Ok(());
+            }
+            let path = update::download(&latest)?;
+            println!(
+                "verified: Mickey {latest}, signed by the release key: {}",
+                path.display()
+            );
+            Ok(())
+        }
         Command::UpdateCheck => {
             let latest = update::latest()?;
             let this = config::version::THIS;

@@ -35,6 +35,7 @@ usage:
   mickey forget <fingerprint>        stop trusting a paired machine
   mickey update check                ask GitHub whether a newer Mickey is out
   mickey update status               the newer Mickey the running one knows of, or none
+  mickey update download             download the newer Mickey and check its signature
   mickey --version                   show which Mickey this is
 ";
 
@@ -71,6 +72,8 @@ pub enum Command {
     UpdateCheck,
     /// The newer Mickey the running one knows of (the settings ask).
     UpdateStatus,
+    /// Download the newer Mickey and check it (PRD 0013).
+    UpdateDownload,
     Status {
         waybar: bool,
     },
@@ -102,6 +105,7 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
         [command] if command == "peers" => Ok(Command::Peers),
         [command, word] if command == "update" && word == "check" => Ok(Command::UpdateCheck),
         [command, word] if command == "update" && word == "status" => Ok(Command::UpdateStatus),
+        [command, word] if command == "update" && word == "download" => Ok(Command::UpdateDownload),
         [command] if command == "autostart" => Ok(Command::Autostart(None)),
         [command, word] if command == "autostart" => match word.as_str() {
             "on" => Ok(Command::Autostart(Some(true))),
