@@ -37,6 +37,8 @@ usage:
   mickey update status               the newer Mickey the running one knows of, or none
   mickey update download             download the newer Mickey and check its signature
   mickey update apply                download, check and install the newer Mickey
+  mickey mcp                         be an MCP server on stdio, for AI agents
+                                     (claude mcp add mickey -- mickey mcp)
   mickey --version                   show which Mickey this is
 ";
 
@@ -77,6 +79,8 @@ pub enum Command {
     UpdateDownload,
     /// Download, check and install the newer Mickey (PRD 0013).
     UpdateApply,
+    /// Be an MCP server on stdio (PRD 0014).
+    Mcp,
     Status {
         waybar: bool,
     },
@@ -110,6 +114,7 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
         [command, word] if command == "update" && word == "status" => Ok(Command::UpdateStatus),
         [command, word] if command == "update" && word == "download" => Ok(Command::UpdateDownload),
         [command, word] if command == "update" && word == "apply" => Ok(Command::UpdateApply),
+        [command] if command == "mcp" => Ok(Command::Mcp),
         [command] if command == "autostart" => Ok(Command::Autostart(None)),
         [command, word] if command == "autostart" => match word.as_str() {
             "on" => Ok(Command::Autostart(Some(true))),

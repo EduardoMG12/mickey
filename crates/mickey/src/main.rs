@@ -26,6 +26,7 @@ mod identity;
 mod input;
 mod jitter;
 mod latency;
+mod mcp;
 mod monitors;
 // The Linux build never translates keys for Windows.
 #[cfg_attr(not(windows), allow(dead_code))]
@@ -106,6 +107,7 @@ fn run(command: Command) -> Result<(), String> {
             println!("{waiting}");
             Ok(())
         }
+        Command::Mcp => mcp::serve(),
         Command::UpdateApply => {
             let latest = update::latest()?;
             if !config::version::is_newer(&latest, config::version::THIS) {
