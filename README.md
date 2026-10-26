@@ -286,6 +286,12 @@ open source by [SignPath.io](https://about.signpath.io), certificate by
 - **Who approves a release:** the maintainer,
   [@EduardoMG12](https://github.com/EduardoMG12), who also approves each
   signing request.
+- **Checking a download:** every release has `SHA256SUMS`, signed with
+  the release key in
+  [`packaging/release-key.pub`](packaging/release-key.pub)
+  (`SHA256SUMS.sig`). Run `tools/release-key/verify.sh SHA256SUMS`, then
+  `sha256sum -c SHA256SUMS`. Mickey makes the same two checks before it
+  installs an update.
 
 ## Build from source
 
