@@ -772,6 +772,10 @@ pub fn run(
     // Where the cursor is, asked on a thread of its own: on Hyprland the
     // answer took 2.7 ms at p99, and this loop must not wait for it (#187).
     let edge = edges::EdgeWatch::start(this_pc.clone(), crate::input::cursor_now);
+    // GNOME and KDE: the InputCapture portal's barriers instead (PRD 0004,
+    // phase 2), started once a peer is placed beside this PC.
+    #[cfg(target_os = "linux")]
+    let mut edge_capture: Option<crate::edge_capture::EdgeCapture> = None;
     let mut online: Vec<bool> = Vec::with_capacity(peers.len());
     // PCs that were off when the owner saved a layout: told when they
     // connect (#288).
@@ -928,6 +932,25 @@ pub fn run(
 
         let mut lost = Vec::new();
         let now = Instant::now();
+        // Once a second: the edges that lead to a placed, online peer.
+        #[cfg(target_os = "linux")]
+        if now >= next_ping && !crate::monitors::on_hyprland() {
+            let placed: Vec<(&[Monitor], [i32; 2])> = (0..peers.len())
+                .filter(|&index| peers[index].link.is_some())
+                .filter_map(|index| Some((peers[index].monitors.as_slice(), positions[index]?)))
+                .collect();
+            let lines = edges::barriers(&this_pc, &placed);
+            match &edge_capture {
+                Some(capture) => capture.set(lines),
+                None if !lines.is_empty() => {
+                    edge_capture = Some(crate::edge_capture::EdgeCapture::start(
+                        this_pc.clone(),
+                        lines,
+                    ));
+                }
+                None => {}
+            }
+        }
         if now >= next_ping {
             let ping = Message::Ping {
                 id: latency::ping_id(start),
@@ -1350,9 +1373,17 @@ pub fn run(
             edge.push(delta);
         }
         // An answer about earlier motion: the cursor is still being pushed.
+        // On GNOME and KDE, a barrier the cursor pushed into says it.
+        #[cfg(target_os = "linux")]
+        let hit = edge_capture
+            .as_ref()
+            .and_then(crate::edge_capture::EdgeCapture::hit);
+        #[cfg(not(target_os = "linux"))]
+        let hit = None;
         let crossed = edge
             .answer()
             .flatten()
+            .or(hit)
             .and_then(|off| edge_crossed(&positions, &peers, off, &input));
         if let Some((index, (x, y))) = crossed {
             switcher.go_to(Some(index), &online);

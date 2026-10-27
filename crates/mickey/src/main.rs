@@ -29,6 +29,8 @@ mod latency;
 mod mcp;
 mod monitors;
 // The Linux build never translates keys for Windows.
+#[cfg(target_os = "linux")]
+mod edge_capture;
 #[cfg_attr(not(windows), allow(dead_code))]
 mod keymap;
 mod platform;
