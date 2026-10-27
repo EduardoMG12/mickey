@@ -765,7 +765,9 @@ pub fn run(
     let mut asked: std::collections::HashSet<[u8; 32]> = std::collections::HashSet::new();
     // Which peers were online when the group map was last shared.
     let mut shared_with: Vec<bool> = Vec::new();
-    let this_pc = monitors::this_pc().unwrap_or_else(|err| {
+    // Re-read on GNOME and KDE while the portal is not up yet (below).
+    #[cfg_attr(windows, allow(unused_mut))]
+    let mut this_pc = monitors::this_pc().unwrap_or_else(|err| {
         eprintln!("mickey: {err}; `mickey peers` will not show this PC's monitors");
         Vec::new()
     });
@@ -935,6 +937,12 @@ pub fn run(
         // Once a second: the edges that lead to a placed, online peer.
         #[cfg(target_os = "linux")]
         if now >= next_ping && !crate::monitors::on_hyprland() {
+            // The portal may come up after Mickey at login.
+            if this_pc.is_empty()
+                && let Ok(found) = monitors::this_pc()
+            {
+                this_pc = found;
+            }
             let placed: Vec<(&[Monitor], [i32; 2])> = (0..peers.len())
                 .filter(|&index| peers[index].link.is_some())
                 .filter_map(|index| Some((peers[index].monitors.as_slice(), positions[index]?)))
