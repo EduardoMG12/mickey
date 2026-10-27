@@ -163,6 +163,13 @@ fn token_path() -> Option<std::path::PathBuf> {
 fn save_token(token: &str) {
     use std::os::unix::fs::OpenOptionsExt;
     let Some(path) = token_path() else { return };
+    // On a fresh install the data folder may not exist yet.
+    if let Some(dir) = path.parent()
+        && let Err(err) = std::fs::create_dir_all(dir)
+    {
+        eprintln!("mickey: cannot keep the portal's permission: {err}");
+        return;
+    }
     let written = std::fs::OpenOptions::new()
         .write(true)
         .create(true)
