@@ -379,7 +379,7 @@ fn run_from_config() -> Result<(), String> {
     // Outside Hyprland, the RemoteDesktop portal's session (PRD 0004),
     // opened now: its one question comes at login, not mid-switch.
     #[cfg(target_os = "linux")]
-    if std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_none() {
+    if !monitors::on_hyprland() {
         crate::threads::spawn("portal start", || {
             let _ = portal::get();
         });

@@ -10,7 +10,7 @@ pub fn this_pc() -> Result<Vec<Monitor>, String> {
         .map_err(|err| format!("cannot list monitors: {err}"));
     #[cfg(target_os = "linux")]
     {
-        if std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_some() {
+        if on_hyprland() {
             return hyprland::monitors();
         }
         // Elsewhere (GNOME, KDE): the RemoteDesktop portal (PRD 0004).
@@ -21,6 +21,13 @@ pub fn this_pc() -> Result<Vec<Monitor>, String> {
                 "no Hyprland, and the RemoteDesktop portal named no monitors".to_string()
             })
     }
+}
+
+/// Whether this session is Hyprland's, which Mickey asks through its own
+/// socket; elsewhere it goes through the RemoteDesktop portal (PRD 0004).
+#[cfg(target_os = "linux")]
+pub fn on_hyprland() -> bool {
+    std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_some()
 }
 
 #[cfg(target_os = "linux")]

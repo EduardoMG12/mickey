@@ -30,12 +30,29 @@ const FIRST_MONITORS: Duration = Duration::from_secs(5);
 
 pub struct Portal {
     shared: Arc<Mutex<Shared>>,
+    context: ei::Context,
 }
 
-/// What libei said, kept by the thread that listens to it.
+/// What libei said, kept by the thread that listens to it, and where
+/// Mickey put the cursor.
 #[derive(Default)]
 struct Shared {
     monitors: Vec<Monitor>,
+    /// The absolute pointer, once libei lets Mickey use it.
+    pointer: Option<Pointer>,
+    /// Where Mickey last put the cursor. While another PC controls this
+    /// one, only Mickey moves it, so this is where it is: no question to
+    /// the compositor (PRD 0004).
+    at: Option<(i32, i32)>,
+}
+
+struct Pointer {
+    device: ei::Device,
+    absolute: ei::PointerAbsolute,
+    /// From libei's "resumed": every request about the device names it.
+    serial: u32,
+    emulating: bool,
+    sequence: u32,
 }
 
 /// The portal's session, started on first use; `None`, logged once, when
@@ -53,7 +70,7 @@ pub fn get() -> Option<&'static Portal> {
 impl Portal {
     fn start() -> Result<Portal, String> {
         let shared = Arc::new(Mutex::new(Shared::default()));
-        let (ready, started) = std::sync::mpsc::channel();
+        let (ready, started) = std::sync::mpsc::channel::<Result<ei::Context, String>>();
         let listening = Arc::clone(&shared);
         crate::threads::spawn("portal", move || {
             let result = async_io::block_on(listen(&listening, &ready));
@@ -63,7 +80,7 @@ impl Portal {
             }
         });
         // The first start may wait for the person to answer the question.
-        started
+        let context = started
             .recv()
             .map_err(|_| "the portal thread ended".to_string())??;
         let until = Instant::now() + FIRST_MONITORS;
@@ -76,7 +93,53 @@ impl Portal {
         {
             std::thread::sleep(Duration::from_millis(20));
         }
-        Ok(Portal { shared })
+        Ok(Portal { shared, context })
+    }
+
+    /// Puts the cursor at `(x, y)` of the desktop, exactly (absolute
+    /// motion: no pointer acceleration in between).
+    pub fn place(&self, x: i32, y: i32) -> std::io::Result<()> {
+        let mut shared = self.shared.lock().unwrap_or_else(|p| p.into_inner());
+        let pointer = shared
+            .pointer
+            .as_mut()
+            .ok_or_else(|| std::io::Error::other("libei has not given the pointer yet"))?;
+        if !pointer.emulating {
+            pointer
+                .device
+                .start_emulating(pointer.serial, pointer.sequence);
+            pointer.sequence += 1;
+            pointer.emulating = true;
+        }
+        pointer.absolute.motion_absolute(x as f32, y as f32);
+        pointer.device.frame(pointer.serial, 0);
+        shared.at = Some((x, y));
+        drop(shared);
+        self.context.flush().map_err(std::io::Error::other)
+    }
+
+    /// Moves the cursor by `(dx, dy)`, within the monitors (`slide`).
+    pub fn move_by(&self, dx: i32, dy: i32) -> std::io::Result<()> {
+        let (monitors, at) = {
+            let shared = self.shared.lock().unwrap_or_else(|p| p.into_inner());
+            (shared.monitors.clone(), shared.at)
+        };
+        // Never placed yet: start from the middle of the first monitor.
+        let at = at.or_else(|| {
+            monitors
+                .first()
+                .map(|m| (m.x + m.width / 2, m.y + m.height / 2))
+        });
+        let Some(at) = at else {
+            return Ok(());
+        };
+        let (x, y) = slide(&monitors, at, (dx, dy));
+        self.place(x, y)
+    }
+
+    /// Where Mickey last put the cursor.
+    pub fn cursor(&self) -> Option<(i32, i32)> {
+        self.shared.lock().unwrap_or_else(|p| p.into_inner()).at
     }
 
     /// This PC's monitors, as libei's absolute pointer regions.
@@ -123,7 +186,7 @@ fn save_token(token: &str) {
 /// `ready` hears once whether the session started.
 async fn listen(
     shared: &Mutex<Shared>,
-    ready: &std::sync::mpsc::Sender<Result<(), String>>,
+    ready: &std::sync::mpsc::Sender<Result<ei::Context, String>>,
 ) -> Result<(), String> {
     let text = |err: ashpd::Error| err.to_string();
     let portal = RemoteDesktop::new().await.map_err(text)?;
@@ -159,7 +222,7 @@ async fn listen(
         .handshake_async_io("Mickey", ei::handshake::ContextType::Sender)
         .await
         .map_err(|err| err.to_string())?;
-    let _ = ready.send(Ok(()));
+    let _ = ready.send(Ok(context.clone()));
 
     while let Some(event) = events.next().await {
         match event.map_err(|err| err.to_string())? {
@@ -186,6 +249,24 @@ async fn listen(
                     .collect();
                 shared.lock().unwrap_or_else(|p| p.into_inner()).monitors = monitors;
             }
+            EiEvent::DeviceResumed(resumed) => {
+                if let Some(absolute) = resumed.device.interface::<ei::PointerAbsolute>() {
+                    shared.lock().unwrap_or_else(|p| p.into_inner()).pointer = Some(Pointer {
+                        device: resumed.device.device().clone(),
+                        absolute,
+                        serial: resumed.serial,
+                        emulating: false,
+                        sequence: 1,
+                    });
+                }
+            }
+            EiEvent::DevicePaused(paused)
+                if paused
+                    .device
+                    .has_capability(DeviceCapability::PointerAbsolute) =>
+            {
+                shared.lock().unwrap_or_else(|p| p.into_inner()).pointer = None;
+            }
             _ => {}
         }
         let _ = context.flush();
@@ -193,4 +274,83 @@ async fn listen(
     // The session object lives until here: dropping it would end the session.
     drop(session);
     Err("libei closed the connection".into())
+}
+
+/// Where the cursor goes when it moves by `(dx, dy)` from `at`: there, if
+/// that is on a monitor (on another one too, crossing between them);
+/// otherwise as far as it can within the monitor it is on, so pushing
+/// against an edge stops on the edge's last pixel, where `edges::beyond`
+/// sees the push.
+pub fn slide(monitors: &[Monitor], at: (i32, i32), (dx, dy): (i32, i32)) -> (i32, i32) {
+    let wanted = (at.0.saturating_add(dx), at.1.saturating_add(dy));
+    if crate::edges::on_screen(monitors, wanted) {
+        return wanted;
+    }
+    let inside = |m: &&Monitor| crate::edges::on_screen(std::slice::from_ref(*m), at);
+    match monitors.iter().find(inside).or(monitors.first()) {
+        Some(m) => (
+            wanted.0.clamp(m.x, m.x + m.width - 1),
+            wanted.1.clamp(m.y, m.y + m.height - 1),
+        ),
+        None => at,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn screen(x: i32, y: i32, width: i32, height: i32) -> Monitor {
+        Monitor {
+            x,
+            y,
+            width,
+            height,
+        }
+    }
+
+    #[test]
+    fn the_cursor_moves_and_stops_on_the_edge() {
+        let one = [screen(0, 0, 1280, 800)];
+        assert_eq!(slide(&one, (100, 100), (5, -3)), (105, 97));
+        // Pushed past the right edge: on its last pixel, wherever the push.
+        assert_eq!(slide(&one, (1275, 400), (20, 0)), (1279, 400));
+        assert_eq!(slide(&one, (1279, 400), (4, 2)), (1279, 402));
+        // Past a corner.
+        assert_eq!(slide(&one, (2, 3), (-50, -50)), (0, 0));
+    }
+
+    #[test]
+    fn the_cursor_crosses_onto_a_second_monitor() {
+        let two = [screen(0, 0, 1280, 800), screen(1280, 0, 1920, 1080)];
+        assert_eq!(slide(&two, (1279, 100), (10, 0)), (1289, 100));
+        // Below the first monitor but within the second's height.
+        assert_eq!(slide(&two, (1300, 900), (0, 50)), (1300, 950));
+        // From the second, down past where the first ends: kept on the second.
+        assert_eq!(slide(&two, (1300, 1070), (-40, 20)), (1280, 1079));
+    }
+
+    /// In a GNOME or KDE session (PRD 0004's VM check): the cursor goes to
+    /// an exact point, then stops on the right edge however hard it is
+    /// pushed, and Mickey knows where it is without asking.
+    #[test]
+    #[ignore = "needs a GNOME or KDE session with the RemoteDesktop portal"]
+    fn the_portal_places_and_stops_on_the_edge() {
+        let portal = get().expect("a RemoteDesktop session");
+        let screen = portal.monitors()[0];
+        // libei gives the pointer a moment after the session starts.
+        let until = Instant::now() + Duration::from_secs(3);
+        while portal.place(100, 100).is_err() && Instant::now() < until {
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        assert_eq!(portal.cursor(), Some((100, 100)));
+        portal.move_by(5000, 0).unwrap();
+        let edge = (screen.x + screen.width - 1, 100);
+        assert_eq!(portal.cursor(), Some(edge));
+        let leaving = crate::edges::beyond(&portal.monitors(), edge, (4, 0));
+        assert_eq!(leaving, Some((edge.0 + 1, 100)), "a push past it is seen");
+        println!("the cursor is at {edge:?}, on the right edge");
+        // Stays there long enough for a screenshot.
+        std::thread::sleep(Duration::from_secs(4));
+    }
 }
