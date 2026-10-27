@@ -381,7 +381,13 @@ fn run_from_config() -> Result<(), String> {
     #[cfg(target_os = "linux")]
     if !monitors::on_hyprland() {
         crate::threads::spawn("portal start", || {
-            let _ = portal::get();
+            // The desktop's portal may come up after Mickey at login.
+            for _ in 0..24 {
+                if portal::get().is_some() {
+                    return;
+                }
+                std::thread::sleep(std::time::Duration::from_secs(5));
+            }
         });
     }
     #[cfg(target_os = "linux")]
