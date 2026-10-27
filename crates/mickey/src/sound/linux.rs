@@ -39,7 +39,26 @@ fn attr(play_ahead: u32, fragment: u32) -> BufferAttr {
 }
 
 /// What this PC plays, 5 ms at a time.
-pub struct Recorder(Simple);
+///
+/// A monitor gives silence too, without end: reading it 5 ms at a time
+/// cost 2.8% of a core with nothing playing, over the 1% budget. After a
+/// second of silence the recorder turns drowsy and reads 50 ms at a time;
+/// the first sound after silence wakes it, and those 50 ms are still sent,
+/// once, up to 50 ms late.
+pub struct Recorder {
+    simple: Simple,
+    source: &'static str,
+    /// Silent 5 ms frames in a row, while awake.
+    quiet: u32,
+    drowsy: bool,
+    /// Sound read while drowsy, given out 5 ms at a time.
+    waiting: std::collections::VecDeque<[u8; PCM_BYTES]>,
+}
+
+/// Silent frames before the recorder turns drowsy: one second.
+const QUIET_FRAMES: u32 = 200;
+/// Frames read at once while drowsy: 50 ms.
+const DROWSY_FRAMES: usize = 10;
 
 impl Recorder {
     /// Records what this PC plays: Mickey's silent sink by name once
@@ -52,29 +71,66 @@ impl Recorder {
         } else {
             DEFAULT_MONITOR
         };
-        Simple::new(
-            None,
-            "Mickey",
-            Direction::Record,
-            Some(source),
-            "What this PC plays, for the PC that listens",
-            &spec(),
-            None,
-            Some(&attr(u32::MAX, PCM_BYTES as u32)),
-        )
-        .map(Recorder)
-        .map_err(|err| format!("cannot record {source}: {err}"))
+        Ok(Recorder {
+            simple: record(source, PCM_BYTES)?,
+            source,
+            quiet: 0,
+            drowsy: false,
+            waiting: std::collections::VecDeque::new(),
+        })
     }
 
-    /// The next 5 ms; waits for them.
-    /// (A monitor always gives sound, silence included: never `None`.)
+    /// The next 5 ms, waiting for them; `None` while drowsy and silent.
     pub fn read(&mut self) -> Result<Option<[u8; PCM_BYTES]>, String> {
+        if let Some(pcm) = self.waiting.pop_front() {
+            return Ok(Some(pcm));
+        }
+        if self.drowsy {
+            let mut long = [0u8; PCM_BYTES * DROWSY_FRAMES];
+            self.simple
+                .read(&mut long)
+                .map_err(|err| format!("recording stopped: {err}"))?;
+            if long.iter().all(|&byte| byte == 0) {
+                return Ok(None);
+            }
+            // Sound: awake again, 5 ms at a time, and these 50 ms go out.
+            self.simple = record(self.source, PCM_BYTES)?;
+            self.drowsy = false;
+            self.quiet = 0;
+            let (frames, _) = long.as_chunks::<PCM_BYTES>();
+            self.waiting.extend(frames.iter().copied());
+            return Ok(self.waiting.pop_front());
+        }
         let mut pcm = [0u8; PCM_BYTES];
-        self.0
+        self.simple
             .read(&mut pcm)
             .map_err(|err| format!("recording stopped: {err}"))?;
+        if pcm.iter().all(|&byte| byte == 0) {
+            self.quiet += 1;
+            if self.quiet >= QUIET_FRAMES {
+                self.simple = record(self.source, PCM_BYTES * DROWSY_FRAMES)?;
+                self.drowsy = true;
+            }
+        } else {
+            self.quiet = 0;
+        }
         Ok(Some(pcm))
     }
+}
+
+/// A recording stream of `source`, handing over `fragment` bytes at a time.
+fn record(source: &str, fragment: usize) -> Result<Simple, String> {
+    Simple::new(
+        None,
+        "Mickey",
+        Direction::Record,
+        Some(source),
+        "What this PC plays, for the PC that listens",
+        &spec(),
+        None,
+        Some(&attr(u32::MAX, fragment as u32)),
+    )
+    .map_err(|err| format!("cannot record {source}: {err}"))
 }
 
 /// Another PC's sound, played here.
@@ -155,5 +211,82 @@ mod tests {
             (sum / n as f64).sqrt() / 32768.0,
             first
         );
+    }
+}
+
+/// CPU time this process has used so far, in clock ticks (100 a second).
+#[cfg(test)]
+fn cpu_ticks() -> u64 {
+    let stat = std::fs::read_to_string("/proc/self/stat").unwrap_or_default();
+    let after = stat.rsplit_once(')').map_or("", |(_, rest)| rest);
+    let fields: Vec<&str> = after.split_whitespace().collect();
+    // utime and stime are fields 14 and 15; after "pid (comm)" they are 11 and 12.
+    fields.get(11).zip(fields.get(12)).map_or(0, |(u, s)| {
+        u.parse::<u64>().unwrap_or(0) + s.parse::<u64>().unwrap_or(0)
+    })
+}
+
+#[cfg(test)]
+mod idle {
+    /// The recorder's CPU while nothing plays (second performance review):
+    /// `cargo test --release recorder_idle_cost -- --ignored --nocapture`
+    /// with no sound playing.
+    #[test]
+    #[ignore = "a measurement; needs PulseAudio or PipeWire"]
+    fn recorder_idle_cost() {
+        let mut recorder = super::Recorder::open(false).expect("a monitor to record");
+        let started = std::time::Instant::now();
+        let ticks = super::cpu_ticks();
+        let (mut reads, mut sound) = (0, 0);
+        while started.elapsed() < std::time::Duration::from_secs(10) {
+            if let Some(pcm) = recorder.read().unwrap() {
+                reads += 1;
+                if pcm.iter().any(|&b| b != 0) {
+                    sound += 1;
+                }
+            }
+        }
+        let used = (super::cpu_ticks() - ticks) as f64 / 100.0;
+        println!(
+            "recorder, 10 s: {:.2}% of one core, {reads} frames ({sound} with sound)",
+            used / started.elapsed().as_secs_f64() * 100.0
+        );
+    }
+
+    /// After the recorder turns drowsy, sound wakes it and is recorded.
+    /// The "sound" is a sample value of 1: not zero, and not audible, since
+    /// it may reach the PC that listens.
+    #[test]
+    #[ignore = "needs PulseAudio or PipeWire"]
+    fn sound_wakes_a_drowsy_recorder() {
+        let mut recorder = super::Recorder::open(false).expect("a monitor to record");
+        // Over a second of silence: drowsy.
+        for _ in 0..(super::QUIET_FRAMES + 5) {
+            recorder.read().unwrap();
+        }
+        assert!(recorder.drowsy);
+        let player = std::thread::spawn(|| {
+            let mut player = super::Player::open("a test").unwrap();
+            let mut faint = [0u8; crate::audio_wire::PCM_BYTES];
+            for sample in faint.as_chunks_mut::<2>().0 {
+                *sample = 1i16.to_le_bytes();
+            }
+            for _ in 0..100 {
+                player.write(&faint, 1.0).unwrap();
+            }
+        });
+        let started = std::time::Instant::now();
+        let mut heard = None;
+        while heard.is_none() && started.elapsed() < std::time::Duration::from_secs(3) {
+            if let Some(pcm) = recorder.read().unwrap()
+                && pcm.iter().any(|&b| b != 0)
+            {
+                heard = Some(started.elapsed());
+            }
+        }
+        player.join().unwrap();
+        let heard = heard.expect("the sound is recorded");
+        assert!(!recorder.drowsy, "awake again");
+        println!("sound heard {} ms after it started", heard.as_millis());
     }
 }
