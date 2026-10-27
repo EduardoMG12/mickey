@@ -69,3 +69,25 @@ Linux users are. Decided with the owner on 2026-10-27:
   spike.
 
 ## Discoveries
+
+- **The spike passed** (#352, Ubuntu 24.04 VM: GNOME Shell 46.0,
+  xdg-desktop-portal 1.18.4, xdg-desktop-portal-gnome 46.2):
+  - The RemoteDesktop portal asks once ("Allow Remote Interaction",
+    "Remember This Selection" on), then `ConnectToEIS` gives a libei
+    socket; the handshake took 22 ms.
+  - The absolute pointer's region was `(0, 0, 1280, 800)`, scale 1.0: the
+    VM's one monitor, in logical pixels.
+  - `motion_absolute(200, 150)` put the cursor exactly there (checked on a
+    screenshot).
+  - With `PersistMode::ExplicitlyRevoked` the restore token spares the
+    dialog: the next session started in 36 ms, and after a reboot in
+    50 ms, with no dialog.
+  - Besides the absolute pointer, GNOME gives a relative pointer and a
+    keyboard: keys can go through libei too, so a GNOME target would not
+    need `/dev/uinput` (decided in the ticket that emits).
+  - While the session lasts, GNOME shows its orange "remote control"
+    indicator in the top bar: the owner sees when Mickey is in control.
+  - The crates built as planned: `ashpd` 0.13 (features `remote_desktop`
+    and `screencast`, which the former needs) and `reis` 0.7 with tokio;
+    the binary needs glibc 2.39 at most.
+
