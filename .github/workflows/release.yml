@@ -24,7 +24,7 @@ jobs:
     steps:
       - name: Tools the container lacks
         run: apt-get update -qq && apt-get install -y -qq curl ca-certificates build-essential git binutils python3 pkg-config libpulse-dev >/dev/null
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Install Rust
         run: |
           curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
@@ -48,7 +48,7 @@ jobs:
           # The crates' own notices travel with the binaries.
           python3 tools/licenses/third_party_licenses.py x86_64-unknown-linux-gnu > "$dir/THIRD-PARTY-LICENSES.txt"
           tar czf "$dir.tar.gz" "$dir"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: linux
           path: mickey-linux-x86_64.tar.gz
@@ -56,7 +56,7 @@ jobs:
   windows:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Install Rust
         run: rustup toolchain install stable --profile minimal; rustup default stable
       - run: cargo build --release --workspace --locked
@@ -81,7 +81,7 @@ jobs:
           "/c/Program Files (x86)/NSIS/makensis.exe" -DVERSION="$version" \
             -DBIN="$GITHUB_WORKSPACE\\target\\release" packaging/windows/mickey.nsi
           mv packaging/windows/Mickey-Setup-*.exe .
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: windows
           path: Mickey-Setup-*.exe
@@ -90,9 +90,14 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: [linux, windows]
     runs-on: ubuntu-latest
+    # The release key is used here only. With the "release" environment set
+    # to require the maintainer's approval (and the key kept as its secret),
+    # nothing is signed without a person saying so, even from a stolen
+    # token. See tools/release-key/README.md.
+    environment: release
     steps:
-      - uses: actions/download-artifact@v4
-      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           path: source
       - name: Create the release
