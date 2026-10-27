@@ -121,8 +121,91 @@ pub fn back(home: &[Monitor], [x, y]: [i32; 2], point: (i32, i32)) -> Option<(i3
     on_screen(home, here).then_some(here)
 }
 
+/// The stretches of this desktop's edges that lead to a placed peer, as
+/// `(x1, y1, x2, y2)` lines just outside the monitors: where a GNOME or
+/// KDE PC puts its InputCapture barriers (PRD 0004, phase 2). `peers` are
+/// each placed peer's monitors and its position on this desktop.
+/// A stretch of an edge, `(x1, y1, x2, y2)`, both ends included.
+#[cfg(any(target_os = "linux", test))]
+pub type Line = (i32, i32, i32, i32);
+
+#[cfg(any(target_os = "linux", test))]
+pub fn barriers(here: &[Monitor], peers: &[(&[Monitor], [i32; 2])]) -> Vec<Line> {
+    let theirs: Vec<Monitor> = peers
+        .iter()
+        .flat_map(|(monitors, [px, py])| {
+            monitors.iter().map(move |m| Monitor {
+                x: m.x + px,
+                y: m.y + py,
+                ..*m
+            })
+        })
+        .collect();
+    // The overlap of [a, a + a_len) and [b, b + b_len), if any.
+    let overlap = |a: i32, a_len: i32, b: i32, b_len: i32| {
+        let (start, end) = (a.max(b), (a + a_len).min(b + b_len));
+        (start < end).then_some((start, end - 1))
+    };
+    let mut lines = Vec::new();
+    for m in here {
+        for t in &theirs {
+            // Right, left, bottom, top: the peer's monitor begins where this
+            // one ends, along a shared stretch.
+            if t.x == m.x + m.width
+                && let Some((y1, y2)) = overlap(m.y, m.height, t.y, t.height)
+            {
+                lines.push((t.x, y1, t.x, y2));
+            }
+            if t.x + t.width == m.x
+                && let Some((y1, y2)) = overlap(m.y, m.height, t.y, t.height)
+            {
+                lines.push((m.x, y1, m.x, y2));
+            }
+            if t.y == m.y + m.height
+                && let Some((x1, x2)) = overlap(m.x, m.width, t.x, t.width)
+            {
+                lines.push((x1, t.y, x2, t.y));
+            }
+            if t.y + t.height == m.y
+                && let Some((x1, x2)) = overlap(m.x, m.width, t.x, t.width)
+            {
+                lines.push((x1, m.y, x2, m.y));
+            }
+        }
+    }
+    lines.sort_unstable();
+    lines.dedup();
+    lines
+}
+
 #[cfg(test)]
 mod tests {
+    fn m(x: i32, y: i32, width: i32, height: i32) -> Monitor {
+        Monitor {
+            x,
+            y,
+            width,
+            height,
+        }
+    }
+
+    #[test]
+    fn barriers_go_where_a_placed_peer_touches() {
+        let laptop = [m(0, 0, 1280, 800)];
+        let desk = [m(0, 0, 1920, 1080)];
+        // The desk to the right, its top 100 px above the laptop's.
+        let right = barriers(&laptop, &[(&desk, [1280, -100])]);
+        assert_eq!(right, [(1280, 0, 1280, 799)]);
+        // To the left, lower down: only the shared stretch.
+        let left = barriers(&laptop, &[(&desk, [-1920, 500])]);
+        assert_eq!(left, [(0, 500, 0, 799)]);
+        // Above.
+        let above = barriers(&laptop, &[(&desk, [-300, -1080])]);
+        assert_eq!(above, [(0, 0, 1279, 0)]);
+        // Placed apart, touching nothing: no barrier.
+        assert!(barriers(&laptop, &[(&desk, [1400, 0])]).is_empty());
+    }
+
     /// #187's measurement, on a real Hyprland: how long the thread that
     /// injects the mouse waits per event at 1000 Hz, when the edge check
     /// runs on its own thread. `cargo test --release edge_watch_cost --
