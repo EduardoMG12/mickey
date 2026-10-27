@@ -43,6 +43,26 @@ Linux users are. Decided with the owner on 2026-10-27:
   through `ksni`) and `reis` for libei (pure Rust). Both justified in
   their PRs.
 
+### Phase 2: driving from GNOME or KDE
+
+Asked by the owner on 2026-10-27: every PC must be able to drive every
+other, GNOME, KDE and Windows alike.
+
+- **Reading the keyboard and mouse already works on any desktop** (evdev,
+  the `input` group). What a GNOME or KDE PC lacks is knowing when its
+  cursor is pushed against an edge that leads to a placed PC.
+- **The InputCapture portal's pointer barriers** say so: one barrier on
+  each edge of this PC's monitors that a placed peer touches. When the
+  cursor pushes into one, the portal reports where; Mickey releases the
+  capture at once, a few pixels inside, and switches the focus the way it
+  does today, through evdev. Mickey never reads input through libei in
+  this phase, so nothing about input changes.
+- **Only when a peer is placed beside this PC**: on GNOME 46 the
+  InputCapture dialog has no "remember", so it would come at every login;
+  with no edge to watch, it never comes.
+- **Coming back**: the target says where the cursor left it; the source
+  places its own cursor there with the RemoteDesktop portal (phase 1).
+
 ## Requirements
 
 - Every grab and every libei device is released on exit, panic and
@@ -100,4 +120,34 @@ Linux users are. Decided with the owner on 2026-10-27:
   token was not saved, so the portal would ask at every start); the
   folder is now made first (#357). The GNOME VM had it from earlier
   tests, which hid the bug.
+- **Phase 2's spike passed on GNOME 46** (InputCapture version 1): one zone
+  `(0, 0, 1280, 800)`, a barrier on its right edge `x = 1280` accepted, and
+  a virtual mouse pushing right activated it at `(1280.0, 288.0)`;
+  released at `(1278, 288)`. GNOME's "Capture Input" dialog ("Allow Remote
+  Input Capturing") has no "remember" in version 1, so it comes once per
+  session.
+- **Two VMs paired end to end (#360): GNOME drives KDE, both ways
+  through the edges.** Ubuntu GNOME and Fedora KDE on their own LAN,
+  paired with the new six-digit code (both screens showed the same code),
+  placed side by side. From GNOME, pushing right crossed into KDE after
+  65 steps of 20 px; 80 px back came home through KDE's left edge (so the
+  cursor entered KDE on its edge); two keys typed on GNOME's keyboard
+  arrived on KDE (288 bytes on its virtual device, "ab" in its terminal).
+  One-way latency between the VMs: p50 0.78 ms, p99 2.4 ms.
+- **KDE drives GNOME too, after two fixes (#359).** KDE froze the pointer
+  until Mickey shook hands on the capture's libei socket; and KDE's
+  activation names where the push would have gone, past the barrier
+  (x = 1319 or -20 on a 1280-wide screen), where GNOME names the pixel on
+  it. With both fixed, KDE crossed into GNOME through its left edge,
+  moved GNOME's cursor, typed on it, and came back. The Fedora live VM
+  needed 3.5 GB to answer its dialogs in time (3 GB lagged by minutes).
+- **After a refused pairing, `mickey connect` will not try again**: the
+  PC stays listed, without a key, as "already one of this PC's PCs".
+  Nothing is trusted, but the only way out is editing config.toml.
+- **At login Mickey can start before the desktop's portal** ("startup job
+  failed", seen on Fedora KDE): the portal is now tried again every 5 s,
+  and the source reads its monitors again while it has none (#357, #359).
+- **GNOME 46 asks "Capture Input" at every start of Mickey**, as expected
+  from the spike: the price of screen edges on GNOME until its portal
+  remembers.
 
