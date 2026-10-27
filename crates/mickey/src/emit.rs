@@ -89,6 +89,11 @@ pub fn place(x: i32, y: i32) -> io::Result<()> {
 #[cfg(target_os = "linux")]
 pub fn place(x: i32, y: i32) -> io::Result<()> {
     use crate::monitors::hyprland;
+    if !crate::monitors::on_hyprland() {
+        return crate::portal::get()
+            .ok_or_else(|| io::Error::other("no RemoteDesktop portal to place the cursor"))?
+            .place(x, y);
+    }
     // A Lua config (Hyprland 0.55+) takes Lua; the older config language
     // takes the plain dispatcher. Try the first, then the second.
     let lua = format!("dispatch hl.dsp.cursor.move({{x={x},y={y}}})");
@@ -110,10 +115,14 @@ pub fn cursor() -> Option<(i32, i32)> {
     Some((point.x, point.y))
 }
 
-/// Where this PC's cursor is, if the compositor says (Hyprland only).
+/// Where this PC's cursor is: Hyprland says; elsewhere, where Mickey put
+/// it through the portal (PRD 0004).
 #[cfg(target_os = "linux")]
 pub fn cursor() -> Option<(i32, i32)> {
-    crate::monitors::hyprland::cursor().ok()
+    if crate::monitors::on_hyprland() {
+        return crate::monitors::hyprland::cursor().ok();
+    }
+    crate::portal::get()?.cursor()
 }
 
 #[cfg(target_os = "linux")]
@@ -161,6 +170,13 @@ impl Emitter {
                 // Only the axes that moved: a zero is an event for nothing.
                 if dx == 0 && dy == 0 {
                     return Ok(());
+                }
+                // Outside Hyprland: absolute moves through the portal, so
+                // Mickey knows where the cursor is (PRD 0004).
+                if !crate::monitors::on_hyprland()
+                    && let Some(portal) = crate::portal::get()
+                {
+                    return portal.move_by(dx, dy);
                 }
                 if dx != 0 {
                     self.device.emit(EV_REL, REL_X, dx);

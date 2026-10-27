@@ -4,7 +4,7 @@
 
 use crate::monitors::Monitor;
 
-fn on_screen(monitors: &[Monitor], (x, y): (i32, i32)) -> bool {
+pub fn on_screen(monitors: &[Monitor], (x, y): (i32, i32)) -> bool {
     monitors
         .iter()
         .any(|m| (m.x..m.x + m.width).contains(&x) && (m.y..m.y + m.height).contains(&y))
