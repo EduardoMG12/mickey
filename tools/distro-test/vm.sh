@@ -70,7 +70,7 @@ fedora-start)
 esac
 
 # shellcheck disable=SC2086 # $boot is a list of arguments
-exec qemu-system-x86_64 -enable-kvm -machine q35 -cpu host -m 3072 -smp 4 $boot "$@" \
+exec qemu-system-x86_64 -enable-kvm -machine q35 -cpu host -m "${MICKEY_VM_MEMORY:-3072}" -smp 4 $boot "$@" \
     -netdev "user,id=n,hostfwd=tcp:127.0.0.1:222$n-:22" -device virtio-net-pci,netdev=n \
     -netdev socket,id=lan,mcast=230.0.0.1:12345 -device "virtio-net-pci,netdev=lan,mac=52:54:00:12:34:1$n" \
     -device VGA,vgamem_mb=64 -device qemu-xhci -device usb-tablet \
