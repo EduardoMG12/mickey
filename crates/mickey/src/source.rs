@@ -311,14 +311,13 @@ fn audio_target(
     if audio.mode == config::SoundMode::Here {
         return None;
     }
-    let listener = audio.listener.as_deref()?;
-    if listener == crate::trust::to_hex(me) {
+    // Compared as bytes: this runs on every input event, and writing two
+    // keys as hex text cost 66 allocations and 7 us each time.
+    let listener = crate::trust::from_hex(audio.listener.as_deref()?)?;
+    if listener == *me {
         return None;
     }
-    let index = peers.iter().position(|peer| {
-        peer.key
-            .is_some_and(|key| crate::trust::to_hex(&key) == listener)
-    })?;
+    let index = peers.iter().position(|peer| peer.key == Some(listener))?;
     let address = peers[index].address;
     online[index].then(|| {
         (
@@ -1634,6 +1633,51 @@ fn report_latency(peer: &Peer) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn audio_peers() -> (config::Audio, [u8; 32], Vec<Peer>) {
+        let peer = |n: u8| Peer {
+            name: format!("PC {n}"),
+            address: "192.0.2.1:4242".parse().unwrap(),
+            link: None,
+            heard: Instant::now(),
+            key: Some([n; 32]),
+            latency: Latency::new(),
+            monitors: Vec::new(),
+            new_key: false,
+            version: None,
+        };
+        let audio = config::Audio {
+            listener: Some(trust::to_hex(&[2; 32])),
+            ..config::Audio::default()
+        };
+        (audio, [9; 32], vec![peer(1), peer(2)])
+    }
+
+    #[test]
+    fn the_sound_goes_to_the_listener_when_it_is_online() {
+        let (audio, me, peers) = audio_peers();
+        let to = audio_target(&audio, &me, &peers, &[true, true]);
+        assert_eq!(to.map(|(index, _)| index), Some(1));
+        assert_eq!(audio_target(&audio, &me, &peers, &[true, false]), None);
+        // This PC listens: nothing to send.
+        assert_eq!(audio_target(&audio, &[2; 32], &peers, &[true, true]), None);
+    }
+
+    /// #189-style measurement: audio_target runs on every input event.
+    /// `cargo test --release audio_target_cost -- --ignored --nocapture`.
+    #[test]
+    #[ignore = "a measurement"]
+    fn audio_target_cost() {
+        let (audio, me, peers) = audio_peers();
+        let started = Instant::now();
+        for _ in 0..100_000 {
+            std::hint::black_box(audio_target(&audio, &me, &peers, &[true, true]));
+        }
+        println!(
+            "audio_target: {:.0} ns per call",
+            started.elapsed().as_nanos() as f64 / 100_000.0
+        );
+    }
 
     fn run(order: Order, switcher: &mut Switcher, online: &[bool]) -> (String, Vec<Action>) {
         let names = ["Desktop".to_string(), "Windows".to_string()];
