@@ -143,17 +143,20 @@ fn obey(
 /// The peer the cursor is pushing onto, and where on its desktop. Never
 /// while a mouse button is down: dragging a window to the edge must not
 /// throw it to another PC.
+/// Whether a placed peer is online: only then is the edge worth checking.
+fn edges_matter(positions: &[Option<[i32; 2]>], peers: &[Peer]) -> bool {
+    (0..peers.len()).any(|index| positions[index].is_some() && peers[index].link.is_some())
+}
+
+/// The peer, and its point, that the cursor pushed onto at `off` (a pixel
+/// just off this desktop, from `EdgeWatch`), unless a button is held.
 fn edge_crossed(
     positions: &[Option<[i32; 2]>],
     peers: &[Peer],
-    this_pc: &[Monitor],
-    delta: (i32, i32),
+    off: (i32, i32),
     input: &Input,
 ) -> Option<(usize, (i32, i32))> {
     let placed = |index: usize| positions[index].filter(|_| peers[index].link.is_some());
-    // Without a placed peer online, the cursor is not even asked for.
-    (0..peers.len()).find(|&index| placed(index).is_some())?;
-    let off = edges::beyond(this_pc, input.cursor()?, delta)?;
     let (index, there) = (0..peers.len()).find_map(|index| {
         let there = edges::onto(&peers[index].monitors, placed(index)?, off)?;
         Some((index, there))
@@ -766,6 +769,9 @@ pub fn run(
         eprintln!("mickey: {err}; `mickey peers` will not show this PC's monitors");
         Vec::new()
     });
+    // Where the cursor is, asked on a thread of its own: on Hyprland the
+    // answer took 2.7 ms at p99, and this loop must not wait for it (#187).
+    let edge = edges::EdgeWatch::start(this_pc.clone(), crate::input::cursor_now);
     let mut online: Vec<bool> = Vec::with_capacity(peers.len());
     // PCs that were off when the owner saved a layout: told when they
     // connect (#288).
@@ -1338,8 +1344,16 @@ pub fn run(
         {
             eprintln!("mickey: cannot place the cursor: {err}");
         }
-        let crossed =
-            pushed.and_then(|delta| edge_crossed(&positions, &peers, &this_pc, delta, &input));
+        if let Some(delta) = pushed
+            && edges_matter(&positions, &peers)
+        {
+            edge.push(delta);
+        }
+        // An answer about earlier motion: the cursor is still being pushed.
+        let crossed = edge
+            .answer()
+            .flatten()
+            .and_then(|off| edge_crossed(&positions, &peers, off, &input));
         if let Some((index, (x, y))) = crossed {
             switcher.go_to(Some(index), &online);
             if let Some(link) = &mut peers[index].link
