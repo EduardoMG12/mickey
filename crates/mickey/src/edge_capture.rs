@@ -58,6 +58,19 @@ impl EdgeCapture {
 /// desktop to put it back on, and the one just off it that it pushed onto.
 fn sides(here: &[Monitor], (x, y): (i32, i32)) -> Option<((i32, i32), (i32, i32))> {
     let on = |point| edges::on_screen(here, point);
+    if !on((x, y)) {
+        // KDE names where the push would have gone, past the barrier (seen:
+        // x = 1319 on a 1280-wide screen); GNOME names the pixel on it. Both
+        // become the pixel just off the nearest edge.
+        let (ex, ey) = nearest(here, (x, y))?;
+        let (dx, dy) = if (x - ex).abs() >= (y - ey).abs() {
+            ((x - ex).signum(), 0)
+        } else {
+            (0, (y - ey).signum())
+        };
+        let off = (ex + dx, ey + dy);
+        return Some(((off.0 - 2 * dx, off.1 - 2 * dy), off));
+    }
     [(1, 0), (-1, 0), (0, 1), (0, -1)]
         .into_iter()
         .find_map(|(dx, dy)| {
@@ -67,6 +80,18 @@ fn sides(here: &[Monitor], (x, y): (i32, i32)) -> Option<((i32, i32), (i32, i32)
                 ((x - 2 * dx, y - 2 * dy), off)
             })
         })
+}
+
+/// The pixel on this desktop closest to a point off it.
+fn nearest(here: &[Monitor], (x, y): (i32, i32)) -> Option<(i32, i32)> {
+    here.iter()
+        .map(|m| {
+            (
+                x.clamp(m.x, m.x + m.width - 1),
+                y.clamp(m.y, m.y + m.height - 1),
+            )
+        })
+        .min_by_key(|&(cx, cy)| (cx - x).pow(2) + (cy - y).pow(2))
 }
 
 async fn watch(
@@ -219,6 +244,13 @@ mod tests {
         assert_eq!(sides(&laptop, (0, 288)), Some(((2, 288), (-1, 288))));
         // Top.
         assert_eq!(sides(&laptop, (500, 0)), Some(((500, 2), (500, -1))));
+        // KDE: where the push would have gone, past the right edge.
+        assert_eq!(
+            sides(&laptop, (1319, 428)),
+            Some(((1278, 428), (1280, 428)))
+        );
+        // KDE, past the left edge.
+        assert_eq!(sides(&laptop, (-39, 428)), Some(((1, 428), (-1, 428))));
         // In the middle of the screen: no edge.
         assert_eq!(sides(&laptop, (500, 400)), None);
     }
