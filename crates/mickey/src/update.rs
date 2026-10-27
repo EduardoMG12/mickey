@@ -216,6 +216,13 @@ pub fn download(version: &str) -> Result<std::path::PathBuf, String> {
     )?;
     verified(&sums, &signature, &key, &version, &name, &file)?;
     let dir = updates_dir()?.join(&version);
+    // A fresh folder: one made earlier could hold anything next to the
+    // installer (on Windows, run by bare name, it could stand in for a
+    // system tool).
+    if dir.exists() {
+        std::fs::remove_dir_all(&dir)
+            .map_err(|err| format!("cannot clear {}: {err}", dir.display()))?;
+    }
     std::fs::create_dir_all(&dir).map_err(|err| format!("cannot make {}: {err}", dir.display()))?;
     let path = dir.join(&name);
     std::fs::write(&path, &file)
@@ -270,6 +277,13 @@ fn unpack(tarball: &std::path::Path) -> Result<std::path::PathBuf, String> {
 /// person to read.
 pub fn install_latest() -> Result<String, String> {
     let latest = latest()?;
+    // Never back to an older Mickey than the one running this.
+    if version::is_newer(version::THIS, &latest) {
+        return Err(format!(
+            "the latest release, {latest}, is older than this Mickey ({})",
+            version::THIS
+        ));
+    }
     let path = download(&latest)?;
     #[cfg(target_os = "linux")]
     {
