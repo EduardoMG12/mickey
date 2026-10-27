@@ -9,7 +9,18 @@ pub fn this_pc() -> Result<Vec<Monitor>, String> {
     return crate::platform::windows::monitors()
         .map_err(|err| format!("cannot list monitors: {err}"));
     #[cfg(target_os = "linux")]
-    return hyprland::monitors();
+    {
+        if std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_some() {
+            return hyprland::monitors();
+        }
+        // Elsewhere (GNOME, KDE): the RemoteDesktop portal (PRD 0004).
+        let monitors = crate::portal::get().map(crate::portal::Portal::monitors);
+        monitors
+            .filter(|monitors| !monitors.is_empty())
+            .ok_or_else(|| {
+                "no Hyprland, and the RemoteDesktop portal named no monitors".to_string()
+            })
+    }
 }
 
 #[cfg(target_os = "linux")]

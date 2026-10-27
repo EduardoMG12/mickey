@@ -32,6 +32,8 @@ mod monitors;
 #[cfg_attr(not(windows), allow(dead_code))]
 mod keymap;
 mod platform;
+#[cfg(target_os = "linux")]
+mod portal;
 mod protocol;
 mod received;
 mod record;
@@ -373,6 +375,14 @@ fn run_from_config() -> Result<(), String> {
     // ended while sending it (PRD 0012); on Linux, on a stop signal too.
     if let Err(err) = speakers::clean_up() {
         eprintln!("mickey: {err}");
+    }
+    // Outside Hyprland, the RemoteDesktop portal's session (PRD 0004),
+    // opened now: its one question comes at login, not mid-switch.
+    #[cfg(target_os = "linux")]
+    if std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_none() {
+        crate::threads::spawn("portal start", || {
+            let _ = portal::get();
+        });
     }
     #[cfg(target_os = "linux")]
     platform::signals::on_stop(|| {
