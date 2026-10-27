@@ -308,6 +308,13 @@ fn main() -> ExitCode {
 
 /// `mickey-ui settings`: the settings window (`mickey settings` starts it).
 fn settings_window() -> ExitCode {
+    // Opened after "Quit Mickey" in the tray: the PCs are not connected
+    // until Mickey runs again, so it is started, as logging in does.
+    if settings::ask_mickey(&["status"]).is_err()
+        && let Err(err) = settings::ask_mickey(&["start"])
+    {
+        eprintln!("mickey-ui: cannot start Mickey: {err}");
+    }
     let options = eframe::NativeOptions {
         viewport: crate::theme::viewport()
             .with_title("Mickey settings")

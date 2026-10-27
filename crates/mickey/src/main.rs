@@ -103,6 +103,7 @@ fn run(command: Command) -> Result<(), String> {
             println!("{}", if autostart::is_on() { "on" } else { "off" });
             Ok(())
         }
+        Command::Start => autostart::start(),
         Command::UpdateStatus => {
             let waiting = control::request("update")?
                 .next()

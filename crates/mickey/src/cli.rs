@@ -26,6 +26,7 @@ usage:
   mickey peers                       list the PCs, whether they are online, and their monitors
   mickey discover [--lines]          list the PCs running Mickey on this network
   mickey autostart [on|off|status]   start Mickey when this PC starts
+  mickey start                       start Mickey now, as logging in does
   mickey connect <ip:port> <name>    add a PC found on the network and pair with it
   mickey history [--lines]           list the recent copies on this PC (newest first);
                                      --lines prints them tab-separated, for the window
@@ -71,6 +72,8 @@ pub enum Command {
     IdKey,
     /// Start with the system: `Some(on)` sets it, `None` asks.
     Autostart(Option<bool>),
+    /// `mickey start`: start the service now, as logging in does.
+    Start,
     /// Ask GitHub whether a newer Mickey is out (PRD 0013).
     UpdateCheck,
     /// The newer Mickey the running one knows of (the settings ask).
@@ -115,6 +118,7 @@ pub fn parse(args: &[String]) -> Result<Command, String> {
         [command, word] if command == "update" && word == "download" => Ok(Command::UpdateDownload),
         [command, word] if command == "update" && word == "apply" => Ok(Command::UpdateApply),
         [command] if command == "mcp" => Ok(Command::Mcp),
+        [command] if command == "start" => Ok(Command::Start),
         [command] if command == "autostart" => Ok(Command::Autostart(None)),
         [command, word] if command == "autostart" => match word.as_str() {
             "on" => Ok(Command::Autostart(Some(true))),
@@ -200,6 +204,7 @@ mod tests {
         assert_eq!(parse(&args("--version")), Ok(Command::Version));
         assert_eq!(parse(&args("id")), Ok(Command::Id));
         assert_eq!(parse(&args("run")), Ok(Command::Run));
+        assert_eq!(parse(&args("start")), Ok(Command::Start));
         assert_eq!(parse(&args("home")), Ok(Command::Order("home".into())));
         assert_eq!(
             parse(&["go".into(), "Windows A".into()]),
