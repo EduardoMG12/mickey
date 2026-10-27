@@ -224,6 +224,21 @@ static ASKING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::ne
 static REFUSED: std::sync::Mutex<Vec<(std::net::IpAddr, std::time::Instant)>> =
     std::sync::Mutex::new(Vec::new());
 
+/// How long until `ip`, refused a moment ago, may ask to pair again; `None`
+/// when it may now. `mickey connect` says so instead of a code that would
+/// never show.
+pub fn refused_for(ip: std::net::IpAddr) -> Option<std::time::Duration> {
+    let now = std::time::Instant::now();
+    REFUSED
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .iter()
+        .filter(|(known, _)| *known == ip)
+        .map(|(_, at)| REFUSED_WAIT.saturating_sub(now.duration_since(*at)))
+        .max()
+        .filter(|left| !left.is_zero())
+}
+
 /// Whether `ip` was refused less than `REFUSED_WAIT` before `now`; older
 /// refusals are forgotten on the way.
 fn refused_recently(

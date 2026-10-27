@@ -1252,7 +1252,20 @@ pub fn run(
         if let Some((address, name, reply)) = connecting {
             // The owner is connecting a PC now: it may answer back.
             trust::open_pairing();
-            let answer = if peers.iter().any(|peer| peer.address == address) {
+            let known = peers.iter().position(|peer| peer.address == address);
+            let paired = known.is_some_and(|i| peers[i].key.is_some());
+            let answer = if let (false, Some(left)) = (paired, trust::refused_for(address.ip())) {
+                format!(
+                    "error: {address} was refused a moment ago; try again in {} s",
+                    left.as_secs() + 1
+                )
+            } else if let Some(index) = known.filter(|&i| peers[i].key.is_none()) {
+                // Listed but never paired (its code was refused, or it
+                // never answered): pair again, under the name it has.
+                let name = peers[index].name.clone();
+                connect_first(index, name.clone(), address, &shared, &back_sender);
+                format!("ok: pairing with {name}: check that both PCs show the same code")
+            } else if known.is_some() {
                 format!("error: {address} is already one of this PC's PCs")
             } else {
                 match add_peer(&mut peers, &mut positions, &name, address, None) {
@@ -1559,7 +1572,9 @@ fn reconnect(index: usize, to: SocketAddr, shared: &Arc<Shared>, back: &Sender<(
                 .unwrap_or_else(|p| p.into_inner())
                 .is_trusted(link.peer_key());
             if !trusted {
-                println!("mickey: {to} has a key this PC never paired with; restart to pair");
+                println!(
+                    "mickey: {to} has a key this PC never paired with; `mickey connect {to} <name>` pairs again"
+                );
                 return;
             }
             if transport::hello(&mut link).is_ok() {
