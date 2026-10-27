@@ -22,8 +22,14 @@ use reis::{
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-/// The session, once started; `None` when this desktop has no portal for it.
-static PORTAL: OnceLock<Option<Portal>> = OnceLock::new();
+/// The session, once started.
+static PORTAL: OnceLock<Portal> = OnceLock::new();
+
+/// When the last try to start it failed: the portal may not be up yet at
+/// login (seen on Fedora KDE: Mickey started first), so a later call tries
+/// again, at most every `TRY_AGAIN`.
+static FAILED_AT: Mutex<Option<Instant>> = Mutex::new(None);
+const TRY_AGAIN: Duration = Duration::from_secs(5);
 
 /// How long to wait, at start, for libei to name the monitors.
 const FIRST_MONITORS: Duration = Duration::from_secs(5);
@@ -38,16 +44,28 @@ struct Shared {
     monitors: Vec<Monitor>,
 }
 
-/// The portal's session, started on first use; `None`, logged once, when
-/// it cannot be (no portal, an older desktop, the person said no).
+/// The portal's session, started on first use; `None`, logged, when it
+/// cannot be yet (no portal running, an older desktop, the person said no).
+/// Only one caller starts it; the others get `None` meanwhile.
 pub fn get() -> Option<&'static Portal> {
-    PORTAL
-        .get_or_init(|| {
-            Portal::start()
-                .inspect_err(|err| eprintln!("mickey: no RemoteDesktop portal: {err}"))
-                .ok()
-        })
-        .as_ref()
+    if let Some(portal) = PORTAL.get() {
+        return Some(portal);
+    }
+    let mut failed_at = FAILED_AT.try_lock().ok()?;
+    if failed_at.is_some_and(|at| at.elapsed() < TRY_AGAIN) {
+        return None;
+    }
+    match Portal::start() {
+        Ok(portal) => {
+            *failed_at = None;
+            Some(PORTAL.get_or_init(|| portal))
+        }
+        Err(err) => {
+            eprintln!("mickey: no RemoteDesktop portal: {err}");
+            *failed_at = Some(Instant::now());
+            None
+        }
+    }
 }
 
 impl Portal {
