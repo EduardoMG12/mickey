@@ -90,4 +90,14 @@ Linux users are. Decided with the owner on 2026-10-27:
   - The crates built as planned: `ashpd` 0.13 (features `remote_desktop`
     and `screencast`, which the former needs) and `reis` 0.7 with tokio;
     the binary needs glibc 2.39 at most.
+- **KDE Plasma works on the same backend, unchanged** (#355, Fedora 44 KDE
+  live VM: Plasma 6.6, xdg-desktop-portal 1.21.1, xdg-desktop-portal-kde
+  6.6.4). Its dialog reads "An application is asking for special
+  privileges: Control input devices", with "Allow restoring on future
+  sessions" ticked; the edge test passed (cursor to (1279, 100) after a
+  5000 px push) and, the token kept, passed again with no dialog.
+- **A fresh install has no data folder yet**: the KDE VM showed it (the
+  token was not saved, so the portal would ask at every start); the
+  folder is now made first (#357). The GNOME VM had it from earlier
+  tests, which hid the bug.
 
