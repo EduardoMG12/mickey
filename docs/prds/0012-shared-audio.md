@@ -141,9 +141,11 @@ speakers stay silent the whole time.
   play-and-capture round trip), Wi-Fi ~8 ms average one way (ping 16 ms
   average, 69 ms worst of 50), the jitter buffer 15 ms (once 20), playback
   on Linux ~30 ms (half of the VM's 65 ms round trip): about **65 ms** in
-  all on Wi-Fi. The cable budget (p99 < 40 ms) is still to measure (#272,
-  with #191); Linux playback (20 ms queued, plus PipeWire's quantum) is
-  the first thing to trim.
+  all on Wi-Fi. The cable budget (p99 < 40 ms) was not measured: the
+  laptop had no cable, and the owner judged 65 ms on Wi-Fi good enough
+  (2026-10-27, closing #272). Linux playback (20 ms queued, plus
+  PipeWire's quantum) is the first thing to trim if it ever needs to be
+  faster.
 - **Two bugs the run found, fixed before merging.** Each Mickey shares who
   listens when it starts, so a PC restarted with an old config.toml undid
   a newer choice: the shared settings carry `since` and only newer ones

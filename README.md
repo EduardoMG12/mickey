@@ -219,6 +219,10 @@ Mickey's log says what it is doing (never which keys you press):
 
 ## Known limits
 
+- **Measured on Wi-Fi only.** Between the owner's Windows PC and Arch
+  laptop over Wi-Fi: keyboard and mouse p50 2.1 ms, p99 22.6 ms one way;
+  sound about 65 ms. The budgets for a cable (input p99 under 2 ms, sound
+  p99 under 40 ms) have not been checked: no cable was at hand.
 - **Screen edges only on Windows and Hyprland.** Elsewhere, use the hotkeys
   and the switcher; native GNOME and KDE support is planned (#178).
 - **The switcher on GNOME (Wayland)** opens without a title bar, but where
