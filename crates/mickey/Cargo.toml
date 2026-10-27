@@ -45,6 +45,13 @@ wasapi = "0.19"
 windows = { version = "0.61", features = ["Win32_Media_Audio", "Win32_Media_Audio_Endpoints", "Win32_System_Com"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
+# Desktops other than Hyprland (PRD 0004): the RemoteDesktop portal
+# (ashpd) and libei (reis, pure Rust). Both over async-io, already in the
+# tree through ksni, so no tokio; ashpd's zbus 5 is ksni's too.
+ashpd = { version = "0.13", default-features = false, features = ["async-io", "remote_desktop", "screencast"] }
+reis = { version = "0.7", features = ["async-io"] }
+async-io = "2"
+futures-util = { version = "0.3", default-features = false }
 ksni = { version = "0.3", default-features = false, features = ["blocking", "async-io"] }
 # Hearing every copy on Wayland without reading the clipboard over and
 # over (PRD 0011): the data-control protocol's selection events. Both are
