@@ -100,12 +100,18 @@ async fn watch(
         }
         Err(err) => return Err(text(err)),
     };
-    // The portal wants an EIS connection before it enables; nothing is read
-    // from it, but it must stay open.
-    let _eis = capture
+    // The portal wants an EIS connection before it enables. KDE also waits
+    // for libei's handshake on it before it lets go of a captured pointer
+    // (seen in the Fedora KDE VM: the pointer froze), so Mickey shakes
+    // hands as a receiver and drops whatever comes: its input still comes
+    // through evdev.
+    let eis = capture
         .connect_to_eis(&session, Default::default())
         .await
         .map_err(text)?;
+    crate::threads::spawn("edge capture eis", move || {
+        async_io::block_on(drain(eis));
+    });
     let mut activated = capture.receive_activated().await.map_err(text)?;
     let mut set: Option<Vec<Line>> = None;
     loop {
@@ -151,6 +157,8 @@ async fn watch(
             .cursor_position()
             .map(|(x, y)| (x.round() as i32, y.round() as i32));
         let (inside, off) = at.and_then(|at| sides(here, at)).unzip();
+        // Where the cursor is, never what is typed (hard rule 7).
+        eprintln!("mickey: the cursor pushed against an edge at {at:?}");
         // Back to the person at once, just inside the edge.
         let back = inside.map(|(x, y)| (f64::from(x), f64::from(y)));
         let release = ReleaseOptions::default()
@@ -164,6 +172,29 @@ async fn watch(
         if let Some(off) = off {
             let _ = hit.send(off);
         }
+    }
+}
+
+/// Speaks libei on the capture's socket, as a receiver, and drops every
+/// event, for as long as the compositor keeps it open.
+async fn drain(eis: std::os::fd::OwnedFd) {
+    let stream = std::os::unix::net::UnixStream::from(eis);
+    let Ok(context) = reis::ei::Context::new(stream) else {
+        return;
+    };
+    let Ok((_connection, mut events)) = context
+        .handshake_async_io("Mickey edges", reis::ei::handshake::ContextType::Receiver)
+        .await
+    else {
+        return;
+    };
+    while let Some(Ok(event)) = events.next().await {
+        if let reis::event::EiEvent::SeatAdded(added) = event {
+            added.seat.bind_capabilities(
+                reis::event::DeviceCapability::Pointer | reis::event::DeviceCapability::Keyboard,
+            );
+        }
+        let _ = context.flush();
     }
 }
 
