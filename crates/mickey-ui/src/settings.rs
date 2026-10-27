@@ -573,7 +573,7 @@ fn empty() -> Config {
 
 /// Runs `mickey <argument>` from next to this program: its output, or
 /// what it said went wrong.
-fn ask_mickey(arguments: &[&str]) -> Result<String, String> {
+pub fn ask_mickey(arguments: &[&str]) -> Result<String, String> {
     std::env::current_exe()
         .map(|exe| exe.with_file_name(format!("mickey{}", std::env::consts::EXE_SUFFIX)))
         .and_then(|mickey| {

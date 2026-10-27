@@ -16,6 +16,12 @@ pub fn is_on() -> bool {
     imp::is_on()
 }
 
+/// Starts Mickey now, as logging in does (`mickey start`): after "Quit
+/// Mickey", opening the settings brings the PCs back.
+pub fn start() -> Result<(), String> {
+    imp::start()
+}
+
 fn run(program: impl AsRef<std::ffi::OsStr>, args: &[&str]) -> Result<(), String> {
     let program = program.as_ref();
     let shown = std::path::Path::new(program).display().to_string();
@@ -91,6 +97,10 @@ mod imp {
     pub fn is_on() -> bool {
         run("systemctl", &["--user", "is-enabled", "--quiet", UNIT]).is_ok()
     }
+
+    pub fn start() -> Result<(), String> {
+        run("systemctl", &["--user", "start", UNIT])
+    }
 }
 
 /// A Windows tool by its full path, never one dropped next to
@@ -154,6 +164,10 @@ mod imp {
 
     pub fn is_on() -> bool {
         run(system("schtasks.exe"), &["/query", "/tn", TASK]).is_ok()
+    }
+
+    pub fn start() -> Result<(), String> {
+        run(system("schtasks.exe"), &["/run", "/tn", TASK])
     }
 
     /// At this user's logon (the account creating it), hidden, through
