@@ -47,15 +47,29 @@ After them each side knows the other's public key, proven by the
 handshake, and both hold the same handshake hash. The whole handshake
 must finish within 5 s, however its bytes trickle in, or the peer is
 dropped; each port takes at most 32 connections at once, paired or not
-(`main.rs`), so nobody can use up its threads. The handshake carries no payload: who the
-peer is comes only from its key, which `trust.rs` looks up in
+(`main.rs`), so nobody can use up its threads. The handshake carries no payload, and a
+peer that sends one is refused: who the peer is comes only from its key, which `trust.rs` looks up in
 `trusted_peers` (a peer is trusted by its key, never by its address).
 
-**The pairing code** is six digits from the handshake hash: its first four
-bytes as a `u32`, modulo 1 000 000, shown as `042 917` (`code_from`). The
-hash covers both static keys and both fresh ephemeral keys, so a machine in
-the middle, which runs two handshakes with its own keys, makes the two PCs
-show different codes. Every connection gets a new code.
+**The pairing code** is six digits, agreed right after the handshake over
+the new session (`agree_code`), so a machine in the middle cannot choose
+it:
+
+```text
+initiator -> BLAKE2s(n_i)        32 random bytes, committed to, still secret
+initiator <- n_r                 the responder's 32 random bytes
+initiator -> n_i                 checked against the commitment
+code = BLAKE2s(handshake hash || n_i || n_r)
+```
+
+The code is that hash's first four bytes as a `u32`, modulo 1 000 000,
+shown as `042 917` (`code_from`). A machine in the middle runs two
+handshakes with its own keys. From the handshake hash alone it could try a
+million variations of one of them, in about a second, until both PCs
+showed the same digits. With the commitment, each side's last value comes
+from an honest PC that can no longer change its own, so the codes match by
+chance: once in a million attempts. Every connection gets a new code. A
+Mickey from before this step is refused with "update both".
 
 ### Framing
 

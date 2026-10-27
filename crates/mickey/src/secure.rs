@@ -204,9 +204,15 @@ impl Link {
                     },
                     &mut message,
                 )?;
-                handshake
+                let carried = handshake
                     .read_message(&message[..len], &mut payload)
                     .map_err(noise_error)?;
+                // Mickey sends nothing in the handshake's messages: what
+                // a peer puts there could only be a lever on the pairing
+                // code (it changes the handshake hash).
+                if carried != 0 {
+                    return Err(invalid("the peer sent data inside the handshake".into()));
+                }
             }
         }
         stream.set_read_timeout(None)?;
@@ -214,8 +220,11 @@ impl Link {
             .get_remote_static()
             .and_then(|key| <[u8; 32]>::try_from(key).ok())
             .ok_or_else(|| invalid("peer sent no identity".into()))?;
-        let code = code_from(handshake.get_handshake_hash());
-        let noise = handshake.into_transport_mode().map_err(noise_error)?;
+        let hash = handshake.get_handshake_hash().to_vec();
+        let mut noise = handshake.into_transport_mode().map_err(noise_error)?;
+        let initiator = writes.first() == Some(&true);
+        let code = agree_code(&mut stream, &mut noise, initiator, &hash, until)?;
+        stream.set_read_timeout(None)?;
         Ok(Link {
             stream,
             noise: Arc::new(Mutex::new(noise)),
@@ -233,6 +242,109 @@ impl Link {
 fn code_from(hash: &[u8]) -> u32 {
     let first = hash.first_chunk::<4>().copied().unwrap_or_default();
     u32::from_be_bytes(first) % 1_000_000
+}
+
+/// The six-digit code both screens show, agreed so that a machine in the
+/// middle cannot choose it (found in the security review after 0.3.0).
+///
+/// From the handshake hash alone, a machine in the middle runs two
+/// handshakes, one with each PC, and can try a million variations of its
+/// side of one of them, in about a second, until both hashes give the
+/// same six digits. So each side adds 32 random bytes, and the side that
+/// connected commits to its own before it sees the other's:
+///
+/// ```text
+/// initiator -> BLAKE2s(n_i)     a commitment: n_i is fixed, still secret
+/// initiator <- n_r
+/// initiator -> n_i              checked against the commitment
+/// code = BLAKE2s(handshake hash, n_i, n_r)
+/// ```
+///
+/// Whatever a machine in the middle does, the last value on each side is
+/// chosen by an honest PC after it can no longer change its own, so the
+/// two codes match by chance: one in a million per attempt. The messages
+/// travel encrypted, over the session just made.
+fn agree_code(
+    stream: &mut TcpStream,
+    noise: &mut TransportState,
+    initiator: bool,
+    hash: &[u8],
+    until: Instant,
+) -> io::Result<u32> {
+    use snow::resolvers::{CryptoResolver, DefaultResolver};
+    let resolver = DefaultResolver;
+    let blake2s = |parts: &[&[u8]]| -> io::Result<[u8; 32]> {
+        let mut hasher = resolver
+            .resolve_hash(&snow::params::HashChoice::Blake2s)
+            .ok_or_else(|| invalid("BLAKE2s is missing".into()))?;
+        for part in parts {
+            hasher.input(part);
+        }
+        let mut out = [0u8; 32];
+        hasher.result(&mut out);
+        Ok(out)
+    };
+    let mut mine = [0u8; 32];
+    resolver
+        .resolve_rng()
+        .ok_or_else(|| invalid("no random source".into()))?
+        .try_fill_bytes(&mut mine)
+        .map_err(noise_error)?;
+    let theirs = if initiator {
+        send_32(stream, noise, &blake2s(&[&mine])?)?;
+        let theirs = receive_32(stream, noise, until)?;
+        send_32(stream, noise, &mine)?;
+        theirs
+    } else {
+        let commitment = receive_32(stream, noise, until)?;
+        send_32(stream, noise, &mine)?;
+        let theirs = receive_32(stream, noise, until)?;
+        if blake2s(&[&theirs])? != commitment {
+            return Err(invalid(
+                "the pairing code's commitment did not match".into(),
+            ));
+        }
+        theirs
+    };
+    let (first, second) = if initiator {
+        (&mine, &theirs)
+    } else {
+        (&theirs, &mine)
+    };
+    Ok(code_from(&blake2s(&[hash, first, second])?))
+}
+
+/// Sends one 32-byte value over the new session.
+fn send_32(stream: &mut TcpStream, noise: &mut TransportState, bytes: &[u8; 32]) -> io::Result<()> {
+    let mut sealed = [0u8; 32 + TAG_LEN];
+    let len = noise
+        .write_message(bytes, &mut sealed)
+        .map_err(noise_error)?;
+    write_noise(stream, &sealed[..len])
+}
+
+/// One 32-byte value the peer sent over the new session, before `until`.
+/// Anything else is a Mickey from before the pairing commitment.
+fn receive_32(
+    stream: &mut TcpStream,
+    noise: &mut TransportState,
+    until: Instant,
+) -> io::Result<[u8; 32]> {
+    let mut sealed = [0u8; MAX_NOISE_MESSAGE];
+    let len = read_noise(
+        &mut Before {
+            stream: &*stream,
+            until,
+        },
+        &mut sealed,
+    )?;
+    let mut plain = [0u8; MAX_NOISE_MESSAGE];
+    let got = noise
+        .read_message(&sealed[..len], &mut plain)
+        .map_err(noise_error)?;
+    plain[..got]
+        .try_into()
+        .map_err(|_| invalid("the other PC runs an older Mickey: update both".into()))
 }
 
 fn builder(identity: &Identity) -> io::Result<snow::Builder<'_>> {
@@ -459,7 +571,9 @@ mod tests {
     fn a_changed_byte_closes_the_link() {
         let (addr, handle) = target(Identity::generate().unwrap());
         let flip = |index, mut frame: Vec<u8>| {
-            if index == 3 {
+            // 0, 1: the handshake; 2, 3: the code's commitment and
+            // reveal; 4 on: messages. The second message is changed.
+            if index == 5 {
                 frame[0] ^= 1;
             }
             vec![frame]
@@ -479,10 +593,35 @@ mod tests {
     }
 
     #[test]
+    fn a_changed_reveal_is_refused() {
+        // The initiator's reveal (frame 3) arrives changed: the PC that
+        // listens refuses the link before any message or code.
+        let (listener, addr) = listener();
+        let responder = thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            Link::respond(stream, &Identity::generate().unwrap()).err()
+        });
+        let flip = |index, mut frame: Vec<u8>| {
+            if index == 3 {
+                frame[0] ^= 1;
+            }
+            vec![frame]
+        };
+        let addr = proxy(addr, flip);
+        let _ = Link::initiate(
+            TcpStream::connect(addr).unwrap(),
+            &Identity::generate().unwrap(),
+        );
+        let refused = responder.join().unwrap().expect("the link is refused");
+        assert_eq!(refused.kind(), io::ErrorKind::InvalidData);
+    }
+
+    #[test]
     fn a_replayed_frame_closes_the_link() {
         let (addr, handle) = target(Identity::generate().unwrap());
         let replay = |index, frame: Vec<u8>| {
-            if index == 2 {
+            // The first message (see a_changed_byte_closes_the_link).
+            if index == 4 {
                 vec![frame.clone(), frame]
             } else {
                 vec![frame]
