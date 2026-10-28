@@ -23,6 +23,34 @@ pub fn this_pc() -> Result<Vec<Monitor>, String> {
     }
 }
 
+/// Reads the monitors again every `every` on a thread of its own, and sends
+/// them when they differ from the last ones: moving a monitor in the
+/// display settings moves its edges too, without restarting Mickey. Off
+/// the main loop because on Hyprland one read is a round trip to the
+/// compositor (#187). A failed read changes nothing. The thread ends when
+/// the receiver is dropped.
+pub fn watch(
+    mut last: Vec<Monitor>,
+    every: std::time::Duration,
+    read: fn() -> Result<Vec<Monitor>, String>,
+) -> std::sync::mpsc::Receiver<Vec<Monitor>> {
+    let (changed, changes) = std::sync::mpsc::channel();
+    crate::threads::spawn("monitor watch", move || {
+        loop {
+            std::thread::sleep(every);
+            let Ok(found) = read() else { continue };
+            if found == last {
+                continue;
+            }
+            if changed.send(found.clone()).is_err() {
+                break;
+            }
+            last = found;
+        }
+    });
+    changes
+}
+
 /// Whether this session is Hyprland's, which Mickey asks through its own
 /// socket; elsewhere it goes through the RemoteDesktop portal (PRD 0004).
 #[cfg(target_os = "linux")]
@@ -162,5 +190,43 @@ pub mod hyprland {
             assert!(parse("").is_err());
             assert!(parse("Monitor X (ID 0):\n\tgarbage\n").is_err());
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Duration;
+
+    /// The owner's vertical monitor before and after it was moved down
+    /// 845 pixels in the display settings (#365).
+    const BEFORE: Monitor = Monitor {
+        x: 2560,
+        y: -845,
+        width: 1080,
+        height: 1920,
+    };
+    const AFTER: Monitor = Monitor { y: 0, ..BEFORE };
+
+    static READS: AtomicUsize = AtomicUsize::new(0);
+
+    /// Unchanged, then a failed read, then moved, then moved still.
+    fn moved_once() -> Result<Vec<Monitor>, String> {
+        match READS.fetch_add(1, Ordering::SeqCst) {
+            0 => Ok(vec![BEFORE]),
+            1 => Err("the compositor did not answer".into()),
+            _ => Ok(vec![AFTER]),
+        }
+    }
+
+    #[test]
+    fn a_moved_monitor_is_sent_once() {
+        let changes = watch(vec![BEFORE], Duration::from_millis(1), moved_once);
+        let wait = Duration::from_secs(1);
+        assert_eq!(changes.recv_timeout(wait), Ok(vec![AFTER]));
+        // Still moved, read after read: nothing more to say.
+        assert!(changes.recv_timeout(Duration::from_millis(50)).is_err());
+        assert!(READS.load(Ordering::SeqCst) > 3, "it kept reading");
     }
 }

@@ -765,8 +765,7 @@ pub fn run(
     let mut asked: std::collections::HashSet<[u8; 32]> = std::collections::HashSet::new();
     // Which peers were online when the group map was last shared.
     let mut shared_with: Vec<bool> = Vec::new();
-    // Re-read on GNOME and KDE while the portal is not up yet (below).
-    #[cfg_attr(windows, allow(unused_mut))]
+    // Kept up to date by `monitor_changes` (below).
     let mut this_pc = monitors::this_pc().unwrap_or_else(|err| {
         eprintln!("mickey: {err}; `mickey peers` will not show this PC's monitors");
         Vec::new()
@@ -774,6 +773,10 @@ pub fn run(
     // Where the cursor is, asked on a thread of its own: on Hyprland the
     // answer took 2.7 ms at p99, and this loop must not wait for it (#187).
     let edge = edges::EdgeWatch::start(this_pc.clone(), crate::input::cursor_now);
+    // The monitors again once a second: moving one in the display settings
+    // used to need a restart, or the edges stayed where it was (#365). On
+    // GNOME and KDE this also picks them up once the portal comes up.
+    let monitor_changes = monitors::watch(this_pc.clone(), PING_EVERY, monitors::this_pc);
     // GNOME and KDE: the InputCapture portal's barriers instead (PRD 0004,
     // phase 2), started once a peer is placed beside this PC.
     #[cfg(target_os = "linux")]
@@ -932,17 +935,17 @@ pub fn run(
             published = Some(status);
         }
 
+        if let Some(found) = monitor_changes.try_iter().last() {
+            println!("mickey: this PC's monitors changed; the edges follow them");
+            edge.set_monitors(found.clone());
+            this_pc = found;
+        }
+
         let mut lost = Vec::new();
         let now = Instant::now();
         // Once a second: the edges that lead to a placed, online peer.
         #[cfg(target_os = "linux")]
         if now >= next_ping && !crate::monitors::on_hyprland() {
-            // The portal may come up after Mickey at login.
-            if this_pc.is_empty()
-                && let Ok(found) = monitors::this_pc()
-            {
-                this_pc = found;
-            }
             let placed: Vec<(&[Monitor], [i32; 2])> = (0..peers.len())
                 .filter(|&index| peers[index].link.is_some())
                 .filter_map(|index| Some((peers[index].monitors.as_slice(), positions[index]?)))

@@ -27,17 +27,22 @@ pub const EDGE_CHECK: std::time::Duration = std::time::Duration::from_millis(8);
 pub struct EdgeWatch {
     pushed: std::sync::mpsc::Sender<(i32, i32)>,
     answers: std::sync::mpsc::Receiver<Option<(i32, i32)>>,
+    monitors: std::sync::mpsc::Sender<Vec<Monitor>>,
 }
 
 impl EdgeWatch {
-    pub fn start(monitors: Vec<Monitor>, cursor: fn() -> Option<(i32, i32)>) -> EdgeWatch {
+    pub fn start(mut monitors: Vec<Monitor>, cursor: fn() -> Option<(i32, i32)>) -> EdgeWatch {
         let (pushed, motion) = std::sync::mpsc::channel::<(i32, i32)>();
         let (answer, answers) = std::sync::mpsc::channel();
+        let (moved, new_monitors) = std::sync::mpsc::channel();
         crate::threads::spawn("edge check", move || {
             while let Ok(mut delta) = motion.recv() {
                 // Motion that came while the last question was out joins in.
                 for (dx, dy) in motion.try_iter() {
                     delta = (delta.0.saturating_add(dx), delta.1.saturating_add(dy));
+                }
+                if let Some(newest) = new_monitors.try_iter().last() {
+                    monitors = newest;
                 }
                 let off = cursor().and_then(|at| beyond(&monitors, at, delta));
                 if answer.send(off).is_err() {
@@ -45,7 +50,16 @@ impl EdgeWatch {
                 }
             }
         });
-        EdgeWatch { pushed, answers }
+        EdgeWatch {
+            pushed,
+            answers,
+            monitors: moved,
+        }
+    }
+
+    /// This PC's monitors moved: the next question uses these.
+    pub fn set_monitors(&self, monitors: Vec<Monitor>) {
+        let _ = self.monitors.send(monitors);
     }
 
     /// Hands motion over, without waiting.
@@ -329,5 +343,30 @@ mod tests {
         // Pushing up off the laptop: nothing of Windows is above it.
         let off = beyond(&LAPTOP, (100, 0), (0, -1)).unwrap();
         assert_eq!(back(&WINDOWS, LAPTOP_AT, off), None);
+    }
+
+    #[test]
+    fn the_edge_check_follows_moved_monitors() {
+        // The cursor rests on the right edge of a 1536-wide laptop.
+        fn on_the_right_edge() -> Option<(i32, i32)> {
+            Some((1535, 400))
+        }
+        let watch = EdgeWatch::start(LAPTOP.to_vec(), on_the_right_edge);
+        let answer = || {
+            let until = std::time::Instant::now() + std::time::Duration::from_secs(1);
+            loop {
+                if let Some(off) = watch.answer() {
+                    return off;
+                }
+                assert!(std::time::Instant::now() < until, "no answer");
+                std::thread::yield_now();
+            }
+        };
+        watch.push((5, 0));
+        assert_eq!(answer(), Some((1536, 400)), "the pixel just off the laptop");
+        // A second monitor plugged in to the right: the same push stays here.
+        watch.set_monitors(vec![LAPTOP[0], m(1536, 0, 1920, 1080)]);
+        watch.push((5, 0));
+        assert_eq!(answer(), None, "onto the new monitor");
     }
 }

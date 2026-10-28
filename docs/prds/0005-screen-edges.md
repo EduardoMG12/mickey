@@ -97,6 +97,14 @@ The position is read only while the mouse moves.
   invisible Mickey window takes the foreground (games only get raw input
   in the foreground) and motion is read from raw input.
 
+- **Monitors move while Mickey runs** (#365). Each PC read its monitors
+  once, at start. After a monitor was moved in Windows' display settings,
+  the source kept checking the target's `Leave` against the old layout,
+  found no monitor there and ignored it silently: the way back through
+  that monitor was gone until Mickey restarted. The source now reads them
+  again once a second, off its main loop; the target resending its own
+  `Monitors` is the second half of #365.
+
 ### Checked against the code (2026-10-22)
 
 - **Only the target sends `Monitors`**, right after `Hello`
