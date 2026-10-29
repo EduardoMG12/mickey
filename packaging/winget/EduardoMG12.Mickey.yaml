@@ -1,0 +1,10 @@
+# winget manifests for Mickey (#176). To publish a release: copy these three
+# files to manifests/e/EduardoMG12/Mickey/<version>/ in a fork of
+# microsoft/winget-pkgs, set PackageVersion, InstallerUrl and
+# InstallerSha256 (from the release's SHA256SUMS), check them with
+# `winget validate --manifest <folder>`, and open a pull request there.
+PackageIdentifier: EduardoMG12.Mickey
+PackageVersion: 0.4.0
+DefaultLocale: en-US
+ManifestType: version
+ManifestVersion: 1.6.0

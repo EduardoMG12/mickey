@@ -1,0 +1,37 @@
+# Maintainer: Eduardo Mello <102185386+EduardoMG12@users.noreply.github.com>
+# mickey-bin for the AUR (#176): the release's Linux binaries, laid out
+# under /usr like the .deb and .rpm (packaging/deb-rpm/package.sh). Update
+# pkgver and sha256sums from the release's SHA256SUMS, then
+# `makepkg --printsrcinfo > .SRCINFO` and push to the AUR repository.
+pkgname=mickey-bin
+pkgver=0.4.0
+pkgrel=1
+pkgdesc="One keyboard and mouse for all your computers"
+arch=('x86_64')
+url="https://github.com/EduardoMG12/mickey"
+license=('GPL-3.0-or-later')
+depends=('glibc' 'libpulse' 'systemd')
+provides=('mickey')
+conflicts=('mickey')
+install=mickey-bin.install
+options=('!debug')
+backup=('etc/xdg/autostart/mickey.desktop')
+source=("mickey-linux-x86_64-$pkgver.tar.gz::$url/releases/download/v$pkgver/mickey-linux-x86_64.tar.gz")
+sha256sums=('21cc1c4ae2acd65659312dd983306c76d518cafdcd44bc64837b1e23cff7ed49')
+
+package() {
+    cd mickey-linux-x86_64
+    install -Dm755 mickey mickey-ui -t "$pkgdir/usr/bin/"
+    install -Dm644 99-mickey-uinput.rules "$pkgdir/usr/lib/udev/rules.d/99-mickey-uinput.rules"
+    sed 's|^ExecStart=%h/.local/bin/mickey|ExecStart=/usr/bin/mickey|' mickey.service |
+        install -Dm644 /dev/stdin "$pkgdir/usr/lib/systemd/user/mickey.service"
+    install -Dm644 mickey-autostart.desktop "$pkgdir/etc/xdg/autostart/mickey.desktop"
+    install -Dm644 mickey-settings.desktop "$pkgdir/usr/share/applications/mickey-settings.desktop"
+    for window in mickey-ui:switcher mickey-history:history mickey-pair:pairing; do
+        printf '[Desktop Entry]\nType=Application\nName=Mickey %s\nExec=mickey-ui\nIcon=mickey\nNoDisplay=true\n' \
+            "${window#*:}" | install -Dm644 /dev/stdin "$pkgdir/usr/share/applications/${window%%:*}.desktop"
+    done
+    install -Dm644 mickey.png "$pkgdir/usr/share/icons/hicolor/256x256/apps/mickey.png"
+    install -Dm644 README.md "$pkgdir/usr/share/doc/mickey/README.md"
+    install -Dm644 LICENSE THIRD-PARTY-LICENSES.txt -t "$pkgdir/usr/share/licenses/$pkgname/"
+}
