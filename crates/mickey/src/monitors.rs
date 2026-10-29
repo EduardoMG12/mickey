@@ -27,8 +27,8 @@ pub fn this_pc() -> Result<Vec<Monitor>, String> {
 /// them when they differ from the last ones: moving a monitor in the
 /// display settings moves its edges too, without restarting Mickey. Off
 /// the main loop because on Hyprland one read is a round trip to the
-/// compositor (#187). A failed read changes nothing. The thread ends when
-/// the receiver is dropped.
+/// compositor (#187). A failed read changes nothing. Once the receiver is
+/// dropped, the thread ends at the next change.
 pub fn watch(
     mut last: Vec<Monitor>,
     every: std::time::Duration,

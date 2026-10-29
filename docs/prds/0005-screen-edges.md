@@ -102,8 +102,10 @@ The position is read only while the mouse moves.
   the source kept checking the target's `Leave` against the old layout,
   found no monitor there and ignored it silently: the way back through
   that monitor was gone until Mickey restarted. The source now reads them
-  again once a second, off its main loop; the target resending its own
-  `Monitors` is the second half of #365.
+  again once a second, off its main loop, on Windows and Hyprland. Not
+  on GNOME and KDE: the portal reports monitors once per session, and
+  reading through it every second could ask for permission again. The
+  target resending its own `Monitors` is the second half of #365.
 
 ### Checked against the code (2026-10-22)
 
