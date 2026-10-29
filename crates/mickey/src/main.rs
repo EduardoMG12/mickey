@@ -569,6 +569,8 @@ fn target(
         );
     }
     let input_slots = SharedSlots::default();
+    // Every source learns when this PC's monitors move (#365).
+    let monitors = monitors::keep_latest(std::time::Duration::from_secs(1));
     loop {
         let (stream, peer) = match listener.accept() {
             Ok(connection) => connection,
@@ -585,6 +587,7 @@ fn target(
             found: found.clone(),
             sources: sources.clone(),
             grants: grants.clone(),
+            monitors: monitors.clone(),
         };
         let Some(slot) = Slot::take(&input_slots, peer.ip()) else {
             continue;
@@ -787,6 +790,9 @@ struct Around {
     sources: Sources,
     /// When each source may read the clipboard (#185).
     grants: clip_sync::Grants,
+    /// This PC's monitors as last read; `None` where they do not follow a
+    /// change (GNOME and KDE).
+    monitors: Option<monitors::Latest>,
 }
 
 /// The switcher window open on this PC for a source, if any, so a later
@@ -855,6 +861,7 @@ fn serve_source(
         found,
         sources,
         grants,
+        monitors: latest,
     } = around;
     let found = found.as_ref();
     let mut link = match transport::accept(stream, identity) {
@@ -933,9 +940,24 @@ fn serve_source(
             }
         }
     };
+    // Newer monitors than the last sent, for `serve` to pass on.
+    let mut sent = monitors.clone();
+    let moved = || {
+        let now = latest
+            .as_ref()?
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .clone();
+        if now.is_empty() || now == sent {
+            return None;
+        }
+        sent = now.clone();
+        Some(now)
+    };
     let result = transport::serve(
         &mut link,
         &monitors,
+        moved,
         |effect| match output(effect) {
             Ok(()) => true,
             Err(err) => {

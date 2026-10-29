@@ -776,14 +776,9 @@ pub fn run(
     let edge = edges::EdgeWatch::start(this_pc.clone(), crate::input::cursor_now);
     // The monitors again once a second: moving one in the display settings
     // used to need a restart, or the edges stayed where it was (#365). Not
-    // on GNOME and KDE: each read goes through the portal, whose monitors
-    // do not follow a change, and their edges are the portal's barriers.
-    #[cfg(target_os = "linux")]
-    let follow = monitors::on_hyprland();
-    #[cfg(windows)]
-    let follow = true;
-    let monitor_changes =
-        follow.then(|| monitors::watch(this_pc.clone(), PING_EVERY, monitors::this_pc));
+    // on GNOME and KDE, whose edges are the portal's barriers.
+    let monitor_changes = monitors::follow_changes()
+        .then(|| monitors::watch(this_pc.clone(), PING_EVERY, monitors::this_pc));
     // GNOME and KDE: the InputCapture portal's barriers instead (PRD 0004,
     // phase 2), started once a peer is placed beside this PC.
     #[cfg(target_os = "linux")]

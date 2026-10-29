@@ -51,6 +51,40 @@ pub fn watch(
     changes
 }
 
+/// Whether this PC's monitors can be read again while Mickey runs: on
+/// Windows and Hyprland. Not on GNOME and KDE: each read goes through the
+/// RemoteDesktop portal, which reports them once per session, and reading
+/// every second could ask for permission again.
+pub fn follow_changes() -> bool {
+    #[cfg(target_os = "linux")]
+    return on_hyprland();
+    #[cfg(windows)]
+    return true;
+}
+
+/// This PC's monitors as last read, shared by every source this PC serves.
+pub type Latest = std::sync::Arc<std::sync::Mutex<Vec<Monitor>>>;
+
+/// One `watch` for the whole target, not one per connection: a source
+/// that reconnects would leave a thread reading the monitors behind.
+/// `None` where they do not follow a change (`follow_changes`).
+pub fn keep_latest(every: std::time::Duration) -> Option<Latest> {
+    if !follow_changes() {
+        return None;
+    }
+    let latest = Latest::default();
+    let first = this_pc().unwrap_or_default();
+    *latest.lock().unwrap_or_else(|p| p.into_inner()) = first.clone();
+    let changes = watch(first, every, this_pc);
+    let kept = latest.clone();
+    crate::threads::spawn("monitor share", move || {
+        for found in changes {
+            *kept.lock().unwrap_or_else(|p| p.into_inner()) = found;
+        }
+    });
+    Some(latest)
+}
+
 /// Whether this session is Hyprland's, which Mickey asks through its own
 /// socket; elsewhere it goes through the RemoteDesktop portal (PRD 0004).
 #[cfg(target_os = "linux")]

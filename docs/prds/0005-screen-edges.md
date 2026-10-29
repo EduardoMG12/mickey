@@ -104,8 +104,10 @@ The position is read only while the mouse moves.
   that monitor was gone until Mickey restarted. The source now reads them
   again once a second, off its main loop, on Windows and Hyprland. Not
   on GNOME and KDE: the portal reports monitors once per session, and
-  reading through it every second could ask for permission again. The
-  target resending its own `Monitors` is the second half of #365.
+  reading through it every second could ask for permission again. A
+  target does the same, with one reader for every source it serves, and
+  sends `Monitors` again after the next `Ping` when they moved, so the
+  source's layout and the target's own edges follow them too.
 
 ### Checked against the code (2026-10-22)
 
