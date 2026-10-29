@@ -1,0 +1,22 @@
+# What install.sh does with sudo; the input group stays the user's step,
+# since pacman does not know who asked.
+post_install() {
+    udevadm control --reload 2>/dev/null || true
+    if [ -e /dev/uinput ]; then
+        chgrp input /dev/uinput 2>/dev/null && chmod 660 /dev/uinput 2>/dev/null || true
+    fi
+    systemctl --global enable mickey.service >/dev/null 2>&1 || true
+    echo "Mickey: add yourself to the input group, then restart once:"
+    echo "  sudo usermod -aG input \$USER"
+    echo "Every program run by a member of the input group can read the"
+    echo "keyboard, not only Mickey. With a firewall on, let in TCP 4242-4243"
+    echo "and UDP 4243-4244."
+}
+
+post_upgrade() {
+    udevadm control --reload 2>/dev/null || true
+}
+
+pre_remove() {
+    systemctl --global disable mickey.service >/dev/null 2>&1 || true
+}

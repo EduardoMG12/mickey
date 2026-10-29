@@ -1,0 +1,19 @@
+pkgbase = mickey-bin
+	pkgdesc = One keyboard and mouse for all your computers
+	pkgver = 0.4.0
+	pkgrel = 1
+	url = https://github.com/EduardoMG12/mickey
+	install = mickey-bin.install
+	arch = x86_64
+	license = GPL-3.0-or-later
+	depends = glibc
+	depends = libpulse
+	depends = systemd
+	provides = mickey
+	conflicts = mickey
+	options = !debug
+	backup = etc/xdg/autostart/mickey.desktop
+	source = mickey-linux-x86_64-0.4.0.tar.gz::https://github.com/EduardoMG12/mickey/releases/download/v0.4.0/mickey-linux-x86_64.tar.gz
+	sha256sums = 21cc1c4ae2acd65659312dd983306c76d518cafdcd44bc64837b1e23cff7ed49
+
+pkgname = mickey-bin
