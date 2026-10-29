@@ -297,7 +297,21 @@ mod endpoint {
 
         pub fn listen(&self) -> Result<Listener, String> {
             if self.connect().is_ok() {
-                return Err("another mickey source is already running".into());
+                // Any program of the user can write the file and listen
+                // where it points, so Mickey would refuse to start (#349):
+                // only a Mickey there counts. When Windows will not say
+                // who listens, believe the file, as before.
+                let port = self.read().map(|(port, _)| port).ok();
+                let there = port.and_then(crate::platform::listener::program_on);
+                let this = std::env::current_exe().ok();
+                match there {
+                    Some(there) if !same_program(&there, this.as_deref()) => eprintln!(
+                        "mickey: {} pointed at {}, not Mickey; taking the control channel back",
+                        self.file.display(),
+                        there.display()
+                    ),
+                    _ => return Err("another mickey source is already running".into()),
+                }
             }
             let inner = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
                 .map_err(|err| format!("cannot listen on localhost: {err}"))?;
@@ -323,6 +337,17 @@ mod endpoint {
             let mut line = String::new();
             reader.read_line(&mut line).is_ok() && line.trim() == self.token
         }
+    }
+
+    /// Whether `there` is this same mickey.exe. Windows paths ignore case.
+    fn same_program(there: &std::path::Path, this: Option<&std::path::Path>) -> bool {
+        let canonical = |path: &std::path::Path| {
+            fs::canonicalize(path)
+                .unwrap_or_else(|_| path.to_path_buf())
+                .to_string_lossy()
+                .to_lowercase()
+        };
+        this.is_some_and(|this| canonical(there) == canonical(this))
     }
 
     /// Sends the token before the request.
@@ -627,6 +652,38 @@ mod tests {
         assert_eq!(order.order, Order::Go("Windows A".into()));
         order.reply.send("ok: going".into()).unwrap();
         assert_eq!(client.join().unwrap().unwrap().unwrap(), "ok: going");
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Another program listens where the control file points: Mickey
+    /// starts anyway (#349).
+    #[cfg(windows)]
+    #[test]
+    fn a_program_that_is_not_mickey_cannot_hold_the_control_channel() {
+        use std::io::BufRead;
+        let dir = std::env::temp_dir().join(format!("mickey-squat-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("control.txt");
+        let mut squatter = std::process::Command::new("powershell")
+            .args([
+                "-NoProfile",
+                "-Command",
+                "$l = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0); \
+                 $l.Start(); $l.LocalEndpoint.Port; while ($true) { $l.AcceptTcpClient().Close() }",
+            ])
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        let mut port = String::new();
+        std::io::BufReader::new(squatter.stdout.take().unwrap())
+            .read_line(&mut port)
+            .unwrap();
+        fs::write(&path, format!("{} {}", port.trim(), "f".repeat(64))).unwrap();
+        let taken = Endpoint::at(path.clone()).listen();
+        let _ = squatter.kill();
+        let _ = squatter.wait();
+        assert!(taken.is_ok(), "{:?}", taken.err());
         fs::remove_dir_all(&dir).unwrap();
     }
 }

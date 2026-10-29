@@ -9,6 +9,8 @@ pub mod hooks;
 #[cfg(target_os = "linux")]
 pub mod linux;
 #[cfg(windows)]
+pub mod listener;
+#[cfg(windows)]
 pub mod log_file;
 #[cfg(windows)]
 pub mod netif;
