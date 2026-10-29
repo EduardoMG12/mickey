@@ -4,25 +4,34 @@
 //! is sent. A `Player` is one render stream per sending PC; its writes wait
 //! while the device's buffer is full, which paces the jitter buffer. Each
 //! is made on the thread that uses it (COM).
+//!
+//! Both wait on the event WASAPI signals once per device period, not on
+//! sleeps: polling woke Mickey about 500 times a second even in silence
+//! (#349). A loopback capture signals only while something plays, so a
+//! quiet PC sleeps until the 50 ms timeout.
 
 use super::at_volume;
 use crate::audio_wire::{CHANNELS, FRAMES, PCM_BYTES, RATE};
 use std::collections::VecDeque;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use wasapi::{
-    AudioCaptureClient, AudioClient, AudioRenderClient, Direction, SampleType, StreamMode,
+    AudioCaptureClient, AudioClient, AudioRenderClient, Direction, Handle, SampleType, StreamMode,
     WaveFormat, get_default_device, initialize_mta,
 };
 
 /// The device buffer, in 100 ns units: 20 ms.
 const BUFFER: i64 = 200_000;
 
-fn client(direction: Direction) -> Result<AudioClient, String> {
+/// How long a read waits for sound before saying there is none.
+const QUIET: Duration = Duration::from_millis(50);
+
+/// A shared-mode client and the event it signals once per device period.
+fn client(direction: Direction) -> Result<(AudioClient, Handle), String> {
     let _ = initialize_mta();
     let format = WaveFormat::new(16, 16, &SampleType::Int, RATE as usize, CHANNELS, None);
     let device = get_default_device(&Direction::Render).map_err(|err| err.to_string())?;
     let mut client = device.get_iaudioclient().map_err(|err| err.to_string())?;
-    let mode = StreamMode::PollingShared {
+    let mode = StreamMode::EventsShared {
         autoconvert: true,
         buffer_duration_hns: BUFFER,
     };
@@ -30,13 +39,18 @@ fn client(direction: Direction) -> Result<AudioClient, String> {
     client
         .initialize_client(&format, &direction, &mode)
         .map_err(|err| err.to_string())?;
-    Ok(client)
+    // Asked for after initializing and before starting, as WASAPI wants.
+    let wake = client
+        .set_get_eventhandle()
+        .map_err(|err| err.to_string())?;
+    Ok((client, wake))
 }
 
 /// What this PC plays, 5 ms at a time.
 pub struct Recorder {
     client: AudioClient,
     capture: AudioCaptureClient,
+    wake: Handle,
     queue: VecDeque<u8>,
 }
 
@@ -44,7 +58,7 @@ impl Recorder {
     /// Records what the default output plays (muted or not: `diverted`
     /// changes nothing here).
     pub fn open(_diverted: bool) -> Result<Recorder, String> {
-        let client = client(Direction::Capture)
+        let (client, wake) = client(Direction::Capture)
             .map_err(|err| format!("cannot record this PC's sound: {err}"))?;
         let capture = client
             .get_audiocaptureclient()
@@ -53,6 +67,7 @@ impl Recorder {
         Ok(Recorder {
             client,
             capture,
+            wake,
             queue: VecDeque::with_capacity(8 * PCM_BYTES),
         })
     }
@@ -60,19 +75,19 @@ impl Recorder {
     /// The next 5 ms; `None` after 50 ms with nothing, which is what a
     /// loopback capture gives while nothing plays (so the caller can stop).
     pub fn read(&mut self) -> Result<Option<[u8; PCM_BYTES]>, String> {
-        for _ in 0..25 {
-            if self.queue.len() >= PCM_BYTES {
-                break;
-            }
+        let started = Instant::now();
+        loop {
             self.capture
                 .read_from_device_to_deque(&mut self.queue)
                 .map_err(|err| format!("recording stopped: {err}"))?;
-            if self.queue.len() < PCM_BYTES {
-                std::thread::sleep(Duration::from_millis(2));
+            if self.queue.len() >= PCM_BYTES {
+                break;
             }
-        }
-        if self.queue.len() < PCM_BYTES {
-            return Ok(None);
+            let left = QUIET.saturating_sub(started.elapsed());
+            // A timeout: nothing played for 50 ms.
+            if left.is_zero() || self.wake.wait_for_event(left.as_millis() as u32).is_err() {
+                return Ok(None);
+            }
         }
         let mut pcm = [0u8; PCM_BYTES];
         for (byte, queued) in pcm.iter_mut().zip(self.queue.drain(..PCM_BYTES)) {
@@ -92,18 +107,23 @@ impl Drop for Recorder {
 pub struct Player {
     client: AudioClient,
     render: AudioRenderClient,
+    wake: Handle,
 }
 
 impl Player {
     /// A stream on the default output. (Windows names it after Mickey.)
     pub fn open(pc: &str) -> Result<Player, String> {
-        let client =
+        let (client, wake) =
             client(Direction::Render).map_err(|err| format!("cannot play {pc}'s sound: {err}"))?;
         let render = client
             .get_audiorenderclient()
             .map_err(|err| err.to_string())?;
         client.start_stream().map_err(|err| err.to_string())?;
-        Ok(Player { client, render })
+        Ok(Player {
+            client,
+            render,
+            wake,
+        })
     }
 
     /// Plays 5 ms at `volume` (0.0 silent, 1.0 as sent); waits while the
@@ -117,7 +137,10 @@ impl Player {
             if space as usize >= FRAMES {
                 break;
             }
-            std::thread::sleep(Duration::from_millis(1));
+            // Signalled once per device period, when room was made. A
+            // timeout (a device that stopped) asks again, and the next
+            // question says what went wrong.
+            let _ = self.wake.wait_for_event(QUIET.as_millis() as u32);
         }
         self.render
             .write_to_device(FRAMES, &at_volume(pcm, volume), None)
@@ -184,5 +207,31 @@ mod tests {
         );
         drop(diverted);
         println!("muted after: {}", muted());
+    }
+
+    /// Run by hand on Windows to measure wake-ups (#349): records for 60 s,
+    /// for something outside to count this process's CPU time and context
+    /// switches. Quiet unless something plays.
+    #[test]
+    #[ignore = "records this PC's sound for 60 seconds"]
+    fn a_recorder_for_a_minute() {
+        let mut recorder = Recorder::open(false).unwrap();
+        let started = std::time::Instant::now();
+        let mut got = 0;
+        while started.elapsed() < std::time::Duration::from_secs(60) {
+            got += usize::from(recorder.read().unwrap().is_some());
+        }
+        println!("5 ms blocks recorded: {got}");
+    }
+
+    /// The same for a Player given silence: its writes pace themselves.
+    #[test]
+    #[ignore = "plays silence for 60 seconds"]
+    fn a_player_for_a_minute() {
+        let mut player = Player::open("test").unwrap();
+        let started = std::time::Instant::now();
+        while started.elapsed() < std::time::Duration::from_secs(60) {
+            player.write(&[0u8; PCM_BYTES], 1.0).unwrap();
+        }
     }
 }
