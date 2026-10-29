@@ -236,7 +236,10 @@ pub fn download(version: &str) -> Result<std::path::PathBuf, String> {
 pub fn apply(version: &str) -> Result<(), String> {
     #[cfg(target_os = "linux")]
     if packaged() {
-        return Err("this Mickey came from a .deb or .rpm: update it with your package manager (apt, dnf)".into());
+        return Err(
+            "this Mickey came from a .deb or .rpm: update it with your package manager (apt, dnf)"
+                .into(),
+        );
     }
     let path = download(version)?;
     install(&path)

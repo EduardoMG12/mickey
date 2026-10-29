@@ -50,6 +50,8 @@ mod tray_picture;
 mod trust;
 mod update;
 mod window;
+#[cfg(target_os = "linux")]
+mod x11;
 
 use cli::Command;
 use mickey_config as config;
@@ -382,7 +384,7 @@ fn run_from_config() -> Result<(), String> {
     // Outside Hyprland, the RemoteDesktop portal's session (PRD 0004),
     // opened now: its one question comes at login, not mid-switch.
     #[cfg(target_os = "linux")]
-    if !monitors::on_hyprland() {
+    if monitors::uses_portal() {
         crate::threads::spawn("portal start", || {
             // The desktop's portal may come up after Mickey at login.
             for _ in 0..24 {

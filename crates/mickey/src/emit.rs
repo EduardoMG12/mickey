@@ -89,6 +89,9 @@ pub fn place(x: i32, y: i32) -> io::Result<()> {
 #[cfg(target_os = "linux")]
 pub fn place(x: i32, y: i32) -> io::Result<()> {
     use crate::monitors::hyprland;
+    if crate::x11::session() {
+        return crate::x11::place(x, y).map_err(io::Error::other);
+    }
     if !crate::monitors::on_hyprland() {
         return crate::portal::get()
             .ok_or_else(|| io::Error::other("no RemoteDesktop portal to place the cursor"))?
@@ -121,6 +124,9 @@ pub fn cursor() -> Option<(i32, i32)> {
 pub fn cursor() -> Option<(i32, i32)> {
     if crate::monitors::on_hyprland() {
         return crate::monitors::hyprland::cursor().ok();
+    }
+    if crate::x11::session() {
+        return crate::x11::cursor().ok();
     }
     crate::portal::get()?.cursor()
 }
@@ -171,9 +177,9 @@ impl Emitter {
                 if dx == 0 && dy == 0 {
                     return Ok(());
                 }
-                // Outside Hyprland: absolute moves through the portal, so
-                // Mickey knows where the cursor is (PRD 0004).
-                if !crate::monitors::on_hyprland()
+                // With the portal: absolute moves through it, so Mickey
+                // knows where the cursor is (PRD 0004).
+                if crate::monitors::uses_portal()
                     && let Some(portal) = crate::portal::get()
                 {
                     return portal.move_by(dx, dy);

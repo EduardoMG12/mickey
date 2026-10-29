@@ -77,7 +77,7 @@ in the download folder checks what you got.
 | Windows 10 | | screen edges work |
 | Ubuntu 24.04 | GNOME (Wayland) | |
 | Ubuntu 22.04 | GNOME | the oldest supported (glibc 2.35); install, start and discovery checked |
-| Linux Mint 22.3 | Cinnamon (X11) | |
+| Linux Mint 22.3 | Cinnamon (X11) | screen edges work |
 | Fedora 44 | KDE Plasma (Wayland) | |
 | Debian 13 | GNOME (Wayland) | no tray icon without an extension ([why](#known-limits)) |
 | Pop!_OS 24.04 | COSMIC (Wayland) | |

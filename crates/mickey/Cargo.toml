@@ -58,6 +58,10 @@ ksni = { version = "0.3", default-features = false, features = ["blocking", "asy
 # already in the tree through arboard.
 wayland-client = "0.31"
 wayland-protocols-wlr = { version = "0.3", features = ["client"] }
+# X11 sessions (#178): the monitors (RandR), the pointer and warping it,
+# from the X server. Already in the tree through arboard; pure Rust, so
+# no libX11 or libxcb at run time.
+x11rb = { version = "0.13", default-features = false, features = ["randr"] }
 # Shared audio on Linux (PRD 0012): the sound server's own client library,
 # libpulse, which PulseAudio and PipeWire both answer and every desktop
 # has. Talking its protocol by hand would be far longer.
