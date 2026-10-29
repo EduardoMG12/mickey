@@ -57,6 +57,14 @@ Download the latest release from the repository's **Releases** page:
   opens TCP 4242-4243 and UDP 4243-4244. Mickey goes to `~/.local/bin` and starts
   with your desktop session. If it had to add you to the `input` group,
   restart the PC once. `./uninstall.sh` removes everything.
+- **Debian, Ubuntu, Mint** or **Fedora**, for every user of the PC: the
+  release's `mickey_<version>_amd64.deb` (`sudo apt install ./mickey_*.deb`)
+  or `mickey-<version>-1.x86_64.rpm` (`sudo dnf install ./mickey-*.rpm`).
+  They install under `/usr`, add the person who ran the command to the
+  `input` group (restart once), and leave the firewall alone (open TCP
+  4242-4243 and UDP 4243-4244 if one is on). Update and remove them with
+  `apt` or `dnf`; Mickey does not update itself then. Use the package or
+  `install.sh`, not both.
 
 Each release also has `SHA256SUMS`: `sha256sum -c SHA256SUMS --ignore-missing`
 in the download folder checks what you got.

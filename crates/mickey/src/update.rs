@@ -234,8 +234,20 @@ pub fn download(version: &str) -> Result<std::path::PathBuf, String> {
 /// running Mickey is then stopped and started again by the installer, the
 /// normal way, which releases every grab (hard rule 8).
 pub fn apply(version: &str) -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    if packaged() {
+        return Err("this Mickey came from a .deb or .rpm: update it with your package manager (apt, dnf)".into());
+    }
     let path = download(version)?;
     install(&path)
+}
+
+/// Linux: whether this Mickey was installed by a .deb or .rpm (under
+/// /usr, #176). Updating it from the tarball would put a second Mickey in
+/// ~/.local/bin, which the package manager knows nothing about.
+#[cfg(target_os = "linux")]
+fn packaged() -> bool {
+    std::env::current_exe().is_ok_and(|exe| exe.starts_with("/usr/"))
 }
 
 /// Linux: unpacks the tarball and runs its `install.sh --update` (no sudo)

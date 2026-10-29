@@ -23,7 +23,7 @@ jobs:
     container: ubuntu:22.04
     steps:
       - name: Tools the container lacks
-        run: apt-get update -qq && apt-get install -y -qq curl ca-certificates build-essential git binutils python3 pkg-config libpulse-dev >/dev/null
+        run: apt-get update -qq && apt-get install -y -qq curl ca-certificates build-essential git binutils python3 pkg-config libpulse-dev rpm >/dev/null
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Install Rust
         run: |
@@ -48,10 +48,18 @@ jobs:
           # The crates' own notices travel with the binaries.
           python3 tools/licenses/third_party_licenses.py x86_64-unknown-linux-gnu > "$dir/THIRD-PARTY-LICENSES.txt"
           tar czf "$dir.tar.gz" "$dir"
+      - name: The .deb and .rpm (#176)
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          case "$GITHUB_REF" in refs/tags/*) ;; *) version=0.0.0-test ;; esac
+          packaging/deb-rpm/package.sh "$version" mickey-linux-x86_64
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: linux
-          path: mickey-linux-x86_64.tar.gz
+          path: |
+            mickey-linux-x86_64.tar.gz
+            mickey_*_amd64.deb
+            mickey-*.x86_64.rpm
 
   windows:
     runs-on: windows-latest
@@ -106,8 +114,8 @@ jobs:
           RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
         run: |
           # Checksums, so a download can be checked (sha256sum -c SHA256SUMS).
-          cp linux/mickey-linux-x86_64.tar.gz windows/Mickey-Setup-*.exe .
-          sha256sum mickey-linux-x86_64.tar.gz Mickey-Setup-*.exe > SHA256SUMS
+          cp linux/mickey-linux-x86_64.tar.gz linux/mickey_*.deb linux/mickey-*.rpm windows/Mickey-Setup-*.exe .
+          sha256sum mickey-linux-x86_64.tar.gz mickey_*.deb mickey-*.rpm Mickey-Setup-*.exe > SHA256SUMS
           # Signed (PRD 0013): Mickey installs an update only with a valid
           # signature. No key, no release.
           if [ -z "$RELEASE_SIGNING_KEY" ]; then
@@ -120,4 +128,4 @@ jobs:
           rm -f "$key"
           gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
             --title "Mickey $GITHUB_REF_NAME" --generate-notes \
-            mickey-linux-x86_64.tar.gz Mickey-Setup-*.exe SHA256SUMS SHA256SUMS.sig
+            mickey-linux-x86_64.tar.gz mickey_*.deb mickey-*.rpm Mickey-Setup-*.exe SHA256SUMS SHA256SUMS.sig
