@@ -151,3 +151,13 @@ other, GNOME, KDE and Windows alike.
   from the spike: the price of screen edges on GNOME until its portal
   remembers.
 
+- **X11 needs no XInput2 or XTest** (#178): the X server answers what
+  Hyprland answers. RandR's `GetMonitors` gives the monitors, `QueryPointer`
+  the cursor and `WarpPointer` places it, through `x11rb` (pure Rust,
+  already in the tree through arboard). Input still goes in through
+  uinput, which X reads like any device, and out through evdev. Mint 22.3
+  (Cinnamon, X11) and Ubuntu 24.04 GNOME, in two VMs: Mint drove GNOME
+  through its left edge and came back, placed on that edge at the same
+  height; GNOME drove Mint (cursor moved about 640 px) and came back
+  through Mint's left edge. Hyprland's XWayland sets `DISPLAY` too, so
+  Hyprland is checked first.

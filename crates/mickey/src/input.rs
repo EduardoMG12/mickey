@@ -29,9 +29,12 @@ mod linux {
         _grabs: Vec<Grab<'a>>,
     }
 
-    /// Where the cursor is: a question to Hyprland, which may take a
-    /// few milliseconds (#187).
+    /// Where the cursor is: a question to Hyprland or the X server,
+    /// which may take a few milliseconds (#187).
     pub fn cursor_now() -> Option<(i32, i32)> {
+        if crate::x11::session() {
+            return crate::x11::cursor().ok();
+        }
         crate::monitors::hyprland::cursor().ok()
     }
 
