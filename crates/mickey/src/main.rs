@@ -45,6 +45,8 @@ mod source;
 mod speakers;
 #[cfg(target_os = "linux")]
 mod sway;
+#[cfg(target_os = "linux")]
+mod sway_edges;
 mod threads;
 mod transport;
 mod tray;

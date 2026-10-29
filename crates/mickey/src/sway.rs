@@ -52,10 +52,16 @@ fn ask(kind: u32, payload: &str) -> Result<serde_json::Value, String> {
 
 /// The active outputs, in the logical layout Sway gives them.
 pub fn monitors() -> Result<Vec<Monitor>, String> {
+    Ok(outputs()?.into_iter().map(|(_, monitor)| monitor).collect())
+}
+
+/// The active outputs with their names, which Wayland's `wl_output` gives
+/// too: how a layer surface is put on the right one (`sway_edges`).
+pub fn outputs() -> Result<Vec<(String, Monitor)>, String> {
     parse_outputs(&ask(GET_OUTPUTS, "")?)
 }
 
-fn parse_outputs(outputs: &serde_json::Value) -> Result<Vec<Monitor>, String> {
+fn parse_outputs(outputs: &serde_json::Value) -> Result<Vec<(String, Monitor)>, String> {
     let outputs = outputs.as_array().ok_or("get_outputs is not a list")?;
     let number = |rect: &serde_json::Value, key: &str| {
         rect.get(key)
@@ -69,12 +75,20 @@ fn parse_outputs(outputs: &serde_json::Value) -> Result<Vec<Monitor>, String> {
             continue;
         }
         let rect = output.get("rect").ok_or("an output has no rect")?;
-        monitors.push(Monitor {
-            x: number(rect, "x")?,
-            y: number(rect, "y")?,
-            width: number(rect, "width")?,
-            height: number(rect, "height")?,
-        });
+        let name = output
+            .get("name")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        monitors.push((
+            name,
+            Monitor {
+                x: number(rect, "x")?,
+                y: number(rect, "y")?,
+                width: number(rect, "width")?,
+                height: number(rect, "height")?,
+            },
+        ));
     }
     if monitors.is_empty() {
         return Err("Sway has no active output".into());
@@ -90,6 +104,19 @@ struct Tracked {
     read: Option<Instant>,
 }
 
+/// When Mickey last put the cursor somewhere. Sway answers a
+/// `cursor set` onto an edge strip as if the cursor had left it and come
+/// back, which must not count as a push (`sway_edges`).
+static PLACED: Mutex<Option<Instant>> = Mutex::new(None);
+
+/// Whether Mickey put the cursor somewhere in the last `within`.
+pub fn placed_within(within: Duration) -> bool {
+    PLACED
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .is_some_and(|at| at.elapsed() < within)
+}
+
 static TRACKED: Mutex<Tracked> = Mutex::new(Tracked {
     at: None,
     monitors: Vec::new(),
@@ -98,6 +125,7 @@ static TRACKED: Mutex<Tracked> = Mutex::new(Tracked {
 
 /// Puts the cursor at `x, y` of the desktop, exactly.
 pub fn place(x: i32, y: i32) -> Result<(), String> {
+    *PLACED.lock().unwrap_or_else(|p| p.into_inner()) = Some(Instant::now());
     let answer = ask(RUN_COMMAND, &format!("seat - cursor set {x} {y}"))?;
     let done = answer
         .get(0)
@@ -153,8 +181,9 @@ mod tests {
         ]);
         let monitors = parse_outputs(&outputs).unwrap();
         assert_eq!(monitors.len(), 2);
+        assert_eq!(monitors[1].0, "DP-1");
         assert_eq!(
-            monitors[1],
+            monitors[1].1,
             Monitor {
                 x: 1536,
                 y: -200,

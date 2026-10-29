@@ -83,6 +83,7 @@ in the download folder checks what you got.
 | Pop!_OS 24.04 | COSMIC (Wayland) | |
 | Xubuntu 24.04 | XFCE (X11) | |
 | openSUSE Tumbleweed | KDE Plasma (Wayland) | install, start, firewall and discovery checked |
+| Ubuntu 24.04 | Sway 1.9 (Wayland), headless | screen edges both ways, against GNOME in the same VM |
 
 On the other Linux distros: the installer, starting at login, the windows,
 the tray, pairing, keys both ways and the clipboard both ways, in test
