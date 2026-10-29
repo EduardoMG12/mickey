@@ -10,6 +10,11 @@
 //! `mickey.log.old`. Rust's `println!` asks Windows for the standard handle
 //! on every write, so it follows. The log holds what Mickey prints, never a
 //! key pressed (hard rule 7).
+//!
+//! Not when the output already goes to a pipe or a file: the settings
+//! window runs `mickey peers` and the like with no console and reads the
+//! answer from a pipe, and moving it into the log left that answer empty
+//! (no monitors, every PC offline) and wrote over the running Mickey's log.
 
 use std::ffi::c_void;
 use std::os::windows::io::AsRawHandle;
@@ -17,6 +22,8 @@ use std::path::PathBuf;
 
 const STD_OUTPUT_HANDLE: u32 = -11i32 as u32;
 const STD_ERROR_HANDLE: u32 = -12i32 as u32;
+const FILE_TYPE_DISK: u32 = 0x0001;
+const FILE_TYPE_PIPE: u32 = 0x0003;
 
 #[link(name = "kernel32")]
 unsafe extern "system" {
@@ -31,6 +38,16 @@ unsafe extern "system" {
 #[link(name = "kernel32")]
 unsafe extern "system" {
     fn SetStdHandle(which: u32, handle: *mut c_void) -> i32;
+    fn GetStdHandle(which: u32) -> *mut c_void;
+    fn GetFileType(file: *mut c_void) -> u32;
+}
+
+/// Whether standard output goes to a pipe or a file someone reads.
+fn output_is_read() -> bool {
+    // SAFETY: no pointers passed; the handle may be null or invalid, and
+    // `GetFileType` then answers FILE_TYPE_UNKNOWN.
+    let kind = unsafe { GetFileType(GetStdHandle(STD_OUTPUT_HANDLE)) };
+    kind == FILE_TYPE_DISK || kind == FILE_TYPE_PIPE
 }
 
 /// When no console is shown, sends what Mickey prints to its log file.
@@ -40,6 +57,9 @@ pub fn when_hidden() {
     let console = unsafe { GetConsoleWindow() };
     // SAFETY: `console` is null or this process's console window.
     if !console.is_null() && unsafe { IsWindowVisible(console) } != 0 {
+        return;
+    }
+    if output_is_read() {
         return;
     }
     let Some(dir) = std::env::var_os("LOCALAPPDATA").map(|base| PathBuf::from(base).join("mickey"))
