@@ -117,11 +117,13 @@ pub enum Effect {
 /// `act`. Whatever is still held when the connection ends, cleanly or not,
 /// is released through `act` before returning. `monitors` are this PC's,
 /// sent to the source after `Hello` so it can lay the PCs out and cross
-/// their edges (PRD 0005). `cursor` says where this PC's cursor is, to
-/// notice it pushing off the desktop; `None` when the system cannot say.
+/// their edges (PRD 0005), and again after a `Ping` whenever `moved` has
+/// newer ones (#365). `cursor` says where this PC's cursor is, to notice
+/// it pushing off the desktop; `None` when the system cannot say.
 pub fn serve(
     link: &mut Link,
     monitors: &[Monitor],
+    mut moved: impl FnMut() -> Option<Vec<Monitor>>,
     mut act: impl FnMut(Effect) -> bool,
     cursor: fn() -> Option<(i32, i32)>,
 ) -> io::Result<()> {
@@ -201,6 +203,15 @@ pub fn serve(
                 if let Err(err) = link.send(&Message::Pong { id }) {
                     break Err(err);
                 }
+                // The source pings once a second: a good time to tell it
+                // this PC's monitors moved, so its layout and this PC's
+                // edges follow them (#365).
+                if let Some(found) = moved() {
+                    if let Err(err) = link.send(&Message::monitors(&found)) {
+                        break Err(err);
+                    }
+                    edge.set_monitors(found);
+                }
             }
             Message::Enter { x, y } => {
                 left = None;
@@ -271,6 +282,7 @@ mod tests {
             let result = serve(
                 &mut link,
                 &[],
+                || None,
                 |effect| {
                     if let Effect::Input(event) = effect {
                         emitted.push(event);
@@ -351,6 +363,7 @@ mod tests {
             let result = serve(
                 &mut link,
                 &laptop,
+                || None,
                 |effect| {
                     if let Effect::Place { x, y } = effect {
                         placed.push((x, y));
@@ -394,7 +407,7 @@ mod tests {
                 width: 1536,
                 height: 864,
             }];
-            serve(&mut link, &laptop, |_| true, || Some((1535, 284)))
+            serve(&mut link, &laptop, || None, |_| true, || Some((1535, 284)))
         });
         let mut link = source(addr);
         let push = Message::Input(InputEvent::Motion { dx: 4, dy: 0 });
@@ -424,6 +437,36 @@ mod tests {
         thread::sleep(std::time::Duration::from_millis(20));
         link.send(&push).unwrap();
         assert_eq!(link.recv().unwrap(), Message::Leave { x: 1536, y: 284 });
+        drop(link);
+        assert!(target.join().unwrap().is_ok());
+    }
+
+    #[test]
+    fn moved_monitors_follow_a_ping() {
+        let moved_to = Monitor {
+            x: 0,
+            y: 845,
+            width: 1080,
+            height: 1920,
+        };
+        let (listener, addr) = listener();
+        let target = thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            let mut link = accept(stream, &Identity::generate().unwrap()).unwrap();
+            // Moved once, then still.
+            let mut news = Some(vec![moved_to]);
+            serve(&mut link, &[], || news.take(), |_| true, || None)
+        });
+        let mut link = source(addr);
+        link.send(&Message::Ping { id: 1 }).unwrap();
+        assert_eq!(link.recv().unwrap(), Message::Pong { id: 1 });
+        assert_eq!(link.recv().unwrap(), Message::monitors(&[moved_to]));
+        link.send(&Message::Ping { id: 2 }).unwrap();
+        assert_eq!(
+            link.recv().unwrap(),
+            Message::Pong { id: 2 },
+            "sent once, not on every ping"
+        );
         drop(link);
         assert!(target.join().unwrap().is_ok());
     }
@@ -484,7 +527,7 @@ mod tests {
             let (stream, _) = listener.accept().unwrap();
             let mut link = accept(stream, &Identity::generate().unwrap()).unwrap();
             // A system that refuses every injected event.
-            serve(&mut link, &[], |_| false, || None)
+            serve(&mut link, &[], || None, |_| false, || None)
         });
         let mut link = source(addr);
         link.send(&Message::Input(KEY_A)).unwrap();

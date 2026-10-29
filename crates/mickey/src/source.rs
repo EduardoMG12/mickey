@@ -765,8 +765,8 @@ pub fn run(
     let mut asked: std::collections::HashSet<[u8; 32]> = std::collections::HashSet::new();
     // Which peers were online when the group map was last shared.
     let mut shared_with: Vec<bool> = Vec::new();
-    // Re-read on GNOME and KDE while the portal is not up yet (below).
-    #[cfg_attr(windows, allow(unused_mut))]
+    // Kept up to date by `monitor_changes`, or on GNOME and KDE read again
+    // while the portal is not up yet (below).
     let mut this_pc = monitors::this_pc().unwrap_or_else(|err| {
         eprintln!("mickey: {err}; `mickey peers` will not show this PC's monitors");
         Vec::new()
@@ -774,6 +774,11 @@ pub fn run(
     // Where the cursor is, asked on a thread of its own: on Hyprland the
     // answer took 2.7 ms at p99, and this loop must not wait for it (#187).
     let edge = edges::EdgeWatch::start(this_pc.clone(), crate::input::cursor_now);
+    // The monitors again once a second: moving one in the display settings
+    // used to need a restart, or the edges stayed where it was (#365). Not
+    // on GNOME and KDE, whose edges are the portal's barriers.
+    let monitor_changes = monitors::follow_changes()
+        .then(|| monitors::watch(this_pc.clone(), PING_EVERY, monitors::this_pc));
     // GNOME and KDE: the InputCapture portal's barriers instead (PRD 0004,
     // phase 2), started once a peer is placed beside this PC.
     #[cfg(target_os = "linux")]
@@ -930,6 +935,15 @@ pub fn run(
                 tray.show(&status);
             }
             published = Some(status);
+        }
+
+        if let Some(found) = monitor_changes
+            .as_ref()
+            .and_then(|changes| changes.try_iter().last())
+        {
+            println!("mickey: this PC's monitors changed; the edges follow them");
+            edge.set_monitors(found.clone());
+            this_pc = found;
         }
 
         let mut lost = Vec::new();
