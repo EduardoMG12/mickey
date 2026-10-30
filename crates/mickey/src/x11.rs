@@ -12,20 +12,6 @@ use x11rb::protocol::randr::ConnectionExt as _;
 use x11rb::protocol::xproto::{ConnectionExt as _, Window};
 use x11rb::rust_connection::RustConnection;
 
-/// Whether this session is an X11 one: `XDG_SESSION_TYPE` says so, or
-/// there is a `DISPLAY` and no Wayland compositor. Never on Hyprland,
-/// whose XWayland sets `DISPLAY` too.
-pub fn session() -> bool {
-    if crate::monitors::on_hyprland() {
-        return false;
-    }
-    match std::env::var("XDG_SESSION_TYPE").as_deref() {
-        Ok("x11") => true,
-        Ok("wayland") => false,
-        _ => std::env::var_os("DISPLAY").is_some() && std::env::var_os("WAYLAND_DISPLAY").is_none(),
-    }
-}
-
 /// The connection and the root window, made on first use. A failed
 /// connection is kept as the error, so each question does not try again.
 fn server() -> Result<&'static Mutex<(RustConnection, Window)>, String> {

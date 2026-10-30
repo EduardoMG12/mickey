@@ -5,12 +5,12 @@ use crate::cli::Command;
 use crate::target::target;
 use mickey_config as config;
 
-#[cfg(target_os = "linux")]
-use crate::portal;
 use crate::{
     audio, autostart, cli, clipboard, control, discovery, history, hotkey, identity, mcp, monitors,
     platform, source, speakers, trust, update, window,
 };
+#[cfg(target_os = "linux")]
+use crate::{desktop, portal};
 
 pub fn run(command: Command) -> Result<(), String> {
     match command {
@@ -316,7 +316,7 @@ fn run_from_config() -> Result<(), String> {
     // Outside Hyprland, the RemoteDesktop portal's session (PRD 0004),
     // opened now: its one question comes at login, not mid-switch.
     #[cfg(target_os = "linux")]
-    if monitors::uses_portal() {
+    if desktop::session() == desktop::Session::Portal {
         crate::threads::spawn("portal start", || {
             // The desktop's portal may come up after Mickey at login.
             for _ in 0..24 {

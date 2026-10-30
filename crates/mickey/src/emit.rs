@@ -89,17 +89,17 @@ pub fn place(x: i32, y: i32) -> io::Result<()> {
 /// relative, so Hyprland places it (PRD 0005 *Discoveries*).
 #[cfg(target_os = "linux")]
 pub fn place(x: i32, y: i32) -> io::Result<()> {
+    use crate::desktop::Session;
     use crate::monitors::hyprland;
-    if crate::x11::session() {
-        return crate::x11::place(x, y).map_err(io::Error::other);
-    }
-    if crate::sway::session() {
-        return crate::sway::place(x, y).map_err(io::Error::other);
-    }
-    if !crate::monitors::on_hyprland() {
-        return crate::portal::get()
-            .ok_or_else(|| io::Error::other("no RemoteDesktop portal to place the cursor"))?
-            .place(x, y);
+    match crate::desktop::session() {
+        Session::X11 => return crate::x11::place(x, y).map_err(io::Error::other),
+        Session::Sway => return crate::sway::place(x, y).map_err(io::Error::other),
+        Session::Portal => {
+            return crate::portal::get()
+                .ok_or_else(|| io::Error::other("no RemoteDesktop portal to place the cursor"))?
+                .place(x, y);
+        }
+        Session::Hyprland => {}
     }
     // A Lua config (Hyprland 0.55+) takes Lua; the older config language
     // takes the plain dispatcher. Try the first, then the second.
@@ -126,16 +126,13 @@ pub fn cursor() -> Option<(i32, i32)> {
 /// it through the portal (PRD 0004).
 #[cfg(target_os = "linux")]
 pub fn cursor() -> Option<(i32, i32)> {
-    if crate::monitors::on_hyprland() {
-        return crate::monitors::hyprland::cursor().ok();
+    use crate::desktop::Session;
+    match crate::desktop::session() {
+        Session::Hyprland => crate::monitors::hyprland::cursor().ok(),
+        Session::X11 => crate::x11::cursor().ok(),
+        Session::Sway => crate::sway::cursor(),
+        Session::Portal => crate::portal::get()?.cursor(),
     }
-    if crate::x11::session() {
-        return crate::x11::cursor().ok();
-    }
-    if crate::sway::session() {
-        return crate::sway::cursor();
-    }
-    crate::portal::get()?.cursor()
 }
 
 #[cfg(target_os = "linux")]
@@ -186,13 +183,16 @@ impl Emitter {
                 }
                 // Sway, or the portal: absolute moves, so Mickey knows
                 // where the cursor is (PRD 0004, #178).
-                if crate::sway::session() {
-                    return crate::sway::move_by(dx, dy).map_err(io::Error::other);
-                }
-                if crate::monitors::uses_portal()
-                    && let Some(portal) = crate::portal::get()
-                {
-                    return portal.move_by(dx, dy);
+                match crate::desktop::session() {
+                    crate::desktop::Session::Sway => {
+                        return crate::sway::move_by(dx, dy).map_err(io::Error::other);
+                    }
+                    crate::desktop::Session::Portal => {
+                        if let Some(portal) = crate::portal::get() {
+                            return portal.move_by(dx, dy);
+                        }
+                    }
+                    _ => {}
                 }
                 if dx != 0 {
                     self.device.emit(EV_REL, REL_X, dx);

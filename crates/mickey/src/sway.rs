@@ -16,11 +16,6 @@ const RUN_COMMAND: u32 = 0;
 const GET_OUTPUTS: u32 = 3;
 const MAGIC: &[u8; 6] = b"i3-ipc";
 
-/// Whether this session is Sway's (it sets `SWAYSOCK`). Never on Hyprland.
-pub fn session() -> bool {
-    std::env::var_os("SWAYSOCK").is_some() && !crate::monitors::on_hyprland()
-}
-
 /// One IPC question: the magic, the payload's length and the message
 /// kind (both little-endian u32), then the payload; the answer has the
 /// same header and a JSON body.

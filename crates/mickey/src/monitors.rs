@@ -13,16 +13,13 @@ pub fn this_pc() -> Result<Vec<Monitor>, String> {
         .map_err(|err| format!("cannot list monitors: {err}"));
     #[cfg(target_os = "linux")]
     {
-        if on_hyprland() {
-            return hyprland::monitors();
+        use crate::desktop::Session;
+        match crate::desktop::session() {
+            Session::Hyprland => return hyprland::monitors(),
+            Session::X11 => return crate::x11::monitors(),
+            Session::Sway => return crate::sway::monitors(),
+            Session::Portal => {}
         }
-        if crate::x11::session() {
-            return crate::x11::monitors();
-        }
-        if crate::sway::session() {
-            return crate::sway::monitors();
-        }
-        // Elsewhere (GNOME, KDE): the RemoteDesktop portal (PRD 0004).
         let monitors = crate::portal::get().map(crate::portal::Portal::monitors);
         monitors
             .filter(|monitors| !monitors.is_empty())
@@ -66,7 +63,7 @@ pub fn watch(
 /// every second could ask for permission again.
 pub fn follow_changes() -> bool {
     #[cfg(target_os = "linux")]
-    return !uses_portal();
+    return crate::desktop::session() != crate::desktop::Session::Portal;
     #[cfg(windows)]
     return true;
 }
@@ -92,21 +89,6 @@ pub fn keep_latest(every: std::time::Duration) -> Option<Latest> {
         }
     });
     Some(latest)
-}
-
-/// Whether Mickey goes through the RemoteDesktop and InputCapture portals
-/// here (GNOME and KDE on Wayland, PRD 0004): neither Hyprland, Sway nor
-/// the X server answers for the cursor and the monitors.
-#[cfg(target_os = "linux")]
-pub fn uses_portal() -> bool {
-    !on_hyprland() && !crate::x11::session() && !crate::sway::session()
-}
-
-/// Whether this session is Hyprland's, which Mickey asks through its own
-/// socket; elsewhere it goes through the RemoteDesktop portal (PRD 0004).
-#[cfg(target_os = "linux")]
-pub fn on_hyprland() -> bool {
-    std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_some()
 }
 
 #[cfg(target_os = "linux")]

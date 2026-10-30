@@ -40,7 +40,7 @@ impl EdgeCapture {
     pub fn start(here: Vec<Monitor>, barriers: Vec<Line>) -> EdgeCapture {
         let wanted = Arc::new(Mutex::new(barriers));
         let (hit, hits) = std::sync::mpsc::channel();
-        if crate::sway::session() {
+        if crate::desktop::session() == crate::desktop::Session::Sway {
             let wake = crate::sway_edges::start(Arc::clone(&wanted), hit)
                 .inspect_err(|err| eprintln!("mickey: no screen edges here: {err}"))
                 .ok();
