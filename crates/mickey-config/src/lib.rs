@@ -650,8 +650,8 @@ mod tests {
     #[test]
     fn the_next_hotkey_names_the_default_when_unset() {
         assert_eq!(Config::empty().hotkeys.next_or_default(), DEFAULT_NEXT);
-        let set = parse("[hotkeys]\nnext = \"Ctrl+F12\"\n").unwrap();
-        assert_eq!(set.hotkeys.next_or_default(), "Ctrl+F12");
+        let set = parse("[hotkeys]\nnext = \"AltGr+Down\"\n").unwrap();
+        assert_eq!(set.hotkeys.next_or_default(), "AltGr+Down");
     }
     #[test]
     fn a_peer_gets_its_key_in_place() {
