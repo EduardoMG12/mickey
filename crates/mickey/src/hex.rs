@@ -17,9 +17,22 @@ pub fn decode(text: &str) -> Option<Vec<u8>> {
         .collect()
 }
 
-/// 64 hex digits back to a 32-byte key.
+/// 64 hex digits back to a 32-byte key. Allocates nothing: it runs on
+/// every input event (`source::sound::audio_target`).
 pub fn decode_key(text: &str) -> Option<[u8; 32]> {
-    decode(text)?.try_into().ok()
+    let digits = text.as_bytes();
+    if digits.len() != 64 {
+        return None;
+    }
+    let mut key = [0; 32];
+    for (byte, [high, low]) in key.iter_mut().zip(digits.as_chunks::<2>().0) {
+        *byte = digit(*high)? << 4 | digit(*low)?;
+    }
+    Some(key)
+}
+
+fn digit(c: u8) -> Option<u8> {
+    char::from(c).to_digit(16).map(|value| value as u8)
 }
 
 #[cfg(test)]
@@ -39,5 +52,13 @@ mod tests {
         assert_eq!(decode("zz"), None);
         assert_eq!(decode("é0"), None);
         assert_eq!(decode_key("00"), None);
+        assert_eq!(decode_key(&"g".repeat(64)), None);
+        assert_eq!(decode_key(&"é".repeat(32)), None, "64 bytes, not 64 digits");
+    }
+
+    #[test]
+    fn a_key_reads_as_decode_reads_it() {
+        let text = "00FFa0".repeat(10) + "0123";
+        assert_eq!(decode_key(&text).map(Vec::from), decode(&text));
     }
 }
