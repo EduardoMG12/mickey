@@ -1063,6 +1063,8 @@ pub fn run(
         let mut heard_hotkeys = None;
         let mut heard_audio = None;
         let mut heard_version = None;
+        // A PC was forgotten from the settings' Remove.
+        let mut forgotten = false;
         // A PC to connect to from the settings: handled below, like `join`.
         let mut connecting = None;
         let mut asked_to_arrange = None;
@@ -1127,6 +1129,7 @@ pub fn run(
                     .lock()
                     .unwrap_or_else(|poisoned| poisoned.into_inner())
                     .forget(&fingerprint);
+                forgotten = matches!(forgot, Ok(true));
                 let _ = reply.send(match forgot {
                     Ok(true) => format!("ok: forgot {fingerprint}; it must pair again to connect"),
                     Ok(false) => {
@@ -1226,6 +1229,19 @@ pub fn run(
             Err(RecvTimeoutError::Disconnected) => break,
         }
         drop(act);
+        // At once, not after a restart: every PC no longer trusted (the one
+        // forgotten, and those it introduced) is dropped and listed as never
+        // paired, so Connect pairs it again with a code instead of saying it
+        // is already one of this PC's PCs.
+        if forgotten {
+            let trusted = shared.trusted.lock().unwrap_or_else(|p| p.into_inner());
+            for peer in peers.iter_mut() {
+                if peer.key.is_some_and(|key| !trusted.is_trusted(&key)) {
+                    peer.key = None;
+                    peer.link = None;
+                }
+            }
+        }
         if recording
             .as_ref()
             .is_some_and(|(_, _, since)| since.elapsed() > control::RECORD_TIMEOUT)
