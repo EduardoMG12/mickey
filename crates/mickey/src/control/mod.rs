@@ -19,6 +19,8 @@
 //! or `elsewhere` (whether this PC is the one controlled now), then one
 //! `online:<name>` or `offline:<name>` per peer.
 
+pub mod mcp;
+
 use crate::threads::LockAnyway;
 use std::fs;
 use std::io::{self, BufRead, BufReader, Write};
@@ -360,7 +362,7 @@ mod endpoint {
     /// 32 random bytes as hex, from the same generator the identity keys
     /// use (snow, through the OS), so no new dependency.
     fn random_token() -> Result<String, String> {
-        let params = crate::identity::NOISE_PARAMS
+        let params = crate::net::identity::NOISE_PARAMS
             .parse()
             .map_err(|err| format!("{err}"))?;
         let keypair = snow::Builder::new(params)

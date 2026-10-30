@@ -12,7 +12,7 @@
 //! types, presses keys, reads the clipboard, or forgets a PC.
 
 use crate::control::{self, Status};
-use crate::identity;
+use crate::net::identity;
 use crate::update;
 use mickey_config::{self as config, peers::Peers, version};
 use serde_json::{Value, json};

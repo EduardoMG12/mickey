@@ -1,8 +1,8 @@
 //! Moving the clipboard between PCs (PRD 0011), over the data link.
 
-use crate::clip_wire::{self, Wire};
+use crate::clipboard::wire::{self, Wire};
 use crate::clipboard::{Content, Keeper};
-use crate::secure::Link;
+use crate::net::secure::Link;
 use crate::threads::LockAnyway;
 use std::collections::HashMap;
 use std::io;
@@ -26,12 +26,12 @@ pub fn answer(
     loop {
         let bytes = link.recv_bulk()?;
         if let Some((&kind, text)) = bytes.split_first()
-            && kind >= crate::group::KIND
+            && kind >= crate::net::group::KIND
         {
             other(kind, &String::from_utf8_lossy(text));
             continue;
         }
-        let message = clip_wire::decode(&bytes).map_err(io::Error::other)?;
+        let message = wire::decode(&bytes).map_err(io::Error::other)?;
         match message {
             Wire::Ask => {
                 // Only right after the keyboard left this PC (#185).
@@ -152,15 +152,15 @@ pub fn may_write(grants: &Grants, ip: std::net::IpAddr) -> bool {
 /// `wire` ready to send; what cannot be sent (files over the limit) goes
 /// as `Nothing`, with the reason in the log, so the link stays up.
 fn encode_or_nothing(wire: &Wire) -> Vec<u8> {
-    clip_wire::encode(wire).unwrap_or_else(|err| {
+    wire::encode(wire).unwrap_or_else(|err| {
         eprintln!("mickey: clipboard not shared: {err}");
-        clip_wire::encode(&Wire::Nothing).expect("Nothing always encodes")
+        wire::encode(&Wire::Nothing).expect("Nothing always encodes")
     })
 }
 
 /// Saves files from another PC (see `received`); `None`, logged, if not.
 fn save(files: Vec<(String, Vec<u8>)>) -> Option<Vec<std::path::PathBuf>> {
-    crate::received::save(files)
+    crate::clipboard::received::save(files)
         .inspect_err(|err| eprintln!("mickey: {err}"))
         .ok()
 }
@@ -209,8 +209,8 @@ impl Mover {
                         if link.set_read_timeout(Some(ANSWER_WAIT)).is_err() {
                             continue;
                         }
-                        let version = crate::group::tagged(
-                            crate::group::VERSION,
+                        let version = crate::net::group::tagged(
+                            crate::net::group::VERSION,
                             mickey_config::version::THIS,
                         );
                         let sent = [Some(&version), map.as_ref(), audio.as_ref()]
@@ -252,14 +252,14 @@ impl Mover {
 
     /// Shares the group map with every peer, now and as links open.
     pub fn share_map(&self, text: &str) {
-        let _ = self.0.send(Job::Map(crate::group::message(text)));
+        let _ = self.0.send(Job::Map(crate::net::group::message(text)));
     }
 
     /// Asks `peer` to show the switcher with these cards.
     pub fn show_switcher(&self, peer: usize, cards: &str) {
         let _ = self.0.send(Job::SendTo(
             peer,
-            crate::group::tagged(crate::group::SWITCHER, cards),
+            crate::net::group::tagged(crate::net::group::SWITCHER, cards),
         ));
     }
 
@@ -267,22 +267,22 @@ impl Mover {
     pub fn mirror_switcher(&self, peer: usize, cards: &str) {
         let _ = self.0.send(Job::SendTo(
             peer,
-            crate::group::tagged(crate::group::MIRROR, cards),
+            crate::net::group::tagged(crate::net::group::MIRROR, cards),
         ));
     }
 
     /// Tells every peer to close the switcher or copy shown for this PC.
     pub fn close_switchers(&self) {
-        let _ = self.0.send(Job::Broadcast(crate::group::tagged(
-            crate::group::CLOSE,
+        let _ = self.0.send(Job::Broadcast(crate::net::group::tagged(
+            crate::net::group::CLOSE,
             "",
         )));
     }
 
     /// Sends this PC's `[hotkeys]` lines to every peer.
     pub fn share_hotkeys(&self, lines: &str) {
-        let _ = self.0.send(Job::Broadcast(crate::group::tagged(
-            crate::group::HOTKEYS,
+        let _ = self.0.send(Job::Broadcast(crate::net::group::tagged(
+            crate::net::group::HOTKEYS,
             lines,
         )));
     }
@@ -291,16 +291,17 @@ impl Mover {
     pub fn give_audio_key(&self, peer: usize, hex: &str) {
         let _ = self.0.send(Job::SendTo(
             peer,
-            crate::group::tagged(crate::group::AUDIO_KEY, hex),
+            crate::net::group::tagged(crate::net::group::AUDIO_KEY, hex),
         ));
     }
 
     /// Tells every peer who listens (`[audio]`'s shared lines), now and as
     /// links open.
     pub fn share_audio(&self, lines: &str) {
-        let _ = self
-            .0
-            .send(Job::Audio(crate::group::tagged(crate::group::AUDIO, lines)));
+        let _ = self.0.send(Job::Audio(crate::net::group::tagged(
+            crate::net::group::AUDIO,
+            lines,
+        )));
     }
 
     pub fn moved(&self, from: Option<usize>, to: Option<usize>) {
@@ -321,8 +322,8 @@ fn carry(
         None => keeper.read(),
         Some(peer) => {
             let asked = links.get_mut(&peer).map(|link| {
-                link.send_bulk(&clip_wire::encode(&Wire::Ask).map_err(io::Error::other)?)?;
-                clip_wire::decode(&link.recv_bulk()?).map_err(io::Error::other)
+                link.send_bulk(&wire::encode(&Wire::Ask).map_err(io::Error::other)?)?;
+                wire::decode(&link.recv_bulk()?).map_err(io::Error::other)
             });
             match asked {
                 Some(Ok(Wire::Content(content))) => Some(content),
@@ -386,7 +387,7 @@ mod tests {
     }
 
     use super::*;
-    use crate::identity::Identity;
+    use crate::net::identity::Identity;
     use std::net::{TcpListener, TcpStream};
     use std::sync::{Arc, Mutex};
     use std::thread;
@@ -425,10 +426,10 @@ mod tests {
         });
         let stream = TcpStream::connect(addr).unwrap();
         let mut link = Link::initiate(stream, &Identity::generate().unwrap()).unwrap();
-        let ask = |link: &mut Link, wire: Wire| link.send_bulk(&clip_wire::encode(&wire).unwrap());
+        let ask = |link: &mut Link, wire: Wire| link.send_bulk(&wire::encode(&wire).unwrap());
 
         ask(&mut link, Wire::Ask).unwrap();
-        let reply = clip_wire::decode(&link.recv_bulk().unwrap()).unwrap();
+        let reply = wire::decode(&link.recv_bulk().unwrap()).unwrap();
         assert_eq!(
             reply,
             Wire::Content(Content::Text("from the target".into()))

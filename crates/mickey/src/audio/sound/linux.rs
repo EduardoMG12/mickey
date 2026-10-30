@@ -7,7 +7,7 @@
 //! is what paces the jitter buffer.
 
 use super::at_volume;
-use crate::audio_wire::{CHANNELS, PCM_BYTES, RATE};
+use crate::audio::wire::{CHANNELS, PCM_BYTES, RATE};
 use libpulse_binding::def::BufferAttr;
 use libpulse_binding::sample::{Format, Spec};
 use libpulse_binding::stream::Direction;
@@ -165,7 +165,7 @@ impl Player {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sound::samples;
+    use crate::audio::sound::samples;
 
     /// Run by hand on a Linux desktop: plays a quiet 440 Hz tone for one
     /// second on the default output while recording that output's monitor,
@@ -267,7 +267,7 @@ mod idle {
         assert!(recorder.drowsy);
         let player = std::thread::spawn(|| {
             let mut player = super::Player::open("a test").unwrap();
-            let mut faint = [0u8; crate::audio_wire::PCM_BYTES];
+            let mut faint = [0u8; crate::audio::wire::PCM_BYTES];
             for sample in faint.as_chunks_mut::<2>().0 {
                 *sample = 1i16.to_le_bytes();
             }

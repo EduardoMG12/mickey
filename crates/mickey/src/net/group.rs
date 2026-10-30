@@ -113,7 +113,7 @@ pub fn decode(text: &str, from: IpAddr) -> Result<Vec<Member>, String> {
                 return Err(bad());
             };
             let key = crate::hex::decode_key(key).ok_or_else(bad)?;
-            if name.len() > 64 || !crate::discovery::plain_name(name) {
+            if name.len() > 64 || !crate::net::discovery::plain_name(name) {
                 return Err(bad());
             }
             let address = match address.strip_prefix(':') {

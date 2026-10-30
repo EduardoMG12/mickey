@@ -1,45 +1,27 @@
 //! Mickey: one keyboard and mouse shared across computers on the LAN.
 
 mod audio;
-mod audio_wire;
 mod autostart;
 mod cli;
-mod clip_sync;
-mod clip_watch;
-mod clip_wire;
 mod clipboard;
 mod control;
 #[cfg(target_os = "linux")]
 mod desktop;
-mod discovery;
 mod edges;
 mod focus;
 #[cfg(test)]
 mod fuzz;
-mod group;
 mod hex;
-mod history;
-mod identity;
 mod input;
-mod jitter;
-mod latency;
-mod mcp;
 mod monitors;
+mod net;
 // The Linux build never translates keys for Windows.
 mod platform;
-mod protocol;
-mod received;
 mod run;
-mod secure;
-mod sound;
 mod source;
-mod speakers;
 mod target;
 mod threads;
-mod transport;
 mod tray;
-mod tray_picture;
-mod trust;
 mod update;
 mod window;
 

@@ -7,7 +7,7 @@
 //! <public key, 64 hex digits> <where it was paired from>
 //! ```
 
-use crate::identity::fingerprint;
+use crate::net::identity::fingerprint;
 use crate::threads::LockAnyway;
 use std::fs;
 use std::io::Write;
@@ -33,7 +33,7 @@ pub fn dir() -> Result<PathBuf, String> {
     if let Some(state) = admin_state_dir() {
         return Ok(state);
     }
-    crate::identity::data_dir()
+    crate::net::identity::data_dir()
 }
 
 /// Whether this process may change the list itself; if not, the running

@@ -164,7 +164,7 @@ impl Portal {
 /// Where the restore token is kept: Mickey's data folder, readable only by
 /// its owner (it lets a program control this PC without asking).
 fn token_path() -> Option<std::path::PathBuf> {
-    crate::identity::data_dir()
+    crate::net::identity::data_dir()
         .ok()
         .map(|dir| dir.join("portal-token"))
 }

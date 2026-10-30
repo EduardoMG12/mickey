@@ -3,11 +3,11 @@
 
 use super::Peer;
 use crate::control::Order;
-use crate::discovery;
 use crate::focus::{Action, Focus, Switcher};
-use crate::identity;
 use crate::monitors::Monitor;
-use crate::trust;
+use crate::net::discovery;
+use crate::net::identity;
+use crate::net::trust;
 use mickey_config::peers::{PeerInfo, Peers};
 use std::time::Instant;
 

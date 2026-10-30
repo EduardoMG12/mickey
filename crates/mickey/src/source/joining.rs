@@ -3,7 +3,7 @@
 //! trusted PC paired with them here (#184).
 
 use super::{Peer, Shared, Wake, save_key, save_position};
-use crate::group;
+use crate::net::group;
 use crate::threads::LockAnyway;
 use mickey_config as config;
 use std::collections::HashSet;
@@ -38,7 +38,7 @@ pub(super) fn take_map(
                 && asked.insert(member.key)
             {
                 let introducer = peers.iter().find(|peer| peer.key == Some(by)).map_or_else(
-                    || crate::identity::fingerprint(&by),
+                    || crate::net::identity::fingerprint(&by),
                     |peer| peer.name.clone(),
                 );
                 ask_to_join(member, by, introducer, wake);
@@ -111,7 +111,7 @@ pub(super) fn join(
         let note = format!(
             "{} via {}",
             member.address,
-            crate::identity::fingerprint(by)
+            crate::net::identity::fingerprint(by)
         );
         if !trusted.is_trusted(&member.key)
             && let Err(err) = trusted.add(member.key, &note)

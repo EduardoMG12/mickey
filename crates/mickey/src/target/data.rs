@@ -4,7 +4,9 @@
 use super::slots::{SharedSlots, Slot};
 use super::{Shown, Sources, show_switcher_here};
 use crate::threads::LockAnyway;
-use crate::{audio, clip_sync, clipboard, group, identity, source, transport, trust, window};
+use crate::{
+    audio, clipboard, net::group, net::identity, net::transport, net::trust, source, window,
+};
 use mickey_config as config;
 use std::net::SocketAddr;
 
@@ -17,7 +19,7 @@ pub(super) fn serve_clipboard(
     keeper: clipboard::Keeper,
     controlled: &std::sync::mpsc::Sender<source::TargetNews>,
     sources: &Sources,
-    grants: &clip_sync::Grants,
+    grants: &clipboard::sync::Grants,
 ) {
     let data = transport::data_address(listen);
     let listener = match std::net::TcpListener::bind(data) {
@@ -52,11 +54,11 @@ pub(super) fn serve_clipboard(
                         let payload = |kind: u8, text: &str| {
                             on_payload(kind, text, from, by, &controlled, &sources, &shown)
                         };
-                        let _ = clip_sync::answer(
+                        let _ = clipboard::sync::answer(
                             link,
-                            || clip_sync::may_read(&grants, from),
+                            || clipboard::sync::may_read(&grants, from),
                             || keeper.read(),
-                            || clip_sync::may_write(&grants, from),
+                            || clipboard::sync::may_write(&grants, from),
                             |content| keeper.write(content),
                             payload,
                         );

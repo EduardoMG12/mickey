@@ -1,26 +1,26 @@
 //! The source side (Linux and Windows): capture local input, run the
 //! focus state machine, and send input to the focused peer.
 
-use crate::clip_sync::Mover;
 use crate::clipboard::Keeper;
+use crate::clipboard::history;
+use crate::clipboard::sync::Mover;
 use crate::control::{self, Control, Order, Request, Status};
-use crate::discovery;
 use crate::edges;
 use crate::focus::{Action, Focus, Switcher};
-use crate::group;
-use crate::history;
-use crate::identity::{self, Identity};
 use crate::input::Input;
 use crate::input::emit;
 use crate::input::event::InputEvent;
 use crate::input::hotkey::Hotkey;
 use crate::input::record::{Heard, Recording};
-use crate::latency;
 use crate::monitors;
-use crate::protocol::Message;
+use crate::net::discovery;
+use crate::net::group;
+use crate::net::identity::{self, Identity};
+use crate::net::latency;
+use crate::net::protocol::Message;
+use crate::net::trust;
 use crate::threads::LockAnyway;
 use crate::tray::{self, Tray};
-use crate::trust;
 use crate::update;
 use mickey_config as config;
 use std::net::SocketAddr;

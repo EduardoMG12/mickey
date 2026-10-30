@@ -8,8 +8,8 @@
 pub const SIZE: usize = 32;
 const BYTES: usize = SIZE * SIZE * 4;
 
-static WHITE: &[u8; BYTES] = include_bytes!("../assets/tray-white.rgba");
-static BLACK: &[u8; BYTES] = include_bytes!("../assets/tray-black.rgba");
+static WHITE: &[u8; BYTES] = include_bytes!("../../assets/tray-white.rgba");
+static BLACK: &[u8; BYTES] = include_bytes!("../../assets/tray-black.rgba");
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Dot {

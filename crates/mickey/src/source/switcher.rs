@@ -1,7 +1,7 @@
 //! The switcher window, shown when the hotkey is pressed (PRD 0007).
 
 use super::{Peer, Wake};
-use crate::clip_sync::Mover;
+use crate::clipboard::sync::Mover;
 use crate::window;
 use mickey_config as config;
 use std::sync::mpsc::Sender;

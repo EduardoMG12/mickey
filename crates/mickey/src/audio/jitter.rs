@@ -5,7 +5,7 @@
 //! (10 ms), grows by one each time one was missing when its turn came, and
 //! gives one back after a calm stretch, so the delay stays low.
 
-use crate::audio_wire::PCM_BYTES;
+use crate::audio::wire::PCM_BYTES;
 
 /// Datagrams the ring holds: 320 ms, more than any target.
 const SLOTS: usize = 64;

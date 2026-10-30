@@ -14,8 +14,8 @@
 //! the payload's length (4 bytes), then the payload in messages of up to
 //! `BULK_CHUNK` bytes each.
 
-use crate::identity::{Identity, NOISE_PARAMS};
-use crate::protocol::{self, MAX_FRAME, Message};
+use crate::net::identity::{Identity, NOISE_PARAMS};
+use crate::net::protocol::{self, MAX_FRAME, Message};
 use crate::threads::LockAnyway;
 use snow::{HandshakeState, TransportState};
 use std::io::{self, Read, Write};
@@ -432,7 +432,7 @@ mod tests {
             }
         });
         let (stream, _) = listener.accept().unwrap();
-        let identity = crate::identity::Identity::generate().unwrap();
+        let identity = crate::net::identity::Identity::generate().unwrap();
         let started = Instant::now();
         assert!(Link::respond(stream, &identity).is_err());
         let took = started.elapsed();
