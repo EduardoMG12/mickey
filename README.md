@@ -1,22 +1,42 @@
-# Mickey
+<p align="center">
+  <img src="assets/icons/mickey-rat.png" width="180" alt="The Ratão, Mickey's mascot">
+</p>
 
-**One keyboard and mouse for all your computers, written in Rust.**
+<h1 align="center">Mickey</h1>
+
+<p align="center">
+  <b>One keyboard and mouse for all your computers, written in Rust.</b>
+</p>
+
+<p align="center">
+  <a href="https://github.com/EduardoMG12/mickey/releases/latest"><img src="https://img.shields.io/github/v/release/EduardoMG12/mickey?label=release" alt="Latest release"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPL--3.0-blue" alt="License: GPL-3.0"></a>
+  <img src="https://img.shields.io/badge/platforms-Windows%20%7C%20Linux-informational" alt="Platforms: Windows and Linux">
+</p>
+
 Push the cursor off the edge of one screen and it appears on the next PC;
 copy on one and paste on another. Linux and Windows, and any of them can be
 the one whose keyboard you use. Inspired by Synergy, Deskflow/Input Leap and
 lan-mouse, built from scratch to be understood line by line.
 
 > **Status: alpha.** Used every day between an Arch Linux laptop (Hyprland)
-> and a Windows PC, and tested on eight more Linux distros (below). Expect
+> and a Windows PC, and tested on ten more Linux setups (below). Expect
 > rough edges, and read the [known limits](#known-limits).
+
+**Contents:** [What it does](#what-it-does) · [Install](#install) ·
+[First steps](#first-steps) · [Everyday use](#everyday-use) ·
+[Known limits](#known-limits) · [Security](#security) ·
+[Privacy](#privacy) · [Build from source](#build-from-source) ·
+[How it is developed](#how-this-project-is-developed)
 
 ---
 
 ## What it does
 
-- **Move between PCs** across the screen edges (on Windows and Hyprland so
-  far), with a hotkey, or with the **switcher**: one card per PC, shown on
-  the screen you are looking at.
+- **Move between PCs** across the screen edges (Windows, and on Linux
+  Hyprland, GNOME, KDE Plasma, Sway and X11 desktops), with a hotkey, or
+  with the **switcher**: one card per PC, shown on the screen you are
+  looking at.
 - **Any PC drives any other.** Every PC runs the same `mickey`; the one
   whose keyboard and mouse you touch is the one in charge.
 - **A shared clipboard that follows the keyboard.** Copy on one PC, move to
@@ -41,14 +61,20 @@ lan-mouse, built from scratch to be understood line by line.
 
 ## Install
 
-Download the latest release from the repository's **Releases** page:
+Download the latest release from the repository's
+[**Releases**](https://github.com/EduardoMG12/mickey/releases/latest) page.
 
-- **Windows:** run `Mickey-Setup-<version>.exe`. It installs to Program
+### Windows
+
+- Run `Mickey-Setup-<version>.exe`. It installs to Program
   Files, starts Mickey at logon (as administrator, so it can also drive
   administrator windows), allows it through the firewall on **private**
   networks only and adds **Mickey settings** to the Start menu. Remove it
   from *Settings → Apps*.
-- **Linux** (x86-64, glibc 2.35 or newer, systemd, and PulseAudio's
+
+### Linux
+
+- **Any distro** (x86-64, glibc 2.35 or newer, systemd, and PulseAudio's
   client library, which every desktop has; `install.sh` says how to add
   it if not): unpack
   `mickey-linux-x86_64.tar.gz` and run `./install.sh`. It asks for your
@@ -69,16 +95,29 @@ Download the latest release from the repository's **Releases** page:
 Each release also has `SHA256SUMS`: `sha256sum -c SHA256SUMS --ignore-missing`
 in the download folder checks what you got.
 
+### Coming soon
+
+- **winget** (`winget install EduardoMG12.Mickey`): submitted to Microsoft
+  ([microsoft/winget-pkgs#465909](https://github.com/microsoft/winget-pkgs/pull/465909)),
+  waiting for its review.
+- **AUR** (`mickey-bin`): the package is ready in
+  [`packaging/aur/`](packaging/aur/), and goes up once the AUR opens new
+  accounts again.
+- **A signed Windows installer:** applied for free code signing for open
+  source at [SignPath Foundation](https://signpath.org) (see the
+  [code signing policy](#code-signing-policy)). Until then Windows warns
+  about an unknown publisher, and Defender may flag it ([why](#known-limits)).
+
 ### Tested on
 
 | System | Desktop | Notes |
 |---|---|---|
 | Arch Linux | Hyprland (Wayland) | the owner's laptop; screen edges work |
 | Windows 10 | | screen edges work |
-| Ubuntu 24.04 | GNOME (Wayland) | |
+| Ubuntu 24.04 | GNOME (Wayland) | screen edges work, in a test VM |
 | Ubuntu 22.04 | GNOME | the oldest supported (glibc 2.35); install, start and discovery checked |
 | Linux Mint 22.3 | Cinnamon (X11) | screen edges work |
-| Fedora 44 | KDE Plasma (Wayland) | |
+| Fedora 44 | KDE Plasma (Wayland) | screen edges work, in a test VM |
 | Debian 13 | GNOME (Wayland) | no tray icon without an extension ([why](#known-limits)) |
 | Pop!_OS 24.04 | COSMIC (Wayland) | |
 | Xubuntu 24.04 | XFCE (X11) | |
@@ -88,7 +127,6 @@ in the download folder checks what you got.
 On the other Linux distros: the installer, starting at login, the windows,
 the tray, pairing, keys both ways and the clipboard both ways, in test
 virtual machines ([`tools/distro-test/`](tools/distro-test/), results in #171).
-Screen edges need Windows or Hyprland for now.
 
 ## First steps
 
@@ -232,8 +270,9 @@ Mickey's log says what it is doing (never which keys you press):
   laptop over Wi-Fi: keyboard and mouse p50 2.1 ms, p99 22.6 ms one way;
   sound about 65 ms. The budgets for a cable (input p99 under 2 ms, sound
   p99 under 40 ms) have not been checked: no cable was at hand.
-- **Screen edges only on Windows and Hyprland.** Elsewhere, use the hotkeys
-  and the switcher; native GNOME and KDE support is planned (#178).
+- **Screen edges on Sway** were checked in a test VM only (a headless
+  Sway), not on a real Sway desktop yet. Other wlroots compositors (river,
+  labwc, Wayfire) have no screen edges: use the hotkeys and the switcher.
 - **The switcher on GNOME (Wayland)** opens without a title bar, but where
   GNOME puts it, not in the chosen corner: GNOME lets no program place a
   window. On KDE Plasma and Hyprland it goes to its corner.
@@ -259,13 +298,15 @@ Mickey's log says what it is doing (never which keys you press):
 - **The `input` group** lets every program you run read the keyboard, not
   only Mickey; desktop portals are the long-term fix (#178).
 - **Local network only:** no relay over the internet.
-- **Windows Defender may block the installer** as
-  `Trojan:Win32/Bearfoos.B!ml`. The `!ml` means its machine-learning guess,
+- **Windows Defender may block the installer or remove `mickey.exe`** as
+  `Trojan:Win32/Bearfoos.B!ml` or `Behavior:Win32/Persistence.A!ml`. The
+  `!ml` means its machine-learning guess,
   not a known virus: a new program, not code-signed yet, that reads the
   keyboard and talks over the network looks like a keylogger to it. Check
   the download against `SHA256SUMS`, then in *Windows Security → Virus &
   threat protection → Protection history* open the item and choose
-  *Allow on device*. Signing is planned.
+  *Allow on device*, or add `C:\Program Files\Mickey` to Defender's
+  exclusions. Signing has been applied for ([Coming soon](#coming-soon)).
 - **Shared sound** is stereo and local-network only; microphones and
   cameras do not cross (they would need a virtual device, on Windows a
   driver). Linux needs PipeWire or PulseAudio, which every current
