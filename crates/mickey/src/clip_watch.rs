@@ -160,13 +160,8 @@ mod wayland {
         ]);
     }
 
-    /// Nothing to do with these objects' own events.
-    macro_rules! ignore {
-        ($($interface:ty),*) => {$(
-            impl Dispatch<$interface, ()> for Watch {
-                fn event(_: &mut Watch, _: &$interface, _: <$interface as wayland_client::Proxy>::Event, _: &(), _: &Connection, _: &QueueHandle<Watch>) {}
-            }
-        )*};
-    }
-    ignore!(WlSeat, ZwlrDataControlManagerV1, ZwlrDataControlOfferV1);
+    // Nothing to do with these objects' own events.
+    wayland_client::delegate_noop!(Watch: ignore WlSeat);
+    wayland_client::delegate_noop!(Watch: ignore ZwlrDataControlManagerV1);
+    wayland_client::delegate_noop!(Watch: ignore ZwlrDataControlOfferV1);
 }

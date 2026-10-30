@@ -429,22 +429,13 @@ impl Dispatch<WlCallback, ()> for Strips {
     }
 }
 
-/// Nothing to do with these objects' own events.
-macro_rules! ignore {
-    ($($interface:ty),*) => {$(
-        impl Dispatch<$interface, ()> for Strips {
-            fn event(_: &mut Strips, _: &$interface, _: <$interface as wayland_client::Proxy>::Event, _: &(), _: &Connection, _: &QueueHandle<Strips>) {}
-        }
-    )*};
-}
-ignore!(
-    WlCompositor,
-    wl_shm::WlShm,
-    WlShmPool,
-    WlBuffer,
-    WlSurface,
-    ZwlrLayerShellV1
-);
+// Nothing to do with these objects' own events.
+wayland_client::delegate_noop!(Strips: ignore WlCompositor);
+wayland_client::delegate_noop!(Strips: ignore wl_shm::WlShm);
+wayland_client::delegate_noop!(Strips: ignore WlShmPool);
+wayland_client::delegate_noop!(Strips: ignore WlBuffer);
+wayland_client::delegate_noop!(Strips: ignore WlSurface);
+wayland_client::delegate_noop!(Strips: ignore ZwlrLayerShellV1);
 
 #[cfg(test)]
 mod tests {

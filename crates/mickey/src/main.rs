@@ -310,8 +310,8 @@ fn run(command: Command) -> Result<(), String> {
                 // Same defaults as an empty config.toml, for these peers.
                 _ => config::HotkeySet {
                     peers: vec![None; peers.len()],
-                    ..config::parse("")
-                        .and_then(|empty| empty.hotkeys())
+                    ..config::Config::empty()
+                        .hotkeys()
                         .expect("the defaults are valid")
                 },
             };
@@ -324,9 +324,7 @@ fn run(command: Command) -> Result<(), String> {
                 interface,
                 source::Services {
                     trusted: trust::shared(&trust::dir()?)?,
-                    name: config::parse("")
-                        .map(|empty| empty.this_pc.name())
-                        .unwrap_or_default(),
+                    name: config::Config::empty().this_pc.name(),
                     port: config::DEFAULT_PORT,
                     controlled,
                     found: None,
@@ -413,7 +411,7 @@ fn run_from_config() -> Result<(), String> {
     // just waits to be controlled until some are added.
     let config = match config::Config::load()? {
         Some(config) => config,
-        None => config::parse("").expect("an empty config is valid"),
+        None => config::Config::empty(),
     };
     let this_pc = &config.this_pc;
     // Let the other PCs find this one, and hear them (PRD 0010). Without

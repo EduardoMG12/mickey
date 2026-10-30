@@ -116,7 +116,7 @@ impl Form {
         if !self.name.trim().is_empty() {
             out += &format!(
                 "name = {}    # how the other PCs see this one\n",
-                quote(self.name.trim())
+                config::toml_string(self.name.trim())
             );
         }
         out += &format!(
@@ -129,16 +129,16 @@ impl Form {
         );
         out += &format!(
             "listen = {}    # where the other PCs connect\n",
-            quote(&self.listen)
+            config::toml_string(&self.listen)
         );
         for pc in &self.pcs {
             out += "\n[[peer]]\n";
-            out += &format!("name = {}\n", quote(&pc.name));
-            out += &format!("address = {}\n", quote(&pc.address));
+            out += &format!("name = {}\n", config::toml_string(&pc.name));
+            out += &format!("address = {}\n", config::toml_string(&pc.address));
             if !pc.hotkey.trim().is_empty() {
                 out += &format!(
                     "hotkey = {}    # straight to this PC\n",
-                    quote(pc.hotkey.trim())
+                    config::toml_string(pc.hotkey.trim())
                 );
             }
             if let Some([x, y]) = pc.position {
@@ -147,7 +147,7 @@ impl Form {
             if let Some(key) = &pc.key {
                 out += &format!(
                     "key = {}    # this PC's identity, set by Mickey\n",
-                    quote(key)
+                    config::toml_string(key)
                 );
             }
         }
@@ -164,24 +164,31 @@ impl Form {
         .collect();
         out += "\n[hotkeys]\n";
         for (key, value) in hotkeys {
-            out += &format!("{key} = {}\n", quote(value));
+            out += &format!("{key} = {}\n", config::toml_string(value));
         }
         // Written even when empty: "" is how the double tap is turned off.
         out += &format!(
             "double_tap = {}    # a key tapped twice quickly: next PC\n",
-            quote(self.double_tap.trim())
+            config::toml_string(self.double_tap.trim())
         );
         out += &format!(
             "double_tap_ms = {}    # how close the two taps must be\n",
             self.double_tap_ms
         );
         out += "\n[interface]\n";
-        out += &format!("switcher_position = {}\n", quote(&self.position));
+        out += &format!(
+            "switcher_position = {}\n",
+            config::toml_string(&self.position)
+        );
         if self.vertical {
             out += "switcher_vertical = true\n";
         }
         if !self.order.is_empty() {
-            let names: Vec<String> = self.order.iter().map(|name| quote(name)).collect();
+            let names: Vec<String> = self
+                .order
+                .iter()
+                .map(|name| config::toml_string(name))
+                .collect();
             out += &format!("switcher_order = [{}]\n", names.join(", "));
         }
         let audio = Audio {
@@ -308,10 +315,6 @@ fn sound(ui: &mut egui::Ui, form: &mut Form, own_key: Option<&str>) {
             volume(ui, key, &mut form.volumes, &mut form.muted);
         });
     }
-}
-
-fn quote(text: &str) -> String {
-    format!("\"{}\"", text.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
 pub struct Settings {
@@ -568,7 +571,7 @@ impl Settings {
 }
 
 fn empty() -> Config {
-    config::parse("").expect("an empty config is valid")
+    Config::empty()
 }
 
 /// Runs `mickey <argument>` from next to this program: its output, or
