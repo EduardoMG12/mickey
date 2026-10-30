@@ -1,5 +1,5 @@
 PackageIdentifier: EduardoMG12.Mickey
-PackageVersion: 0.4.2
+PackageVersion: 0.4.3
 InstallerType: nullsoft
 Scope: machine
 # The installer makes a logon task and a firewall rule: it needs it.
@@ -13,7 +13,7 @@ InstallerSwitches:
 UpgradeBehavior: install
 Installers:
   - Architecture: x64
-    InstallerUrl: https://github.com/EduardoMG12/mickey/releases/download/v0.4.2/Mickey-Setup-0.4.2.exe
-    InstallerSha256: EA26E4BFE5E3225A318C0C434FFC2C670AA68DB237B9C0D638F4922C7AFACCCC
+    InstallerUrl: https://github.com/EduardoMG12/mickey/releases/download/v0.4.3/Mickey-Setup-0.4.3.exe
+    InstallerSha256: EFFE5A0E70720B6830C6B37A729FC3FA324AF111531A9AAA41316474F6623414
 ManifestType: installer
 ManifestVersion: 1.6.0
