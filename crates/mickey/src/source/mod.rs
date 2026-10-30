@@ -36,7 +36,7 @@ mod peer;
 mod sound;
 mod switcher;
 
-use hotkeys::take_hotkeys;
+use hotkeys::{offer_hotkeys, take_hotkeys};
 use joining::{add_peer, join, take_map};
 use layout::{arrange, edge_crossed, edges_matter, save_position};
 use orders::{found_text, obey, peers_text};
@@ -77,8 +77,10 @@ enum Wake {
     Version(std::net::IpAddr, String),
     /// A peer's group map (PRD 0010), and who sent it.
     Group(Vec<group::Member>, [u8; 32]),
-    /// A peer's hotkeys, to take.
-    Hotkeys(String),
+    /// A peer's hotkeys, and the address it sent them from.
+    Hotkeys(String, std::net::IpAddr),
+    /// The person here said yes to a peer's hotkeys (#349).
+    HotkeysAccepted(String),
     /// Who listens, from a peer.
     Audio(String),
     /// The person here accepted a PC the group introduced (#184).
@@ -186,8 +188,12 @@ pub enum TargetNews {
         members: Vec<group::Member>,
         by: [u8; 32],
     },
-    /// A peer's `[hotkeys]` lines, saved there: the group shares hotkeys.
-    Hotkeys(String),
+    /// A peer's `[hotkeys]` lines, saved there, and where they came from:
+    /// they are offered to this PC (#349).
+    Hotkeys {
+        lines: String,
+        from: std::net::IpAddr,
+    },
     /// Who listens, as a peer shared it (PRD 0012).
     Audio(String),
     /// The Mickey version the peer at this address runs (PRD 0013).
@@ -320,7 +326,7 @@ pub fn run(
                     TargetNews::Controlled(here) => Wake::Controlled(here),
                     TargetNews::Arranged { from, position } => Wake::Arranged(from, position),
                     TargetNews::Group { members, by } => Wake::Group(members, by),
-                    TargetNews::Hotkeys(lines) => Wake::Hotkeys(lines),
+                    TargetNews::Hotkeys { lines, from } => Wake::Hotkeys(lines, from),
                     TargetNews::Audio(lines) => Wake::Audio(lines),
                     TargetNews::Version { from, version } => Wake::Version(from, version),
                 };
@@ -707,7 +713,8 @@ pub fn run(
             Ok(Wake::Arranged(from, position)) => placed = Some((from, position)),
             Ok(Wake::Group(members, by)) => heard_map = Some((members, by)),
             Ok(Wake::Accepted(member, by)) => accepted = Some((member, by)),
-            Ok(Wake::Hotkeys(lines)) => heard_hotkeys = Some(lines),
+            Ok(Wake::Hotkeys(lines, from)) => heard_hotkeys = Some((lines, from)),
+            Ok(Wake::HotkeysAccepted(lines)) => pending_hotkeys = Some(lines),
             Ok(Wake::Audio(lines)) => heard_audio = Some(lines),
             Ok(Wake::Version(from, version)) => heard_version = Some((from, version)),
             Ok(Wake::Control(request)) if request.order == Order::Arranged => {
@@ -865,7 +872,9 @@ pub fn run(
                 use_hotkeys(&config, &mut focus_machine, &mut double_tap_window);
                 interface = config.interface.clone();
                 if let Some(data_links) = &data_links {
-                    data_links.share_hotkeys(&config.hotkeys.to_lines());
+                    if config.this_pc.share_hotkeys {
+                        data_links.share_hotkeys(&config.hotkeys.to_lines());
+                    }
                     data_links.share_audio(&config.audio.shared_lines());
                 }
                 audio = config.audio.clone();
@@ -905,8 +914,12 @@ pub fn run(
             };
             let _ = reply.send(answer);
         }
-        if let Some(lines) = heard_hotkeys {
-            pending_hotkeys = Some(lines);
+        if let Some((lines, from)) = heard_hotkeys {
+            let who = peers
+                .iter()
+                .find(|peer| peer.address.ip() == from)
+                .map_or_else(|| from.to_string(), |peer| peer.name.clone());
+            offer_hotkeys(lines, &who, &wake);
         }
         if let Some(lines) = heard_audio {
             match take_audio(&lines) {

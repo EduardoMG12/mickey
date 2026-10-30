@@ -21,6 +21,8 @@ pub struct Form {
     pub name: String,
     pub controls_others: bool,
     pub controlled: bool,
+    /// Share the hotkeys with the other PCs, and be asked about theirs.
+    pub share_hotkeys: bool,
     pub listen: String,
     pub pcs: Vec<PcRow>,
     pub next: String,
@@ -61,6 +63,7 @@ impl Form {
             name: text(&config.this_pc.name),
             controls_others: config.this_pc.controls_others,
             controlled: config.this_pc.controlled,
+            share_hotkeys: config.this_pc.share_hotkeys,
             listen: config.this_pc.listen.to_string(),
             pcs: config
                 .peers
@@ -120,6 +123,10 @@ impl Form {
         out += &format!(
             "controlled = {}         # let paired PCs drive this one\n",
             self.controlled
+        );
+        out += &format!(
+            "share_hotkeys = {}      # share [hotkeys] with the other PCs, and be asked about theirs\n",
+            self.share_hotkeys
         );
         out += &format!(
             "listen = {}    # where the other PCs connect\n",
@@ -221,7 +228,7 @@ mod tests {
     #[test]
     fn what_the_form_writes_parses_back_to_the_same_form() {
         let original = config::parse(
-            "[[peer]]\nname = \"Windows \\\"main\\\"\"\naddress = \"192.0.2.10:4242\"\nhotkey = \"AltGr+RightShift+1\"\nposition = [-1920, 0]\nkey = \"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"\n\n[hotkeys]\nhome = \"AltGr+RightShift+H\"\n\n[interface]\nswitcher_position = \"top-left\"\n\n[clipboard]\nhistory = false\n\n[updates]\ncheck = false\n\n[audio]\nlistener = \"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"\nmode = \"both\"\n\n[this_pc]\ncontrolled = false\nname = \"Desk\"\n",
+            "[[peer]]\nname = \"Windows \\\"main\\\"\"\naddress = \"192.0.2.10:4242\"\nhotkey = \"AltGr+RightShift+1\"\nposition = [-1920, 0]\nkey = \"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"\n\n[hotkeys]\nhome = \"AltGr+RightShift+H\"\n\n[interface]\nswitcher_position = \"top-left\"\n\n[clipboard]\nhistory = false\n\n[updates]\ncheck = false\n\n[audio]\nlistener = \"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"\nmode = \"both\"\n\n[this_pc]\ncontrolled = false\nshare_hotkeys = false\nname = \"Desk\"\n",
         )
         .unwrap();
         let form = Form::from_config(&original);

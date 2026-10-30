@@ -102,7 +102,8 @@ fn on_payload(
             crate::threads::spawn("switcher close", move || window::close(&shown));
         }
         group::HOTKEYS => {
-            let _ = target_news.send(source::TargetNews::Hotkeys(text.to_string()));
+            let lines = text.to_string();
+            let _ = target_news.send(source::TargetNews::Hotkeys { lines, from });
         }
         group::AUDIO_KEY => {
             // Named after the PC, as config.toml knows it.

@@ -191,3 +191,9 @@ PRD's review.
   and the double-tap key are forwarded when pressed, and only a chord's
   last key waits; the target sees a hotkey's modifiers go down and up,
   which is harmless, but never its last key.
+- **Shared hotkeys are asked about** (2026-10-30, #349). A paired PC used
+  to replace this PC's hotkeys as soon as it saved its own, which a
+  paired PC could abuse (`Ctrl+C` as a hotkey) and which forced one set
+  of keys on PCs with different keyboards. Now the change is shown first,
+  with who sent it, and taken only on a yes; `[this_pc] share_hotkeys =
+  false` (Settings, Hotkeys tab) keeps a PC's own hotkeys for good.

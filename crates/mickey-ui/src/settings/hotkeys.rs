@@ -96,6 +96,11 @@ impl Settings {
             crate::theme::keycaps(ui, "AltGr", false, false);
             ui.weak("2 s, and let go: works whatever is set here");
         });
+        ui.checkbox(
+            &mut form.share_hotkeys,
+            "Share these hotkeys with the other PCs, and ask before using theirs",
+        )
+        .on_hover_text("Off: this PC keeps its own hotkeys, for a keyboard unlike the others'.");
         let held = game_keys(form);
         if !held.is_empty() {
             ui.colored_label(
