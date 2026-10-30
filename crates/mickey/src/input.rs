@@ -3,6 +3,8 @@
 //! interface, so the focus, hotkey and switcher work the same on both.
 
 use crate::event::InputEvent;
+#[cfg(windows)]
+use crate::threads::LockAnyway;
 use std::sync::mpsc::Sender;
 
 #[cfg(target_os = "linux")]
@@ -124,7 +126,7 @@ mod windows {
     impl Drop for Grabbed<'_> {
         fn drop(&mut self) {
             hooks::set_swallow(false);
-            *self.anchor.lock().unwrap_or_else(|p| p.into_inner()) = None;
+            *self.anchor.lock_anyway() = None;
         }
     }
 
@@ -154,7 +156,7 @@ mod windows {
             let anchor = Arc::clone(&self.anchor);
             crate::threads::spawn("input translate", move || {
                 for event in raw {
-                    let anchor = *anchor.lock().unwrap_or_else(|p| p.into_inner());
+                    let anchor = *anchor.lock_anyway();
                     if let Some(event) = translate(event, anchor)
                         && events.send(T::from(event)).is_err()
                     {
@@ -175,7 +177,7 @@ mod windows {
 
         /// Pins the cursor where it is and starts swallowing.
         pub fn grab(&self) -> Result<Grabbed<'_>, String> {
-            *self.anchor.lock().unwrap_or_else(|p| p.into_inner()) = Some(hooks::cursor_pos());
+            *self.anchor.lock_anyway() = Some(hooks::cursor_pos());
             hooks::set_swallow(true);
             Ok(Grabbed {
                 anchor: Arc::clone(&self.anchor),

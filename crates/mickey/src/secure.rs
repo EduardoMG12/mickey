@@ -16,6 +16,7 @@
 
 use crate::identity::{Identity, NOISE_PARAMS};
 use crate::protocol::{self, MAX_FRAME, Message};
+use crate::threads::LockAnyway;
 use snow::{HandshakeState, TransportState};
 use std::io::{self, Read, Write};
 use std::net::TcpStream;
@@ -95,10 +96,7 @@ impl Link {
         let mut sealed = [0u8; MAX_FRAME + TAG_LEN];
         // Hold the lock until the bytes are written: messages must reach the
         // wire in the order they were encrypted, or the peer's nonces break.
-        let mut noise = self
-            .noise
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut noise = self.noise.lock_anyway();
         let sealed_len = noise
             .write_message(&frame[1..len], &mut sealed)
             .map_err(noise_error)?;
@@ -114,8 +112,7 @@ impl Link {
         // Only the decryption holds the lock, never the blocking read.
         let body_len = self
             .noise
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .lock_anyway()
             .read_message(&sealed[..len], &mut body)
             .map_err(noise_error)?;
         protocol::decode(&body[..body_len]).map_err(|err| invalid(err.to_string()))
@@ -132,10 +129,7 @@ impl Link {
         }
         let length = (bytes.len() as u32).to_be_bytes();
         let mut sealed = vec![0u8; BULK_CHUNK + TAG_LEN];
-        let mut noise = self
-            .noise
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut noise = self.noise.lock_anyway();
         for piece in std::iter::once(&length[..]).chain(bytes.chunks(BULK_CHUNK)) {
             let len = noise
                 .write_message(piece, &mut sealed)
@@ -152,8 +146,7 @@ impl Link {
         let mut open = |stream: &mut TcpStream, plain: &mut [u8]| -> io::Result<usize> {
             let len = read_noise(stream, &mut sealed)?;
             self.noise
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .lock_anyway()
                 .read_message(&sealed[..len], plain)
                 .map_err(noise_error)
         };

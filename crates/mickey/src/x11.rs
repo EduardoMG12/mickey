@@ -5,6 +5,7 @@
 //! goes in through uinput, which X reads like any other device.
 
 use crate::monitors::Monitor;
+use crate::threads::LockAnyway;
 use std::sync::{Mutex, OnceLock};
 use x11rb::connection::Connection;
 use x11rb::protocol::randr::ConnectionExt as _;
@@ -43,7 +44,7 @@ fn server() -> Result<&'static Mutex<(RustConnection, Window)>, String> {
 /// The monitors as RandR lays them out, in pixels: X has no scaling, so
 /// pixels are the logical size.
 pub fn monitors() -> Result<Vec<Monitor>, String> {
-    let server = server()?.lock().unwrap_or_else(|p| p.into_inner());
+    let server = server()?.lock_anyway();
     let (connection, root) = &*server;
     let reply = connection
         .randr_get_monitors(*root, true)
@@ -68,7 +69,7 @@ pub fn monitors() -> Result<Vec<Monitor>, String> {
 
 /// Where the pointer is on the whole desktop.
 pub fn cursor() -> Result<(i32, i32), String> {
-    let server = server()?.lock().unwrap_or_else(|p| p.into_inner());
+    let server = server()?.lock_anyway();
     let (connection, root) = &*server;
     let reply = connection
         .query_pointer(*root)
@@ -81,7 +82,7 @@ pub fn cursor() -> Result<(i32, i32), String> {
 /// Puts the pointer at `x, y` of the desktop.
 pub fn place(x: i32, y: i32) -> Result<(), String> {
     let (x, y) = (clamp(x), clamp(y));
-    let server = server()?.lock().unwrap_or_else(|p| p.into_inner());
+    let server = server()?.lock_anyway();
     let (connection, root) = &*server;
     connection
         .warp_pointer(x11rb::NONE, *root, 0, 0, 0, 0, x, y)

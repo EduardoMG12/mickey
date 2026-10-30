@@ -5,6 +5,8 @@
 //! Windows an icon in the notification area (`platform::tray`).
 
 use crate::control::Status;
+#[cfg(windows)]
+use crate::threads::LockAnyway;
 use crate::tray_picture::{self, Dot};
 use std::sync::mpsc::Sender;
 
@@ -196,7 +198,7 @@ impl Tray {
                 1 => Click::Home,
                 peer => Click::Go(peer as usize - 2),
             };
-            let _ = clicks.lock().unwrap_or_else(|p| p.into_inner()).send(click);
+            let _ = clicks.lock_anyway().send(click);
         };
         let icon = crate::platform::tray::Icon::start(look(&status), Box::new(picked))
             .map(Tray)

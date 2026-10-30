@@ -19,6 +19,7 @@
 //! or `elsewhere` (whether this PC is the one controlled now), then one
 //! `online:<name>` or `offline:<name>` per peer.
 
+use crate::threads::LockAnyway;
 use std::fs;
 use std::io::{self, BufRead, BufReader, Write};
 use std::path::PathBuf;
@@ -365,11 +366,7 @@ mod endpoint {
         let keypair = snow::Builder::new(params)
             .generate_keypair()
             .map_err(|err| format!("{err}"))?;
-        Ok(keypair
-            .private
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect())
+        Ok(crate::hex::encode(&keypair.private))
     }
 }
 
@@ -437,10 +434,7 @@ fn accept<T: From<Request>>(
         }
         drop(reader);
         let mut stream = stream;
-        let status = latest
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .clone();
+        let status = latest.lock_anyway().clone();
         match request.trim() {
             "status" => {
                 if let Some(status) = status {
@@ -513,9 +507,7 @@ fn publish(
 ) {
     let mut followers: Vec<Stream> = Vec::new();
     for status in updates {
-        *latest
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(status.clone());
+        *latest.lock_anyway() = Some(status.clone());
         followers.extend(new_followers.try_iter());
         let line = format!("{}\n", status.to_line());
         followers.retain_mut(|stream| stream.write_all(line.as_bytes()).is_ok());

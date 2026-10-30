@@ -19,6 +19,7 @@ use crate::monitors::{self, Monitor};
 use crate::protocol::Message;
 use crate::record::{Heard, Recording};
 use crate::secure::Link;
+use crate::threads::LockAnyway;
 use crate::transport;
 use crate::tray::{self, Tray};
 use crate::trust;
@@ -293,7 +294,7 @@ fn listen_here(me: &[u8; 32]) -> Result<config::Audio, String> {
     let path = config::path()?;
     let text = std::fs::read_to_string(&path).unwrap_or_default();
     let audio = config::Audio {
-        listener: Some(crate::trust::to_hex(me)),
+        listener: Some(crate::hex::encode(me)),
         since: config::now_seconds(),
         ..config::parse(&text)?.audio
     };
@@ -316,7 +317,7 @@ fn audio_target(
     }
     // Compared as bytes: this runs on every input event, and writing two
     // keys as hex text cost 66 allocations and 7 us each time.
-    let listener = crate::trust::from_hex(audio.listener.as_deref()?)?;
+    let listener = crate::hex::decode_key(audio.listener.as_deref()?)?;
     if listener == *me {
         return None;
     }
@@ -382,7 +383,7 @@ fn join(
         return None;
     }
     {
-        let mut trusted = shared.trusted.lock().unwrap_or_else(|p| p.into_inner());
+        let mut trusted = shared.trusted.lock_anyway();
         // Noted with who introduced it, so forgetting that PC forgets it too.
         let note = format!(
             "{} via {}",
@@ -463,7 +464,7 @@ fn add_peer(
 fn save_key(name: &str, key: &[u8; 32]) {
     let saved = config::path().and_then(|path| {
         let text = std::fs::read_to_string(&path).map_err(|err| err.to_string())?;
-        let text = config::set_key(&text, name, &trust::to_hex(key))?;
+        let text = config::set_key(&text, name, &crate::hex::encode(key))?;
         config::write(&path, &text)
     });
     if let Err(err) = saved {
@@ -634,7 +635,7 @@ pub fn run(
         .into_iter()
         .map(|peer| Peer {
             key: peer.key.as_deref().and_then(|hex| {
-                let key = trust::from_hex(hex);
+                let key = crate::hex::decode_key(hex);
                 if key.is_none() {
                     eprintln!(
                         "mickey: {}'s key in config.toml is not 64 hex digits; ignored",
@@ -1124,11 +1125,7 @@ pub fn run(
                 order: Order::Forget(fingerprint),
                 reply,
             })) => {
-                let forgot = shared
-                    .trusted
-                    .lock()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner())
-                    .forget(&fingerprint);
+                let forgot = shared.trusted.lock_anyway().forget(&fingerprint);
                 forgotten = matches!(forgot, Ok(true));
                 let _ = reply.send(match forgot {
                     Ok(true) => format!("ok: forgot {fingerprint}; it must pair again to connect"),
@@ -1188,7 +1185,7 @@ pub fn run(
             Ok(Wake::Control(request)) if request.order == Order::History => {
                 let answer = match (&history, &keeper) {
                     (Some(history), _) => {
-                        let history = history.lock().unwrap_or_else(|p| p.into_inner());
+                        let history = history.lock_anyway();
                         history::lines(&history, std::time::SystemTime::now())
                     }
                     (None, Some(_)) => {
@@ -1203,7 +1200,7 @@ pub fn run(
                 reply,
             })) => {
                 let entry = history.as_ref().and_then(|history| {
-                    let history = history.lock().unwrap_or_else(|p| p.into_inner());
+                    let history = history.lock_anyway();
                     history.get(id).and_then(|entry| entry.content())
                 });
                 let answer = match (entry, &keeper) {
@@ -1234,7 +1231,7 @@ pub fn run(
         // paired, so Connect pairs it again with a code instead of saying it
         // is already one of this PC's PCs.
         if forgotten {
-            let trusted = shared.trusted.lock().unwrap_or_else(|p| p.into_inner());
+            let trusted = shared.trusted.lock_anyway();
             for peer in peers.iter_mut() {
                 if peer.key.is_some_and(|key| !trusted.is_trusted(&key)) {
                     peer.key = None;
@@ -1351,11 +1348,7 @@ pub fn run(
         if let Some((members, by)) = heard_map {
             let me = *shared.identity.public();
             for member in group::as_seen_by(&members, &me) {
-                let trusted = shared
-                    .trusted
-                    .lock()
-                    .unwrap_or_else(|p| p.into_inner())
-                    .is_trusted(&member.key);
+                let trusted = shared.trusted.lock_anyway().is_trusted(&member.key);
                 // A PC this one never paired with joins only once the
                 // person here says so (#184), asked once per run.
                 if !trusted {
@@ -1596,11 +1589,7 @@ fn reconnect(index: usize, to: SocketAddr, shared: &Arc<Shared>, back: &Sender<(
             let Ok(mut link) = transport::connect(to, &shared.identity) else {
                 continue;
             };
-            let trusted = shared
-                .trusted
-                .lock()
-                .unwrap_or_else(|p| p.into_inner())
-                .is_trusted(link.peer_key());
+            let trusted = shared.trusted.lock_anyway().is_trusted(link.peer_key());
             if !trusted {
                 println!(
                     "mickey: {to} has a key this PC never paired with; `mickey connect {to} <name>` pairs again"
@@ -1759,7 +1748,7 @@ mod tests {
             version: None,
         };
         let audio = config::Audio {
-            listener: Some(trust::to_hex(&[2; 32])),
+            listener: Some(crate::hex::encode(&[2; 32])),
             ..config::Audio::default()
         };
         (audio, [9; 32], vec![peer(1), peer(2)])

@@ -3,6 +3,7 @@
 use crate::clip_wire::{self, Wire};
 use crate::clipboard::{Content, Keeper};
 use crate::secure::Link;
+use crate::threads::LockAnyway;
 use std::collections::HashMap;
 use std::io;
 use std::sync::mpsc::{self, Sender};
@@ -107,7 +108,7 @@ pub type Grants = std::sync::Arc<std::sync::Mutex<HashMap<std::net::IpAddr, Clip
 
 /// Records a focus change from the source at `ip`.
 pub fn focus_changed(grants: &Grants, ip: std::net::IpAddr, here: bool) {
-    let mut grants = grants.lock().unwrap_or_else(|p| p.into_inner());
+    let mut grants = grants.lock_anyway();
     grants.entry(ip).or_default().focus(here, Instant::now());
 }
 
@@ -118,8 +119,7 @@ pub fn may_read(grants: &Grants, ip: std::net::IpAddr) -> bool {
     let started = Instant::now();
     loop {
         let allowed = grants
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
+            .lock_anyway()
             .get_mut(&ip)
             .is_some_and(|grant| grant.take(Instant::now()));
         if allowed || started.elapsed() > std::time::Duration::from_millis(500) {
@@ -139,8 +139,7 @@ pub fn may_write(grants: &Grants, ip: std::net::IpAddr) -> bool {
     let started = Instant::now();
     loop {
         let allowed = grants
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
+            .lock_anyway()
             .get(&ip)
             .is_some_and(ClipGrant::in_control);
         if allowed || started.elapsed() > std::time::Duration::from_millis(500) {

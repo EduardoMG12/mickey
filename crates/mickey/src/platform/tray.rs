@@ -3,6 +3,7 @@
 //! and it shows a popup menu. It knows nothing about Mickey: it shows the
 //! picture, tooltip and menu it is given, and reports the id picked.
 
+use crate::threads::LockAnyway;
 use std::ffi::c_void;
 use std::io;
 use std::sync::atomic::{AtomicIsize, Ordering};
@@ -239,7 +240,7 @@ impl Icon {
 
     pub fn show(&self, look: Look) {
         if let Some(shared) = SHARED.get() {
-            *shared.look.lock().unwrap_or_else(|p| p.into_inner()) = look;
+            *shared.look.lock_anyway() = look;
             // SAFETY: posting to our own window; a 0 handle just fails.
             unsafe { PostMessageW(shared.hwnd.load(Ordering::SeqCst), WM_REFRESH, 0, 0) };
         }
@@ -329,7 +330,7 @@ fn notify(hwnd: isize, message: u32) -> bool {
     let Some(shared) = SHARED.get() else {
         return false;
     };
-    let look = shared.look.lock().unwrap_or_else(|p| p.into_inner());
+    let look = shared.look.lock_anyway();
     let icon = make_icon(&look.picture);
     // SAFETY: NOTIFYICONDATAW is plain data; all zeros is a valid start.
     let mut data: NotifyIconData = unsafe { std::mem::zeroed() };
@@ -435,12 +436,7 @@ fn show_menu(hwnd: isize) {
     let Some(shared) = SHARED.get() else {
         return;
     };
-    let items = shared
-        .look
-        .lock()
-        .unwrap_or_else(|p| p.into_inner())
-        .menu
-        .clone();
+    let items = shared.look.lock_anyway().menu.clone();
     // SAFETY: the menu is ours from creation to destruction here; every
     // string lives across the AppendMenuW call that copies it.
     let picked = unsafe {

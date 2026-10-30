@@ -1,6 +1,7 @@
 //! `mickey-ui` windows that Mickey may have to close before they answer:
 //! the switcher closes when its hotkey is pressed again (PRD 0007).
 
+use crate::threads::LockAnyway;
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -74,5 +75,5 @@ pub fn close(slot: &Slot) {
 }
 
 fn lock(slot: &Slot) -> std::sync::MutexGuard<'_, Option<Child>> {
-    slot.lock().unwrap_or_else(|p| p.into_inner())
+    slot.lock_anyway()
 }

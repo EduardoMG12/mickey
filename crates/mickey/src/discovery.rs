@@ -18,6 +18,7 @@
 //! "MKY1" | port: u16 | public key: 32 bytes | name length: u8 | name
 //! ```
 
+use crate::threads::LockAnyway;
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket};
 use std::sync::{Arc, Mutex};
@@ -98,7 +99,7 @@ impl Table {
             address: SocketAddr::new(from, announce.port),
             key: announce.key,
         };
-        let mut table = self.0.lock().unwrap_or_else(|p| p.into_inner());
+        let mut table = self.0.lock_anyway();
         table.insert(found.key, (found, at));
         if table.len() > MAX_HEARD {
             table.retain(|_, (_, heard)| at.duration_since(*heard) < FORGET_AFTER);
@@ -118,13 +119,13 @@ impl Table {
 
     /// The name a PC announced, if it was heard.
     pub fn name_of(&self, key: &[u8; 32]) -> Option<String> {
-        let table = self.0.lock().unwrap_or_else(|p| p.into_inner());
+        let table = self.0.lock_anyway();
         table.get(key).map(|(found, _)| found.name.clone())
     }
 
     /// The PCs heard in the last `FORGET_AFTER`, by name.
     pub fn list(&self, now: Instant) -> Vec<Found> {
-        let mut table = self.0.lock().unwrap_or_else(|p| p.into_inner());
+        let mut table = self.0.lock_anyway();
         table.retain(|_, (_, at)| now.duration_since(*at) < FORGET_AFTER);
         let mut found: Vec<Found> = table.values().map(|(found, _)| found.clone()).collect();
         found.sort_by(|a, b| a.name.cmp(&b.name));
