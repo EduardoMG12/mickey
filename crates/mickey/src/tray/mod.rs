@@ -4,10 +4,12 @@
 //! tray, KDE, GNOME with the AppIndicator extension), through `ksni`; on
 //! Windows an icon in the notification area (`platform::tray`).
 
+pub mod picture;
+
 use crate::control::Status;
 #[cfg(windows)]
 use crate::threads::LockAnyway;
-use crate::tray_picture::{self, Dot};
+use picture::Dot;
 use std::sync::mpsc::Sender;
 
 /// What the owner picked in the menu.
@@ -74,14 +76,14 @@ impl ksni::Tray for Icon {
 
     fn icon_pixmap(&self) -> Vec<ksni::Icon> {
         let (dot, _) = looks(&self.status);
-        let rgba = tray_picture::picture(dot, false);
+        let rgba = picture::picture(dot, false);
         // The protocol wants ARGB, byte by byte.
         let (pixels, _) = rgba.as_chunks::<4>();
         let argb = pixels
             .iter()
             .flat_map(|&[r, g, b, a]| [a, r, g, b])
             .collect();
-        let size = tray_picture::SIZE as i32;
+        let size = picture::SIZE as i32;
         vec![ksni::Icon {
             width: size,
             height: size,
@@ -265,7 +267,7 @@ fn look(status: &Status) -> crate::platform::tray::Look {
     menu.push(item("Settings", true, SETTINGS));
     menu.push(item("Quit Mickey", true, QUIT));
     Look {
-        picture: tray_picture::picture(dot, false),
+        picture: picture::picture(dot, false),
         tip: format!("Mickey · {tip}"),
         menu,
     }

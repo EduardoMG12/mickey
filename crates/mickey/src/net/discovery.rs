@@ -169,7 +169,7 @@ pub fn start(me: Announce) -> Result<Table, String> {
                 continue;
             };
             // Our own packets, and anything from outside the local network.
-            if announce.key == me.key || !crate::group::is_local(from.ip()) {
+            if announce.key == me.key || !crate::net::group::is_local(from.ip()) {
                 continue;
             }
             let now = Instant::now();
@@ -194,7 +194,7 @@ pub fn start(me: Announce) -> Result<Table, String> {
 fn targets() -> Vec<Ipv4Addr> {
     let mut all: Vec<Ipv4Addr> = networks()
         .into_iter()
-        .filter(|network| crate::group::is_local((*network).into()))
+        .filter(|network| crate::net::group::is_local((*network).into()))
         .collect();
     all.push(Ipv4Addr::BROADCAST);
     all

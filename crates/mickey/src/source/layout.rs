@@ -4,7 +4,7 @@
 use super::Peer;
 use crate::edges;
 use crate::input::Input;
-use crate::protocol::Message;
+use crate::net::protocol::Message;
 use mickey_config as config;
 
 /// Whether a placed peer is online: only then is the edge worth checking.

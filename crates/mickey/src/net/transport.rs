@@ -1,12 +1,12 @@
 //! The connection from source to target: TCP carrying the secure link.
 
 use crate::edges;
-use crate::identity::Identity;
 use crate::input::event::InputEvent;
 use crate::input::held::HeldSet;
 use crate::monitors::Monitor;
-use crate::protocol::{Message, VERSION};
-use crate::secure::Link;
+use crate::net::identity::Identity;
+use crate::net::protocol::{Message, VERSION};
+use crate::net::secure::Link;
 use std::io;
 use std::net::{SocketAddr, TcpStream};
 use std::time::{Duration, Instant};
@@ -501,7 +501,7 @@ mod tests {
         theirs.send_bulk(b"").unwrap();
         assert_eq!(ours.recv_bulk().unwrap(), b"");
         assert!(
-            ours.send_bulk(&vec![0; crate::secure::MAX_BULK + 1])
+            ours.send_bulk(&vec![0; crate::net::secure::MAX_BULK + 1])
                 .is_err()
         );
     }

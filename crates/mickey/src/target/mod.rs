@@ -8,8 +8,8 @@ use slots::{SharedSlots, Slot};
 
 use crate::threads::LockAnyway;
 use crate::{
-    clip_sync, clipboard, discovery, identity, input::emit, monitors, protocol, secure, source,
-    transport, trust, window,
+    clipboard, input::emit, monitors, net::discovery, net::identity, net::protocol, net::secure,
+    net::transport, net::trust, source, window,
 };
 use mickey_config as config;
 use std::net::SocketAddr;
@@ -33,7 +33,7 @@ pub fn target(
     let data_dir = identity::data_dir()?;
     let identity = Arc::new(identity::Identity::load_or_create(&data_dir)?);
     let sources = Sources::default();
-    let grants = clip_sync::Grants::default();
+    let grants = clipboard::sync::Grants::default();
     // One virtual keyboard and mouse for every source that connects.
     let emitter = Arc::new(Mutex::new(emit::Emitter::new()?));
     let listener = TcpListener::bind(listen).map_err(|err| match err.kind() {
@@ -95,7 +95,7 @@ pub(super) struct Around {
     found: Option<discovery::Table>,
     sources: Sources,
     /// When each source may read the clipboard (#185).
-    grants: clip_sync::Grants,
+    grants: clipboard::sync::Grants,
     /// This PC's monitors as last read; `None` where they do not follow a
     /// change (GNOME and KDE).
     monitors: Option<monitors::Latest>,
@@ -222,7 +222,7 @@ pub(super) fn serve_source(
             transport::Effect::Place { x, y } => emitter.place(x, y),
             // Nobody listens when this PC only waits to be controlled.
             transport::Effect::Controlled(here) => {
-                clip_sync::focus_changed(grants, peer.ip(), here);
+                clipboard::sync::focus_changed(grants, peer.ip(), here);
                 // The keyboard and mouse went elsewhere: the cursor too.
                 if here {
                     emit::unpark();

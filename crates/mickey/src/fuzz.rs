@@ -9,13 +9,13 @@
 //! No crate needed: a small xorshift generator, seeded, so a failure
 //! repeats.
 
-use crate::audio_wire::{Opener, PCM_BYTES, Sealer, StreamKey};
-use crate::clip_wire::{self, Wire};
+use crate::audio::jitter::Jitter;
+use crate::audio::wire::{Opener, PCM_BYTES, Sealer, StreamKey};
 use crate::clipboard::Content;
-use crate::discovery::Announce;
-use crate::group::{self, Member};
-use crate::jitter::Jitter;
-use crate::protocol;
+use crate::clipboard::wire::Wire;
+use crate::net::discovery::Announce;
+use crate::net::group::{self, Member};
+use crate::net::protocol;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::{Duration, Instant};
 
@@ -157,14 +157,14 @@ fn clipboard() {
     ];
     let seeds: Vec<Vec<u8>> = wires
         .iter()
-        .map(|wire| clip_wire::encode(wire).unwrap())
+        .map(|wire| crate::clipboard::wire::encode(wire).unwrap())
         .collect();
     hammer(
-        "clipboard (clip_wire::decode)",
+        "clipboard (clipboard::wire::decode)",
         rounds(20_000),
         &seeds,
         |bytes| {
-            let _ = clip_wire::decode(bytes);
+            let _ = crate::clipboard::wire::decode(bytes);
         },
     );
 }

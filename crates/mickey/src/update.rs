@@ -167,13 +167,13 @@ fn verified(
 fn updates_dir() -> Result<std::path::PathBuf, String> {
     #[cfg(windows)]
     if crate::platform::acl::elevated() {
-        let state = crate::trust::dir()?;
+        let state = crate::net::trust::dir()?;
         if !crate::platform::acl::admin_only(&state).unwrap_or(false) {
             return Err("Mickey runs as administrator without a folder only administrators can change: install the update by hand".into());
         }
         return Ok(state.join("updates"));
     }
-    Ok(crate::identity::data_dir()?.join("updates"))
+    Ok(crate::net::identity::data_dir()?.join("updates"))
 }
 
 /// Downloads `version`'s file for this system into Mickey's data folder and

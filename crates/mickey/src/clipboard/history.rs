@@ -28,8 +28,8 @@ impl Entry {
     pub fn content(&self) -> Option<Content> {
         match &self.kept {
             Kept::Plain(content) => Some(content.clone()),
-            Kept::Png { wire, .. } => match crate::clip_wire::decode(wire) {
-                Ok(crate::clip_wire::Wire::Content(content)) => Some(content),
+            Kept::Png { wire, .. } => match crate::clipboard::wire::decode(wire) {
+                Ok(crate::clipboard::wire::Wire::Content(content)) => Some(content),
                 _ => None,
             },
         }
@@ -53,7 +53,9 @@ enum Kept {
 impl Kept {
     fn new(content: Content) -> Kept {
         if let Content::Image { width, height, .. } = content {
-            let wire = crate::clip_wire::encode(&crate::clip_wire::Wire::Content(content.clone()));
+            let wire = crate::clipboard::wire::encode(&crate::clipboard::wire::Wire::Content(
+                content.clone(),
+            ));
             if let Ok(wire) = wire {
                 return Kept::Png {
                     width,
@@ -128,7 +130,7 @@ pub fn record(keeper: crate::clipboard::Keeper) -> Shared {
     let history = Shared::default();
     let (changed, changes) = std::sync::mpsc::channel();
     let text_keeper = keeper.clone();
-    let how = crate::clip_watch::start(changed, move || text_keeper.read_text());
+    let how = crate::clipboard::watch::start(changed, move || text_keeper.read_text());
     println!("mickey: clipboard history through {how}");
     let kept = Arc::clone(&history);
     crate::threads::spawn("history", move || {

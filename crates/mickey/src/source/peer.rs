@@ -2,15 +2,15 @@
 //! said last, and the threads that connect to it, pair with it and read it.
 
 use super::RETRY_EVERY;
-use crate::clip_sync::Mover;
-use crate::identity::Identity;
-use crate::latency::{self, Latency};
+use crate::clipboard::sync::Mover;
 use crate::monitors::Monitor;
-use crate::protocol::Message;
-use crate::secure::Link;
+use crate::net::identity::Identity;
+use crate::net::latency::{self, Latency};
+use crate::net::protocol::Message;
+use crate::net::secure::Link;
+use crate::net::transport;
+use crate::net::trust;
 use crate::threads::LockAnyway;
-use crate::transport;
-use crate::trust;
 use mickey_config as config;
 use std::net::SocketAddr;
 use std::sync::Arc;

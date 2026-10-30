@@ -5,6 +5,12 @@
 //! What is copied may be a password: it is never printed or logged, only
 //! its kind and size.
 
+pub mod history;
+pub mod received;
+pub mod sync;
+pub mod watch;
+pub mod wire;
+
 use std::fmt;
 use std::path::PathBuf;
 

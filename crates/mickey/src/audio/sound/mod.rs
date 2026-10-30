@@ -2,7 +2,7 @@
 //! 0012), in the datagrams' unit: 5 ms of 48 kHz stereo 16-bit PCM. One
 //! `Recorder` and one `Player` per OS, with the same calls.
 
-use crate::audio_wire::PCM_BYTES;
+use crate::audio::wire::PCM_BYTES;
 
 #[cfg(target_os = "linux")]
 mod linux;

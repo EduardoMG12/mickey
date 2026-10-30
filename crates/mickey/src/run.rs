@@ -6,8 +6,9 @@ use crate::target::target;
 use mickey_config as config;
 
 use crate::{
-    audio, autostart, cli, clipboard, control, discovery, history, identity, input::hotkey, mcp,
-    monitors, platform, source, speakers, trust, update, window,
+    audio, audio::speakers, autostart, cli, clipboard, clipboard::history, control, control::mcp,
+    input::hotkey, monitors, net::discovery, net::identity, net::trust, platform, source, update,
+    window,
 };
 #[cfg(target_os = "linux")]
 use crate::{desktop, desktop::portal};

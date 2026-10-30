@@ -11,7 +11,7 @@
 //! quiet PC sleeps until the 50 ms timeout.
 
 use super::at_volume;
-use crate::audio_wire::{CHANNELS, FRAMES, PCM_BYTES, RATE};
+use crate::audio::wire::{CHANNELS, FRAMES, PCM_BYTES, RATE};
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 use wasapi::{
@@ -157,7 +157,7 @@ impl Drop for Player {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sound::samples;
+    use crate::audio::sound::samples;
 
     /// Run by hand on Windows, in the owner's session: mutes the speakers
     /// the way Send only does, plays a quiet tone through a Player while a
@@ -168,7 +168,7 @@ mod tests {
     fn the_tone_is_captured_while_the_speakers_are_muted() {
         let muted = || crate::platform::output::muted().unwrap();
         println!("muted before: {}", muted());
-        let diverted = crate::speakers::divert().unwrap();
+        let diverted = crate::audio::speakers::divert().unwrap();
         println!("muted while sending: {}", muted());
         let mut recorder = Recorder::open(true).unwrap();
         let player = std::thread::spawn(|| {

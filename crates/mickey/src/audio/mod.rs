@@ -11,9 +11,14 @@
 //!   this PC's mode is not *Here*: it takes the sound off the speakers
 //!   (mode *Listener*), records, seals and sends. Silence is not sent.
 
-use crate::audio_wire::{Opener, PCM_BYTES, Sealer, StreamKey};
-use crate::jitter::{Jitter, Turn};
-use crate::sound::{Player, Recorder};
+pub mod jitter;
+pub mod sound;
+pub mod speakers;
+pub mod wire;
+
+use crate::audio::jitter::{Jitter, Turn};
+use crate::audio::sound::{Player, Recorder};
+use crate::audio::wire::{Opener, PCM_BYTES, Sealer, StreamKey};
 use mickey_config::SoundMode;
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr, UdpSocket};
@@ -245,7 +250,7 @@ fn send(
     // Off the speakers first, then record: on Linux the recorder follows
     // the default output, which `divert` changes.
     let diverted = match mode {
-        SoundMode::Listener => Some(crate::speakers::divert()?),
+        SoundMode::Listener => Some(crate::audio::speakers::divert()?),
         _ => None,
     };
     let mut recorder = Recorder::open(diverted.is_some())?;

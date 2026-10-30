@@ -8,7 +8,7 @@ use crate::platform::output;
 use std::path::PathBuf;
 
 fn marker() -> Result<PathBuf, String> {
-    Ok(crate::identity::data_dir()?.join("muted-by-mickey"))
+    Ok(crate::net::identity::data_dir()?.join("muted-by-mickey"))
 }
 
 /// The sound taken off the speakers; given back when dropped.
