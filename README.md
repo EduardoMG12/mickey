@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/icons/mickey-rat.png" width="180" alt="The Ratão, Mickey's mascot">
+  <img src="assets/mascot/ratao.png" width="300" alt="The Ratão, Mickey's mascot">
 </p>
 
 <h1 align="center">Mickey</h1>
