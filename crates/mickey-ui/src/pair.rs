@@ -6,6 +6,10 @@
 //! `mickey-ui join <who> <by>`: asks whether to let in a PC that `by`, a
 //! paired PC, introduced to the group (#184).
 //!
+//! `mickey-ui hotkeys <who> <changes>`: asks whether to use the hotkeys
+//! `who` shared; `<changes>` is one line per hotkey that would change
+//! (#349).
+//!
 //! Exit code 0 means yes, 1 anything else.
 
 use eframe::egui;
@@ -19,6 +23,8 @@ pub enum Ask {
     Pair { code: String },
     /// Let in a PC that `by` introduced through the group.
     Join { by: String },
+    /// Use the hotkeys a paired PC shared: what would change, one per line.
+    Hotkeys { changes: String },
 }
 
 struct Pair {
@@ -33,9 +39,14 @@ impl eframe::App for Pair {
             ui.vertical_centered(|ui| {
                 use crate::theme::{self, icon};
                 ui.add_space(6.0);
-                let (title, yes) = match &self.ask {
-                    Ask::Pair { .. } => (format!("Connect with {}?", self.who), "Pair"),
-                    Ask::Join { .. } => (format!("Let {} in?", self.who), "Let in"),
+                let (title, yes, no) = match &self.ask {
+                    Ask::Pair { .. } => (format!("Connect with {}?", self.who), "Pair", "Refuse"),
+                    Ask::Join { .. } => (format!("Let {} in?", self.who), "Let in", "Refuse"),
+                    Ask::Hotkeys { .. } => (
+                        format!("Use {}'s hotkeys?", self.who),
+                        "Use them",
+                        "Keep mine",
+                    ),
                 };
                 ui.label(
                     egui::RichText::new(format!("{}  {title}", icon::LINK))
@@ -64,6 +75,15 @@ impl eframe::App for Pair {
                             icon::SHIELD
                         ));
                     }
+                    Ask::Hotkeys { changes } => {
+                        theme::card(ui, |ui| {
+                            for change in changes.lines() {
+                                ui.label(change);
+                            }
+                        });
+                        ui.add_space(6.0);
+                        ui.weak("Settings, Hotkeys tab: keep this PC's own for good.");
+                    }
                 }
                 ui.add_space(10.0);
                 ui.horizontal(|ui| {
@@ -81,7 +101,7 @@ impl eframe::App for Pair {
                     if ui
                         .add_sized(
                             [90.0, 28.0],
-                            egui::Button::new(format!("{}  Refuse", icon::X)),
+                            egui::Button::new(format!("{}  {no}", icon::X)),
                         )
                         .clicked()
                     {
@@ -98,7 +118,7 @@ pub fn window(who: &str, ask: Ask) -> ExitCode {
         viewport: crate::theme::viewport()
             .with_title("Mickey: pair with another PC")
             .with_app_id("mickey-pair")
-            .with_inner_size([380.0, 240.0])
+            .with_inner_size([400.0, 260.0])
             .with_resizable(false)
             .with_always_on_top(),
         ..Default::default()

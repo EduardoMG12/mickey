@@ -110,8 +110,11 @@ reach the target at once (a game holding Ctrl gets it when pressed); only a
 chord's last key, such as the `1` of `AltGr+RightShift+1`, is held back. If
 the hotkey completes, the target never sees that key; if another key comes
 first, it is sent after all, so AltGr+Q and Shift+1 still type. When the owner saves the
-hotkeys in the settings, they are sent to every peer (kind 17), so the
-whole group uses the same keys.
+hotkeys in the settings, they are offered to every peer (kind 17). Each
+peer shows what would change and takes them only if the person there
+says yes, once its keyboard is home (#182, #349); a PC with
+`[this_pc] share_hotkeys = false` neither sends its own nor is asked, so
+PCs with different keyboards can keep different keys.
 
 **The way home.** On `main` it is the `home` hotkey (configurable), or
 `next` with one peer, or *This PC* in the switcher, the tray or

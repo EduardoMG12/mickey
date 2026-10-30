@@ -250,6 +250,12 @@ fn main() -> ExitCode {
     {
         return pair::window(who, pair::Ask::Join { by: by.clone() });
     }
+    if let [command, who, changes] = args.as_slice()
+        && command == "hotkeys"
+    {
+        let changes = changes.clone();
+        return pair::window(who, pair::Ask::Hotkeys { changes });
+    }
     // `switcher --mirror …`: the copy for the PCs not in use.
     let mirror = args.iter().any(|arg| arg == "--mirror");
     let args: Vec<String> = args.into_iter().filter(|arg| arg != "--mirror").collect();

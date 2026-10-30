@@ -26,6 +26,67 @@ impl Hotkeys {
     pub fn next_or_default(&self) -> &str {
         self.next.as_deref().unwrap_or(DEFAULT_NEXT)
     }
+
+    /// What taking `theirs` would change here, one line per hotkey as the
+    /// settings name it, e.g. `Next PC / switcher: LeftCtrl+F12 (now
+    /// AltGr+RightShift)`. Unset hotkeys count as their defaults, so two PCs
+    /// that only write them differently change nothing. Empty when equal.
+    pub fn changes(&self, theirs: &Hotkeys) -> Vec<String> {
+        let shown = |text: &Option<String>, default: &str| match text
+            .as_deref()
+            .map(str::trim)
+            .unwrap_or(default)
+        {
+            "" => "off".to_string(),
+            text => text.to_string(),
+        };
+        let rows = [
+            ("Next PC / switcher", &self.next, &theirs.next, DEFAULT_NEXT),
+            (
+                "Back to this PC",
+                &self.home,
+                &theirs.home,
+                "the hotkey above + 0",
+            ),
+            (
+                "Open the switcher",
+                &self.switcher,
+                &theirs.switcher,
+                DEFAULT_SWITCHER,
+            ),
+            (
+                "Next PC (one hand)",
+                &self.forward,
+                &theirs.forward,
+                DEFAULT_FORWARD,
+            ),
+            (
+                "Previous PC (one hand)",
+                &self.back,
+                &theirs.back,
+                DEFAULT_BACK,
+            ),
+            (
+                "Double tap",
+                &self.double_tap,
+                &theirs.double_tap,
+                DEFAULT_DOUBLE_TAP,
+            ),
+        ];
+        let mut lines: Vec<String> = rows
+            .iter()
+            .filter_map(|(label, mine, their, default)| {
+                let (mine, their) = (shown(mine, default), shown(their, default));
+                (mine != their).then(|| format!("{label}: {their} (now {mine})"))
+            })
+            .collect();
+        let window = |ms: Option<u64>| ms.unwrap_or(DEFAULT_DOUBLE_TAP_MS);
+        let (mine, their) = (window(self.double_tap_ms), window(theirs.double_tap_ms));
+        if mine != their {
+            lines.push(format!("Double tap window: {their} ms (now {mine} ms)"));
+        }
+        lines
+    }
 }
 
 /// Every hotkey, parsed. `peers[i]` is peer `i`'s own hotkey, if any.

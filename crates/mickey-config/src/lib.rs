@@ -106,6 +106,11 @@ pub struct ThisPc {
     /// How the other PCs see this one (PRD 0010); the host name when unset.
     #[serde(default)]
     pub name: Option<String>,
+    /// Share `[hotkeys]` with the other PCs, and be asked when one shares
+    /// its own (#349). Off, this PC keeps its hotkeys to itself: one with a
+    /// different keyboard may want others.
+    #[serde(default = "yes")]
+    pub share_hotkeys: bool,
 }
 
 impl ThisPc {
@@ -137,6 +142,7 @@ impl Default for ThisPc {
             controlled: true,
             listen: default_listen(),
             name: None,
+            share_hotkeys: true,
         }
     }
 }
@@ -318,6 +324,40 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn shared_hotkeys_are_on_unless_this_pc_says_no() {
+        assert!(Config::empty().this_pc.share_hotkeys);
+        let config = parse("[this_pc]\nshare_hotkeys = false\n").unwrap();
+        assert!(!config.this_pc.share_hotkeys);
+    }
+
+    #[test]
+    fn changes_name_each_hotkey_that_would_change() {
+        let mine = Hotkeys::default();
+        let same = Hotkeys {
+            next: Some(DEFAULT_NEXT.into()),
+            ..Hotkeys::default()
+        };
+        assert!(
+            mine.changes(&same).is_empty(),
+            "written or default, the same"
+        );
+        let theirs = Hotkeys {
+            next: Some("LeftCtrl+F12".into()),
+            double_tap: Some(String::new()),
+            double_tap_ms: Some(250),
+            ..Hotkeys::default()
+        };
+        assert_eq!(
+            mine.changes(&theirs),
+            [
+                "Next PC / switcher: LeftCtrl+F12 (now AltGr+RightShift)",
+                "Double tap: off (now RightShift)",
+                "Double tap window: 250 ms (now 400 ms)",
+            ]
+        );
+    }
 
     #[test]
     fn write_creates_the_missing_folder() {
