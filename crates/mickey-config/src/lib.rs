@@ -12,12 +12,20 @@
 
 pub mod audio;
 pub mod chord;
+mod edit;
+mod hotkeys;
+mod interface;
 pub mod peers;
 pub mod version;
 
 pub use audio::{Audio, SoundMode, now_seconds};
+pub use edit::{add_peer, set_audio, set_hotkeys, set_key, set_position, toml_string};
+pub use hotkeys::{
+    DEFAULT_BACK, DEFAULT_DOUBLE_TAP, DEFAULT_DOUBLE_TAP_MS, DEFAULT_FORWARD, DEFAULT_NEXT,
+    DEFAULT_SWITCHER, DOUBLE_TAP_MS, HotkeySet, Hotkeys,
+};
+pub use interface::{Interface, SWITCHER_POSITIONS};
 
-use chord::Chord;
 use serde::Deserialize;
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -143,63 +151,6 @@ fn default_listen() -> SocketAddr {
     SocketAddr::from(([0, 0, 0, 0], DEFAULT_PORT))
 }
 
-/// `[interface]`: how Mickey shows itself.
-#[derive(Debug, Clone, Deserialize, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub struct Interface {
-    /// Where the switcher appears: a corner or `center`.
-    #[serde(default = "default_switcher_position")]
-    pub switcher_position: String,
-    /// The switcher's cards in a column instead of a row.
-    #[serde(default)]
-    pub switcher_vertical: bool,
-    /// PC names in the order the switcher shows them; PCs left out follow,
-    /// as the layout places them. Empty: all as the layout places them.
-    #[serde(default)]
-    pub switcher_order: Vec<String>,
-}
-
-impl Default for Interface {
-    fn default() -> Interface {
-        Interface {
-            switcher_position: default_switcher_position(),
-            switcher_vertical: false,
-            switcher_order: Vec::new(),
-        }
-    }
-}
-
-impl Interface {
-    /// The switcher's cards in the order to show them: each card's name and
-    /// its place in the layout (`None` if not placed). The custom order goes
-    /// first; then left to right as the layout places them (top to bottom
-    /// in a column); unplaced PCs last. Returns indexes into `cards`.
-    pub fn switcher_sort(&self, cards: &[(&str, Option<[i32; 2]>)]) -> Vec<usize> {
-        let mut order: Vec<usize> = (0..cards.len()).collect();
-        order.sort_by_key(|&index| {
-            let (name, place) = cards[index];
-            let custom = self.switcher_order.iter().position(|wanted| wanted == name);
-            let place = place.map(|[x, y]| {
-                if self.switcher_vertical {
-                    (y, x)
-                } else {
-                    (x, y)
-                }
-            });
-            (custom.unwrap_or(usize::MAX), place.is_none(), place, index)
-        });
-        order
-    }
-}
-
-pub const SWITCHER_POSITIONS: [&str; 5] = [
-    "center",
-    "top-left",
-    "top-right",
-    "bottom-left",
-    "bottom-right",
-];
-
 /// `[clipboard]`.
 #[derive(Debug, Clone, Default, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -212,63 +163,6 @@ pub struct Clipboard {
     #[serde(default)]
     pub history: Option<bool>,
 }
-
-fn default_switcher_position() -> String {
-    "bottom-right".into()
-}
-
-/// `[hotkeys]`, as written; `Config::hotkeys` parses and checks them.
-#[derive(Debug, Clone, Default, Deserialize, PartialEq)]
-#[serde(deny_unknown_fields)]
-pub struct Hotkeys {
-    pub next: Option<String>,
-    pub home: Option<String>,
-    pub switcher: Option<String>,
-    /// One hand: the next and the previous PC in the list.
-    pub forward: Option<String>,
-    pub back: Option<String>,
-    /// A key tapped twice quickly also goes to the next PC; `""` turns it
-    /// off.
-    pub double_tap: Option<String>,
-    /// How close the two taps must be, in milliseconds.
-    pub double_tap_ms: Option<u64>,
-}
-
-impl Hotkeys {
-    /// The hotkey to the next PC, as written (the default if unset).
-    pub fn next_or_default(&self) -> &str {
-        self.next.as_deref().unwrap_or(DEFAULT_NEXT)
-    }
-}
-
-/// Every hotkey, parsed. `peers[i]` is peer `i`'s own hotkey, if any.
-#[derive(Debug, Clone, PartialEq)]
-pub struct HotkeySet {
-    pub next: Chord,
-    pub home: Option<Chord>,
-    pub switcher: Chord,
-    pub forward: Chord,
-    pub back: Chord,
-    /// `None` when turned off.
-    pub double_tap: Option<u16>,
-    /// Two taps closer than this are a double tap.
-    pub double_tap_window: std::time::Duration,
-    pub peers: Vec<Option<Chord>>,
-}
-
-/// How close two taps must be by default, and the range allowed.
-pub const DEFAULT_DOUBLE_TAP_MS: u64 = 400;
-pub const DOUBLE_TAP_MS: std::ops::RangeInclusive<u64> = 150..=1000;
-
-/// The M0 hotkey, still the default for `next`.
-pub const DEFAULT_NEXT: &str = "AltGr+RightShift";
-/// One-hand defaults, asked for by the owner: AltGr and the arrows next to
-/// it, and a double tap on Right Shift.
-pub const DEFAULT_FORWARD: &str = "AltGr+Right";
-pub const DEFAULT_BACK: &str = "AltGr+Left";
-/// The switcher with one hand too: AltGr and the arrow above the others.
-pub const DEFAULT_SWITCHER: &str = "AltGr+Up";
-pub const DEFAULT_DOUBLE_TAP: &str = "RightShift";
 
 #[derive(Debug, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -315,73 +209,6 @@ impl Config {
     /// Every setting at its default: what an empty config.toml gives.
     pub fn empty() -> Config {
         parse("").expect("an empty config is valid")
-    }
-
-    /// Parses every hotkey; an error names the setting and the bad part,
-    /// and two settings with the same keys are refused.
-    pub fn hotkeys(&self) -> Result<HotkeySet, String> {
-        let one = |setting: &str, text: &Option<String>| {
-            text.as_deref()
-                .map(chord::parse)
-                .transpose()
-                .map_err(|err| format!("{setting}: {err}"))
-        };
-        let default = |text| chord::parse(text).expect("the defaults parse");
-        let double_tap = match self.hotkeys.double_tap.as_deref().map(str::trim) {
-            Some("") => None,
-            text => {
-                let text = text.unwrap_or(DEFAULT_DOUBLE_TAP);
-                let code =
-                    chord::parse_key(text).map_err(|err| format!("hotkeys.double_tap: {err}"))?;
-                if !chord::fits_a_double_tap(code) {
-                    return Err(format!(
-                        "hotkeys.double_tap: `{text}` is typed alone, so a double tap on it would get in the way; use Shift, Ctrl, Alt, AltGr, Super or an F key"
-                    ));
-                }
-                Some(code)
-            }
-        };
-        let window = self.hotkeys.double_tap_ms.unwrap_or(DEFAULT_DOUBLE_TAP_MS);
-        if !DOUBLE_TAP_MS.contains(&window) {
-            return Err(format!(
-                "hotkeys.double_tap_ms: {window} is outside {} to {}",
-                DOUBLE_TAP_MS.start(),
-                DOUBLE_TAP_MS.end()
-            ));
-        }
-        let set = HotkeySet {
-            next: one("hotkeys.next", &self.hotkeys.next)?.unwrap_or_else(|| default(DEFAULT_NEXT)),
-            home: one("hotkeys.home", &self.hotkeys.home)?,
-            switcher: one("hotkeys.switcher", &self.hotkeys.switcher)?
-                .unwrap_or_else(|| default(DEFAULT_SWITCHER)),
-            forward: one("hotkeys.forward", &self.hotkeys.forward)?
-                .unwrap_or_else(|| default(DEFAULT_FORWARD)),
-            back: one("hotkeys.back", &self.hotkeys.back)?.unwrap_or_else(|| default(DEFAULT_BACK)),
-            double_tap,
-            double_tap_window: std::time::Duration::from_millis(window),
-            peers: self
-                .peers
-                .iter()
-                .map(|peer| one(&format!("hotkey of {}", peer.name), &peer.hotkey))
-                .collect::<Result<_, _>>()?,
-        };
-        let all: Vec<&Chord> = [
-            Some(&set.next),
-            set.home.as_ref(),
-            Some(&set.switcher),
-            Some(&set.forward),
-            Some(&set.back),
-        ]
-        .into_iter()
-        .flatten()
-        .chain(set.peers.iter().flatten())
-        .collect();
-        for (i, chord) in all.iter().enumerate() {
-            if all[..i].contains(chord) {
-                return Err(format!("two hotkeys use the same keys: {chord:?}"));
-            }
-        }
-        Ok(set)
     }
 
     /// Reads `config.toml`; `None` when the file does not exist.
@@ -460,188 +287,6 @@ pub fn parse(text: &str) -> Result<Config, String> {
         ));
     }
     Ok(config)
-}
-
-/// `text` (a config.toml) with the peer named `name` placed at `position`:
-/// its `position` line replaced, or added under its `name`. Every other
-/// line, comments included, is kept as it was. The result is checked with
-/// the same rules as `parse`.
-pub fn set_position(text: &str, name: &str, position: [i32; 2]) -> Result<String, String> {
-    let wanted = format!("position = [{}, {}]", position[0], position[1]);
-    set_peer_field(text, name, "position", wanted)
-}
-
-/// `text` with the peer named `name` bound to the public key `key` (64 hex
-/// digits): Mickey then talks to that PC only with that key (#184).
-pub fn set_key(text: &str, name: &str, key: &str) -> Result<String, String> {
-    set_peer_field(text, name, "key", format!("key = {}", toml_string(key)))
-}
-
-/// `text` with the `field` line of the peer named `name` replaced by
-/// `wanted`, or `wanted` added under its `name`. Every other line,
-/// comments included, is kept; the result is checked like `parse`.
-fn set_peer_field(text: &str, name: &str, field: &str, wanted: String) -> Result<String, String> {
-    let is_field = |line: &str| {
-        line.strip_prefix(field)
-            .is_some_and(|rest| rest.trim_start().starts_with('='))
-    };
-    let is_our_name = |line: &str| {
-        line.starts_with("name")
-            && toml::from_str::<toml::Table>(line)
-                .ok()
-                .and_then(|table| table.get("name")?.as_str().map(|value| value == name))
-                == Some(true)
-    };
-    let mut out: Vec<String> = Vec::new();
-    let mut in_peer = false;
-    // Where our peer's name line is in `out`, while inside its block.
-    let mut ours: Option<usize> = None;
-    let mut done = false;
-    for line in text.lines().chain(std::iter::once("[end]")) {
-        let trimmed = line.trim_start();
-        if trimmed.starts_with('[') {
-            // Leaving our block without a position line: add one under its name.
-            if let Some(at) = ours.take()
-                && !done
-            {
-                out.insert(at + 1, wanted.clone());
-                done = true;
-            }
-            in_peer = trimmed.starts_with("[[peer]]");
-        }
-        if in_peer && !done && is_our_name(trimmed) {
-            ours = Some(out.len());
-        }
-        if ours.is_some() && !done && is_field(trimmed) {
-            out.push(wanted.clone());
-            done = true;
-            continue;
-        }
-        out.push(line.to_string());
-    }
-    out.pop(); // the "[end]" sentinel
-    if !done {
-        return Err(format!("no PC named {name:?} in config.toml"));
-    }
-    let mut text = out.join("\n");
-    text.push('\n');
-    parse(&text)?;
-    Ok(text)
-}
-
-impl Hotkeys {
-    /// The section's lines, as config.toml takes them (no header). This is
-    /// what one PC sends the others so all share the same hotkeys.
-    pub fn to_lines(&self) -> String {
-        let mut lines = Vec::new();
-        for (key, value) in [
-            ("next", &self.next),
-            ("home", &self.home),
-            ("switcher", &self.switcher),
-            ("forward", &self.forward),
-            ("back", &self.back),
-            ("double_tap", &self.double_tap),
-        ] {
-            if let Some(value) = value {
-                lines.push(format!("{key} = {}", toml_string(value)));
-            }
-        }
-        if let Some(ms) = self.double_tap_ms {
-            lines.push(format!("double_tap_ms = {ms}"));
-        }
-        lines.join("\n")
-    }
-
-    /// Reads lines made by `to_lines`, e.g. from another PC.
-    pub fn from_lines(lines: &str) -> Result<Hotkeys, String> {
-        toml::from_str(lines).map_err(|err| err.to_string())
-    }
-}
-
-/// `text` (a config.toml) with its `[hotkeys]` section replaced by
-/// `hotkeys`, in place, or added at the end. Other lines are kept, and the
-/// result is checked with `parse`.
-pub fn set_hotkeys(text: &str, hotkeys: &Hotkeys) -> Result<String, String> {
-    set_section(text, "hotkeys", &hotkeys.to_lines())
-}
-
-/// `text` (a config.toml) with its `[audio]` section replaced by `audio`.
-pub fn set_audio(text: &str, audio: &Audio) -> Result<String, String> {
-    set_section(text, "audio", &audio.to_lines())
-}
-
-/// `text` with section `[name]` replaced by `lines`, in place, or added at
-/// the end. Other lines are kept, and the result is checked with `parse`.
-fn set_section(text: &str, name: &str, lines: &str) -> Result<String, String> {
-    let header = format!("[{name}]");
-    let section = format!("{header}\n{lines}");
-    let mut out: Vec<String> = Vec::new();
-    let (mut skipping, mut done) = (false, false);
-    for line in text.lines() {
-        let trimmed = line.trim_start();
-        if trimmed.starts_with('[') {
-            skipping = trimmed.starts_with(&header);
-            if skipping {
-                out.push(section.clone());
-                out.push(String::new());
-                done = true;
-            }
-        }
-        if !skipping {
-            out.push(line.to_string());
-        }
-    }
-    if !done {
-        out.push(String::new());
-        out.push(section);
-    }
-    let mut text = out.join("\n").trim_end().to_string();
-    text.push('\n');
-    parse(&text)?;
-    Ok(text)
-}
-
-/// `text` (a config.toml) with a new peer at its end. A name already
-/// taken gets " (2)", " (3)"… so two PCs never share one. Checked with
-/// `parse`; returns the text and the name used.
-pub fn add_peer(
-    text: &str,
-    name: &str,
-    address: SocketAddr,
-    position: Option<[i32; 2]>,
-) -> Result<(String, String), String> {
-    let taken = parse(text)?
-        .peers
-        .into_iter()
-        .map(|peer| peer.name)
-        .collect::<Vec<_>>();
-    let name = (1..)
-        .map(|n| {
-            if n == 1 {
-                name.to_string()
-            } else {
-                format!("{name} ({n})")
-            }
-        })
-        .find(|candidate| !taken.contains(candidate))
-        .expect("an unused name exists");
-    let mut block = format!(
-        "\n[[peer]]\nname = {}\naddress = \"{address}\"\n",
-        toml_string(&name)
-    );
-    if let Some([x, y]) = position {
-        block += &format!("position = [{x}, {y}]\n");
-    }
-    let mut text = text.trim_end().to_string();
-    text += "\n";
-    text += &block;
-    parse(&text)?;
-    Ok((text, name))
-}
-
-/// A TOML basic string: quotes and backslashes escaped.
-pub fn toml_string(text: &str) -> String {
-    format!("\"{}\"", text.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
 #[cfg(test)]
