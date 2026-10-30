@@ -64,10 +64,13 @@ refuses a bigger announced length and pieces that do not add up.
   hotkeys, switcher, audio); they go to `other`. The rest is decoded by
   [`clipboard/wire.rs:89`](../../crates/mickey/src/clipboard/wire.rs#L89).
 - **`Ask` is answered only once, right after the keyboard left**:
-  [`clipboard/sync.rs:79`](../../crates/mickey/src/clipboard/sync.rs#L79)
-  `ClipGrant` allows one read within 5 s of the focus leaving this PC.
-  Otherwise the answer is `Nothing`. A paired PC therefore cannot poll
-  your clipboard for passwords (#185).
+  [`clipboard/sync.rs:90`](../../crates/mickey/src/clipboard/sync.rs#L90)
+  `ClipGrant` allows one read within 5 s of the focus leaving this PC,
+  only if a key or button was pressed here meanwhile, and at most once
+  every 3 s. Otherwise the answer is `Nothing`. A paired PC therefore
+  cannot poll your clipboard for passwords by saying its keyboard came
+  and went (#185). It is still trusted to type here, which is why only
+  PCs you paired get this far.
 
 ## What crosses (`clipboard/wire.rs`, `clipboard.rs`, `received.rs`)
 

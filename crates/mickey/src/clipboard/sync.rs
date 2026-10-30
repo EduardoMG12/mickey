@@ -77,24 +77,46 @@ const ASK_WINDOW: std::time::Duration = std::time::Duration::from_secs(5);
 /// answer still arriving is not cut short.
 const ANSWER_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
 
+/// Grants come at most this often: a peer that says its keyboard came
+/// and went, over and over, cannot read the clipboard over and over.
+const GRANT_EVERY: std::time::Duration = std::time::Duration::from_secs(3);
+
 /// When a source may read this PC's clipboard (#185): once, within
-/// `ASK_WINDOW` after its keyboard left this PC, never at any other time,
-/// so a paired PC cannot poll it for copied passwords.
+/// `ASK_WINDOW` after its keyboard left this PC, and only if a key or a
+/// button was pressed here meanwhile (something could have been copied),
+/// at most once every `GRANT_EVERY`. A paired PC cannot poll it for copied
+/// passwords by only saying its keyboard came and went.
 #[derive(Debug, Default)]
 pub struct ClipGrant {
     /// The source's keyboard is on this PC.
     here: bool,
+    /// A key or button was pressed since it came.
+    used: bool,
     /// Until when one ask is allowed.
     until: Option<Instant>,
+    /// When the last grant was given.
+    granted: Option<Instant>,
 }
 
 impl ClipGrant {
     /// The source's keyboard came here (`true`) or left (`false`).
     pub fn focus(&mut self, here: bool, now: Instant) {
-        if !here && self.here {
+        let rested = self.granted.is_none_or(|at| now >= at + GRANT_EVERY);
+        if !here && self.here && self.used && rested {
             self.until = Some(now + ASK_WINDOW);
+            self.granted = Some(now);
+        }
+        if here && !self.here {
+            self.used = false;
         }
         self.here = here;
+    }
+
+    /// A key or button went down on this PC from this source.
+    pub fn pressed(&mut self) {
+        if self.here {
+            self.used = true;
+        }
     }
 
     /// Whether the source's keyboard is on this PC now.
@@ -110,6 +132,13 @@ impl ClipGrant {
 
 /// Each source's permission, by address.
 pub type Grants = std::sync::Arc<std::sync::Mutex<HashMap<std::net::IpAddr, ClipGrant>>>;
+
+/// Records that the source at `ip` pressed a key or button here.
+pub fn pressed(grants: &Grants, ip: std::net::IpAddr) {
+    if let Some(grant) = grants.lock_anyway().get_mut(&ip) {
+        grant.pressed();
+    }
+}
 
 /// Records a focus change from the source at `ip`.
 pub fn focus_changed(grants: &Grants, ip: std::net::IpAddr, here: bool) {
@@ -374,21 +403,39 @@ mod tests {
     #[test]
     fn the_clipboard_may_be_read_once_right_after_the_keyboard_leaves() {
         let now = Instant::now();
+        let second = std::time::Duration::from_secs(1);
         let mut grant = ClipGrant::default();
         assert!(!grant.take(now), "never without a focus change");
         grant.focus(false, now);
         assert!(!grant.take(now), "leaving a PC it never had gives nothing");
         grant.focus(true, now);
+        grant.pressed();
         assert!(!grant.take(now), "not while the keyboard is here");
         grant.focus(false, now);
-        assert!(grant.take(now + std::time::Duration::from_secs(1)));
-        assert!(!grant.take(now + std::time::Duration::from_secs(1)), "once");
+        assert!(grant.take(now + second));
+        assert!(!grant.take(now + second), "once");
+        let later = now + GRANT_EVERY;
+        grant.focus(true, later);
+        grant.pressed();
+        grant.focus(false, later);
+        assert!(!grant.take(later + ASK_WINDOW + second), "too late");
+    }
+
+    #[test]
+    fn coming_and_going_alone_gives_no_clipboard() {
+        let now = Instant::now();
+        let mut grant = ClipGrant::default();
         grant.focus(true, now);
         grant.focus(false, now);
-        assert!(
-            !grant.take(now + ASK_WINDOW + std::time::Duration::from_millis(1)),
-            "too late"
-        );
+        assert!(!grant.take(now), "nothing was pressed here");
+        grant.focus(true, now);
+        grant.pressed();
+        grant.focus(false, now);
+        assert!(grant.take(now));
+        grant.focus(true, now);
+        grant.pressed();
+        grant.focus(false, now);
+        assert!(!grant.take(now), "a second grant this soon");
     }
 
     use super::*;
