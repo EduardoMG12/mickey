@@ -374,6 +374,7 @@ fn run_from_config() -> Result<(), String> {
     let (news_sender, target_news) = std::sync::mpsc::channel();
     // One list of trusted PCs for the source and the target.
     let trusted = trust::shared(&trust::dir()?)?;
+    trust::follow(&trusted, &trust::dir()?);
     // One clipboard for the whole process (PRD 0011).
     let keeper = clipboard::Keeper::start()
         .inspect_err(|err| eprintln!("mickey: {err}; the clipboard will not be shared"))
