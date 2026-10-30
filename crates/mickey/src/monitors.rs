@@ -1,7 +1,8 @@
 //! This PC's monitors (PRD 0005): where each one sits and its logical size,
 //! the space the cursor moves in. Windows asks the system; on Linux,
-//! Hyprland over its IPC socket, the X server in an X11 session, and the
-//! RemoteDesktop portal elsewhere (GNOME and KDE on Wayland).
+//! Hyprland or Sway over their IPC sockets, the X server in an X11
+//! session, and the RemoteDesktop portal elsewhere (GNOME and KDE on
+//! Wayland).
 
 pub use mickey_config::peers::Monitor;
 
@@ -16,6 +17,9 @@ pub fn this_pc() -> Result<Vec<Monitor>, String> {
         }
         if crate::x11::session() {
             return crate::x11::monitors();
+        }
+        if crate::sway::session() {
+            return crate::sway::monitors();
         }
         // Elsewhere (GNOME, KDE): the RemoteDesktop portal (PRD 0004).
         let monitors = crate::portal::get().map(crate::portal::Portal::monitors);
@@ -90,11 +94,11 @@ pub fn keep_latest(every: std::time::Duration) -> Option<Latest> {
 }
 
 /// Whether Mickey goes through the RemoteDesktop and InputCapture portals
-/// here (GNOME and KDE on Wayland, PRD 0004): neither Hyprland nor the X
-/// server answers for the cursor and the monitors.
+/// here (GNOME and KDE on Wayland, PRD 0004): neither Hyprland, Sway nor
+/// the X server answers for the cursor and the monitors.
 #[cfg(target_os = "linux")]
 pub fn uses_portal() -> bool {
-    !on_hyprland() && !crate::x11::session()
+    !on_hyprland() && !crate::x11::session() && !crate::sway::session()
 }
 
 /// Whether this session is Hyprland's, which Mickey asks through its own

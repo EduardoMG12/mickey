@@ -161,3 +161,12 @@ other, GNOME, KDE and Windows alike.
   height; GNOME drove Mint (cursor moved about 640 px) and came back
   through Mint's left edge. Hyprland's XWayland sets `DISPLAY` too, so
   Hyprland is checked first.
+- **Sway, when controlled** (#178): its IPC socket gives the monitors
+  (`get_outputs`, logical rects) and places the cursor
+  (`seat - cursor set x y`), but never says where the cursor is. So a
+  controlled Sway moves in absolute steps and remembers where it put the
+  cursor, as the portal does on GNOME and KDE (`portal::slide`). Checked
+  with a headless Sway 1.9 and a second Mickey in the Ubuntu VM: GNOME
+  sent the focus there, moved the cursor and left through Sway's left
+  edge. Driving others from Sway needs to see the cursor reach an edge:
+  next.

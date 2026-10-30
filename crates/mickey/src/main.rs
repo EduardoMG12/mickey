@@ -43,6 +43,8 @@ mod secure;
 mod sound;
 mod source;
 mod speakers;
+#[cfg(target_os = "linux")]
+mod sway;
 mod threads;
 mod transport;
 mod tray;
