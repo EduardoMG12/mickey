@@ -49,7 +49,7 @@ impl Default for Jitter {
 }
 
 impl Jitter {
-    /// A datagram from the network, as `audio_wire` opened it.
+    /// A datagram from the network, as `audio::wire` opened it.
     pub fn push(&mut self, counter: u64, pcm: [u8; PCM_BYTES]) {
         if let Some(next) = self.next {
             // Its turn is gone.

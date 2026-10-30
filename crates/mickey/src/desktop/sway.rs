@@ -52,7 +52,7 @@ pub fn monitors() -> Result<Vec<Monitor>, String> {
 }
 
 /// The active outputs with their names, which Wayland's `wl_output` gives
-/// too: how a layer surface is put on the right one (`sway_edges`).
+/// too: how a layer surface is put on the right one (`edges::sway`).
 pub fn outputs() -> Result<Vec<(String, Monitor)>, String> {
     parse_outputs(&ask(GET_OUTPUTS, "")?)
 }
@@ -102,7 +102,7 @@ struct Tracked {
 
 /// When Mickey last put the cursor somewhere. Sway answers a
 /// `cursor set` onto an edge strip as if the cursor had left it and come
-/// back, which must not count as a push (`sway_edges`).
+/// back, which must not count as a push (`edges::sway`).
 static PLACED: Mutex<Option<Instant>> = Mutex::new(None);
 
 /// Whether Mickey put the cursor somewhere in the last `within`.

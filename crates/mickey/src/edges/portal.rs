@@ -8,7 +8,7 @@
 //! once a peer is placed beside this PC: with no edge to watch, no question.
 //!
 //! On Sway, which has no InputCapture portal, the same lines become
-//! one-pixel layer surfaces instead (`sway_edges`, #178).
+//! one-pixel layer surfaces instead (`edges::sway`, #178).
 
 use crate::edges::{self, Line};
 use crate::monitors::Monitor;
