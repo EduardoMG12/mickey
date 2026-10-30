@@ -1,7 +1,7 @@
 //! Linux capture: find keyboards, mice and touchpads, read them on one
 //! thread each and turn raw evdev events into `InputEvent`s on one channel.
 
-use crate::event::InputEvent;
+use crate::input::event::InputEvent;
 use crate::platform::linux::{Device, RawEvent};
 use std::io;
 use std::path::Path;

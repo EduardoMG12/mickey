@@ -1,6 +1,6 @@
 //! Hand-written bindings for `SendInput`.
 
-use crate::keymap::MouseButton;
+use crate::input::keymap::MouseButton;
 use std::io;
 use std::mem::size_of;
 

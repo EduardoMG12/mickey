@@ -15,9 +15,9 @@
 //! the switcher window (`Action::OpenSwitcher`), and `go_to` follows the
 //! owner's pick; from a remote peer it first brings the devices home.
 
-use crate::event::InputEvent;
-use crate::held::HeldSet;
-use crate::hotkey::{Hotkey, Trigger};
+use crate::input::event::InputEvent;
+use crate::input::held::HeldSet;
+use crate::input::hotkey::{Hotkey, Trigger};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Focus {
@@ -227,7 +227,7 @@ fn first_online(online: &[bool]) -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::hotkey::{KEY_RIGHTALT, KEY_RIGHTSHIFT};
+    use crate::input::hotkey::{KEY_RIGHTALT, KEY_RIGHTSHIFT};
 
     const A: u16 = 30;
 
@@ -345,7 +345,7 @@ mod tests {
 
     #[test]
     fn a_direct_hotkey_hops_from_one_peer_to_another() {
-        use crate::hotkey::Hotkey;
+        use crate::input::hotkey::Hotkey;
         let set = mickey_config::parse(
             "[[peer]]\nname = \"A\"\naddress = \"192.0.2.10:1\"\n\n[[peer]]\nname = \"B\"\naddress = \"192.0.2.11:1\"\n",
         )

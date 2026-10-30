@@ -3,8 +3,6 @@
 mod audio;
 mod audio_wire;
 mod autostart;
-#[cfg(target_os = "linux")]
-mod capture;
 mod cli;
 mod clip_sync;
 mod clip_watch;
@@ -15,16 +13,12 @@ mod control;
 mod desktop;
 mod discovery;
 mod edges;
-mod emit;
-mod event;
 mod focus;
 #[cfg(test)]
 mod fuzz;
 mod group;
-mod held;
 mod hex;
 mod history;
-mod hotkey;
 mod identity;
 mod input;
 mod jitter;
@@ -32,12 +26,9 @@ mod latency;
 mod mcp;
 mod monitors;
 // The Linux build never translates keys for Windows.
-#[cfg_attr(not(windows), allow(dead_code))]
-mod keymap;
 mod platform;
 mod protocol;
 mod received;
-mod record;
 mod run;
 mod secure;
 mod sound;

@@ -2,7 +2,17 @@
 //! on Linux, low-level hooks on Windows. `mickey source` only uses this
 //! interface, so the focus, hotkey and switcher work the same on both.
 
-use crate::event::InputEvent;
+#[cfg(target_os = "linux")]
+pub mod capture;
+pub mod emit;
+pub mod event;
+pub mod held;
+pub mod hotkey;
+#[cfg_attr(not(windows), allow(dead_code))]
+pub mod keymap;
+pub mod record;
+
+use crate::input::event::InputEvent;
 #[cfg(windows)]
 use crate::threads::LockAnyway;
 use std::sync::mpsc::Sender;
@@ -19,7 +29,7 @@ pub use windows::cursor_now;
 #[cfg(target_os = "linux")]
 mod linux {
     use super::*;
-    use crate::capture;
+    use crate::input::capture;
     use crate::platform::linux::Grab;
 
     pub struct Input {
@@ -103,7 +113,7 @@ mod linux {
 #[cfg(windows)]
 mod windows {
     use super::*;
-    use crate::keymap;
+    use crate::input::keymap;
     use crate::platform::hooks::{self, HookEvent, Point};
     use std::marker::PhantomData;
     use std::sync::{Arc, Mutex};

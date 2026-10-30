@@ -8,8 +8,8 @@ use slots::{SharedSlots, Slot};
 
 use crate::threads::LockAnyway;
 use crate::{
-    clip_sync, clipboard, discovery, emit, identity, monitors, protocol, secure, source, transport,
-    trust, window,
+    clip_sync, clipboard, discovery, identity, input::emit, monitors, protocol, secure, source,
+    transport, trust, window,
 };
 use mickey_config as config;
 use std::net::SocketAddr;
