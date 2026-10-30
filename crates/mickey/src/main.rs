@@ -11,6 +11,8 @@ mod clip_watch;
 mod clip_wire;
 mod clipboard;
 mod control;
+#[cfg(target_os = "linux")]
+mod desktop;
 mod discovery;
 mod edges;
 mod emit;
