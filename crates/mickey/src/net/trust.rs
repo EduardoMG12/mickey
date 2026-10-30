@@ -68,6 +68,40 @@ pub fn shared(dir: &Path) -> Result<Shared, String> {
     )))
 }
 
+/// How often `follow` looks at the file.
+const FOLLOW_EVERY: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// Keeps `shared` the same as the file in `dir`, read again whenever it
+/// changes: `mickey forget` writes the file directly when no control
+/// channel runs (a PC that is only controlled), and a PC forgotten that
+/// way must stop being trusted without a restart. A file that cannot be
+/// read leaves the list as it was.
+pub fn follow(shared: &Shared, dir: &Path) {
+    let (shared, dir) = (shared.clone(), dir.to_path_buf());
+    let modified = |dir: &Path| {
+        fs::metadata(dir.join(FILE_NAME))
+            .and_then(|file| file.modified())
+            .ok()
+    };
+    let mut last = modified(&dir);
+    crate::threads::spawn("trust follow", move || {
+        loop {
+            std::thread::sleep(FOLLOW_EVERY);
+            let now = modified(&dir);
+            if now == last {
+                continue;
+            }
+            last = now;
+            // Read under the lock: a pairing saved meanwhile is not lost.
+            let mut list = shared.lock_anyway();
+            match TrustedPeers::load(&dir) {
+                Ok(read) => *list = read,
+                Err(err) => eprintln!("mickey: {err}; the trusted PCs stay as they were"),
+            }
+        }
+    });
+}
+
 pub struct TrustedPeers {
     path: PathBuf,
     peers: Vec<([u8; 32], String)>,
@@ -338,6 +372,26 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn a_pc_forgotten_in_the_file_is_forgotten_in_memory() {
+        let dir = std::env::temp_dir().join(format!("mickey-follow-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let shared = shared(&dir).unwrap();
+        shared.lock_anyway().add([7; 32], "laptop").unwrap();
+        follow(&shared, &dir);
+        // What `mickey forget` does with no Mickey to ask: the file only.
+        let mut on_disk = TrustedPeers::load(&dir).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        assert!(on_disk.forget(&crate::hex::encode(&[7; 32])).unwrap());
+        let gone = (0..40).any(|_| {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            !shared.lock_anyway().is_trusted(&[7; 32])
+        });
+        let _ = fs::remove_dir_all(&dir);
+        assert!(gone, "still trusted 4 s after the file changed");
+    }
 
     fn temp_dir(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("mickey-trust-{name}-{}", std::process::id()));
