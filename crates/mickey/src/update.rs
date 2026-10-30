@@ -85,12 +85,7 @@ fn fetch(url: &str, limits: &[&str]) -> Result<Vec<u8>, String> {
         .args(["--user-agent", &format!("mickey/{}", version::THIS)])
         .args(["--header", "Accept: application/vnd.github+json"])
         .arg(url);
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        // CREATE_NO_WINDOW: no console flashing up.
-        curl.creation_flags(0x0800_0000);
-    }
+    crate::platform::hide_console(&mut curl);
     let answer = curl
         .output()
         .map_err(|err| format!("cannot run curl: {err}"))?;

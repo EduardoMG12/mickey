@@ -24,3 +24,16 @@ pub mod tray;
 pub mod uinput;
 #[cfg(windows)]
 pub mod windows;
+
+/// Keeps a console program started from Mickey from flashing a console
+/// window up on Windows (`CREATE_NO_WINDOW`); nothing elsewhere.
+pub fn hide_console(command: &mut std::process::Command) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    #[cfg(not(windows))]
+    let _ = command;
+}

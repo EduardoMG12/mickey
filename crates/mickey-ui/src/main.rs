@@ -9,6 +9,7 @@
 mod choice;
 mod history;
 mod layout;
+mod mickey;
 mod pair;
 mod place;
 mod settings;
@@ -310,8 +311,8 @@ fn main() -> ExitCode {
 fn settings_window() -> ExitCode {
     // Opened after "Quit Mickey" in the tray: the PCs are not connected
     // until Mickey runs again, so it is started, as logging in does.
-    if settings::ask_mickey(&["status"]).is_err()
-        && let Err(err) = settings::ask_mickey(&["start"])
+    if mickey::ask(&["status"]).is_err()
+        && let Err(err) = mickey::ask(&["start"])
     {
         eprintln!("mickey-ui: cannot start Mickey: {err}");
     }
