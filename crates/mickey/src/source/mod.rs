@@ -15,7 +15,7 @@ use crate::hotkey::Hotkey;
 use crate::identity::{self, Identity};
 use crate::input::Input;
 use crate::latency;
-use crate::monitors::{self, Monitor};
+use crate::monitors;
 use crate::protocol::Message;
 use crate::record::{Heard, Recording};
 use crate::threads::LockAnyway;
@@ -24,13 +24,19 @@ use crate::trust;
 use crate::update;
 use crate::window;
 use mickey_config as config;
-use mickey_config::peers::{PeerInfo, Peers};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
 use std::time::{Duration, Instant};
 
+mod layout;
+mod orders;
 mod peer;
+mod switcher;
+
+use layout::{arrange, edge_crossed, edges_matter, save_position};
+use orders::{found_text, obey, peers_text};
+use switcher::{open_mirror, open_switcher, switcher_cards};
 
 use peer::{
     News, Peer, Shared, connect_first, open_data_link, read_peer, reconnect, report_latency,
@@ -83,88 +89,6 @@ impl From<Request> for Wake {
     fn from(request: Request) -> Wake {
         Wake::Control(request)
     }
-}
-
-/// Carries out an order from the control socket and returns the answer
-/// line. Orders only move the focus.
-fn obey(
-    order: Order,
-    names: &[String],
-    online: &[bool],
-    switcher: &mut Switcher,
-    act: &mut impl FnMut(Action),
-) -> String {
-    match order {
-        Order::Home => {
-            switcher.go_home(act);
-            "ok: the focus is on this PC".into()
-        }
-        Order::Switcher if switcher.focus() == Focus::Local => {
-            act(Action::OpenSwitcher);
-            "ok: showing the switcher".into()
-        }
-        Order::Switcher => match switcher.focus() {
-            Focus::Remote(peer) => {
-                act(Action::OpenSwitcherOn(peer));
-                "ok: showing the switcher on the PC in use".into()
-            }
-            _ => "error: the focus is moving; try again".into(),
-        },
-        // The main loop answers these, since it knows the answers.
-        Order::Peers
-        | Order::Discover
-        | Order::History
-        | Order::HistoryCopy(_)
-        | Order::Quit
-        | Order::Arranged
-        | Order::Record
-        | Order::Forget(_)
-        | Order::Connect { .. } => "error: not an order".into(),
-        Order::Pairing => {
-            trust::open_pairing();
-            format!(
-                "ok: a new PC may ask to pair for {} s",
-                trust::PAIRING_OPEN.as_secs()
-            )
-        }
-        Order::Go(name) => {
-            let Some(peer) = names.iter().position(|known| *known == name) else {
-                return format!("error: no PC named `{name}` in config.toml");
-            };
-            if !online[peer] {
-                return format!("error: {name} is offline");
-            }
-            if switcher.focus() != Focus::Local {
-                return "error: the focus is on another PC; use the hotkey or `mickey home`".into();
-            }
-            switcher.go_to(Some(peer), online);
-            format!("ok: going to {name} once every key is released")
-        }
-    }
-}
-
-/// The peer the cursor is pushing onto, and where on its desktop. Never
-/// while a mouse button is down: dragging a window to the edge must not
-/// throw it to another PC.
-/// Whether a placed peer is online: only then is the edge worth checking.
-fn edges_matter(positions: &[Option<[i32; 2]>], peers: &[Peer]) -> bool {
-    (0..peers.len()).any(|index| positions[index].is_some() && peers[index].link.is_some())
-}
-
-/// The peer, and its point, that the cursor pushed onto at `off` (a pixel
-/// just off this desktop, from `EdgeWatch`), unless a button is held.
-fn edge_crossed(
-    positions: &[Option<[i32; 2]>],
-    peers: &[Peer],
-    off: (i32, i32),
-    input: &Input,
-) -> Option<(usize, (i32, i32))> {
-    let placed = |index: usize| positions[index].filter(|_| peers[index].link.is_some());
-    let (index, there) = (0..peers.len()).find_map(|index| {
-        let there = edges::onto(&peers[index].monitors, placed(index)?, off)?;
-        Some((index, there))
-    })?;
-    (!input.button_down()).then_some((index, there))
 }
 
 /// Whether the keyboard and mouse in use control this PC (PRD 0009). Two
@@ -227,52 +151,6 @@ fn use_hotkeys(config: &config::Config, switcher: &mut Switcher, window: &mut Du
     }
 }
 
-/// After the owner placed PCs in the settings window: reads the positions
-/// saved in config.toml, uses them, and tells every placed peer where this
-/// PC sits on its desktop (the mirror: if it is at `x, y` here, this PC is
-/// at `-x, -y` there), so both PCs agree. Always all of them: telling a peer
-/// what it already knows only writes the same line again.
-/// Takes config.toml's positions and tells each PC online where this PC
-/// sits on its desktop. The PCs offline go into `unsent`, told as soon as
-/// they connect (#288): a layout saved while a PC was off must reach it.
-fn arrange(
-    positions: &mut [Option<[i32; 2]>],
-    peers: &mut [Peer],
-    unsent: &mut std::collections::HashSet<String>,
-) -> String {
-    let config = match config::Config::load() {
-        Ok(Some(config)) => config,
-        Ok(None) => return "error: no config.toml".into(),
-        Err(err) => return format!("error: {err}"),
-    };
-    let mut told = 0;
-    for (index, peer) in peers.iter_mut().enumerate() {
-        let saved = config.peers.iter().find(|saved| saved.name == peer.name);
-        let Some([x, y]) = saved.and_then(|saved| saved.position) else {
-            continue;
-        };
-        positions[index] = Some([x, y]);
-        if let Some(link) = &mut peer.link
-            && link.send(&Message::Arrange { x: -x, y: -y }).is_ok()
-        {
-            told += 1;
-            unsent.remove(&peer.name);
-        } else {
-            unsent.insert(peer.name.clone());
-        }
-    }
-    let later = if unsent.is_empty() {
-        String::new()
-    } else {
-        format!("; {} more once online", unsent.len())
-    };
-    format!("ok: told {told} PC(s) about the layout{later}")
-}
-
-/// One PC from a peer's map (already in this PC's coordinates): trusted,
-/// because a trusted member vouches for it (the owner's choice, PRD 0010);
-/// its place taken if it has one; added to config.toml and to `peers` if
-/// this PC did not know it. Returns the new peer's index, to connect to.
 /// Writes who listens, as a peer shared it, into config.toml, keeping this
 /// PC's own mode; nothing when it is already so (every new data link
 /// sends it again).
@@ -331,13 +209,13 @@ fn audio_target(
     })
 }
 
+/// Whether a "let this PC in?" question is on screen (see `ask_to_join`).
+static JOIN_ASKING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 /// Asks, on its own thread (the main loop must keep moving keys), whether
 /// to let `member` join, as `introducer` (who sent the map) says it is in
 /// the group. A yes comes back as `Wake::Accepted`; anything else leaves
 /// it out.
-/// Whether a "let this PC in?" question is on screen (see `ask_to_join`).
-static JOIN_ASKING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-
 fn ask_to_join(member: group::Member, by: [u8; 32], introducer: String, wake: &Sender<Wake>) {
     use std::sync::atomic::Ordering;
     if JOIN_ASKING.swap(true, Ordering::SeqCst) {
@@ -361,6 +239,10 @@ fn ask_to_join(member: group::Member, by: [u8; 32], introducer: String, wake: &S
     });
 }
 
+/// One PC from a peer's map (already in this PC's coordinates): trusted,
+/// because a trusted member vouches for it (the owner's choice, PRD 0010);
+/// its place taken if it has one; added to config.toml and to `peers` if
+/// this PC did not know it. Returns the new peer's index, to connect to.
 fn join(
     member: group::Member,
     by: &[u8; 32],
@@ -455,60 +337,6 @@ fn save_key(name: &str, key: &[u8; 32]) {
     if let Err(err) = saved {
         eprintln!("mickey: cannot remember {name}'s key: {err}");
     }
-}
-
-/// Writes where a peer placed itself into config.toml, so the settings
-/// window and the next start see it too.
-fn save_position(name: &str, position: [i32; 2]) {
-    let saved = config::path().and_then(|path| {
-        let text = std::fs::read_to_string(&path).map_err(|err| err.to_string())?;
-        let text = config::set_position(&text, name, position)?;
-        config::write(&path, &text)
-    });
-    match saved {
-        Ok(()) => println!("mickey: {name} placed itself on this desktop at {position:?}"),
-        Err(err) => eprintln!("mickey: cannot save where {name} sits: {err}"),
-    }
-}
-
-/// The answer to `mickey discover`: one PC per line, its name, address
-/// and fingerprint, tab-separated.
-fn found_text(found: Option<&discovery::Table>) -> String {
-    let Some(table) = found else {
-        return "error: this Mickey is not looking for other PCs".into();
-    };
-    let lines: Vec<String> = table
-        .list(Instant::now())
-        .iter()
-        .map(|pc| {
-            format!(
-                "{}\t{}\t{}",
-                pc.name,
-                pc.address,
-                identity::fingerprint(&pc.key)
-            )
-        })
-        .collect();
-    lines.join("\n")
-}
-
-/// The answer to `mickey peers`.
-fn peers_text(this_pc: &[Monitor], peers: &[Peer], online: &[bool]) -> String {
-    Peers {
-        this_pc: this_pc.to_vec(),
-        peers: peers
-            .iter()
-            .zip(online)
-            .map(|(peer, &online)| PeerInfo {
-                name: peer.name.clone(),
-                online,
-                reinstalled: peer.new_key,
-                version: peer.version.clone(),
-                monitors: peer.monitors.clone(),
-            })
-            .collect(),
-    }
-    .to_text()
 }
 
 /// What the target passes on to the source.
@@ -909,7 +737,7 @@ pub fn run(
             {
                 this_pc = found;
             }
-            let placed: Vec<(&[Monitor], [i32; 2])> = (0..peers.len())
+            let placed: Vec<(&[monitors::Monitor], [i32; 2])> = (0..peers.len())
                 .filter(|&index| peers[index].link.is_some())
                 .filter_map(|index| Some((peers[index].monitors.as_slice(), positions[index]?)))
                 .collect();
@@ -1457,65 +1285,6 @@ pub fn run(
         }
     }
     Err("every input device is gone".into())
-}
-
-/// The switcher's cards: the focused card's id first, then one card per
-/// PC, as `id=online:name` or `id=offline:name`, in the order to show them
-/// (`Interface::switcher_sort`). Id 0 is this PC, `i + 1` is peer `i`.
-fn switcher_cards(
-    focused: usize,
-    my_name: &str,
-    peers: &[Peer],
-    positions: &[Option<[i32; 2]>],
-    interface: &config::Interface,
-) -> Vec<String> {
-    let mut all = vec![(my_name, Some([0, 0]), true)];
-    for (peer, place) in peers.iter().zip(positions) {
-        all.push((peer.name.as_str(), *place, peer.link.is_some()));
-    }
-    let sortable: Vec<(&str, Option<[i32; 2]>)> =
-        all.iter().map(|&(name, place, _)| (name, place)).collect();
-    let mut cards = vec![focused.to_string()];
-    for id in interface.switcher_sort(&sortable) {
-        let (name, _, online) = all[id];
-        let state = if online { "online" } else { "offline" };
-        cards.push(format!("{id}={state}:{name}"));
-    }
-    cards
-}
-
-/// Opens a view-only copy of the switcher on this PC; the caller kills it
-/// once a pick is made.
-fn open_mirror(cards: &[String], interface: &config::Interface) -> Option<std::process::Child> {
-    crate::window::ui_command(&crate::window::switcher_args(cards, interface, true))
-        .and_then(|mut ui| ui.stdout(std::process::Stdio::null()).spawn())
-        .ok()
-}
-
-/// Shows `mickey-ui switcher` (installed next to this program) on its own
-/// thread, and sends the owner's pick when the window closes: `Some(peer)`,
-/// `None` for this PC or Esc, or an error if the window could not run.
-/// The GUI is a separate program so this one stays small (PRD 0003).
-fn open_switcher(
-    cards: &[String],
-    interface: &config::Interface,
-    wake: &Sender<Wake>,
-    slot: &window::Slot,
-) {
-    let args = crate::window::switcher_args(cards, interface, false);
-    let (wake, slot) = (wake.clone(), slot.clone());
-    crate::threads::spawn("switcher", move || {
-        let pick = match window::run(&args, &slot) {
-            // The window prints the card's id; 0 is this PC.
-            window::Outcome::Answered(text) => text
-                .parse::<usize>()
-                .map(|card| card.checked_sub(1))
-                .map_err(|err| format!("mickey-ui answered badly: {err}")),
-            window::Outcome::Closed => Ok(None),
-            window::Outcome::Failed(err) => Err(err),
-        };
-        let _ = wake.send(Wake::Pick(pick));
-    });
 }
 
 #[cfg(test)]
