@@ -305,6 +305,11 @@ fn default_speed() -> i32 {
 }
 
 impl Config {
+    /// Every setting at its default: what an empty config.toml gives.
+    pub fn empty() -> Config {
+        parse("").expect("an empty config is valid")
+    }
+
     /// Parses every hotkey; an error names the setting and the bad part,
     /// and two settings with the same keys are refused.
     pub fn hotkeys(&self) -> Result<HotkeySet, String> {
@@ -628,7 +633,7 @@ pub fn add_peer(
 }
 
 /// A TOML basic string: quotes and backslashes escaped.
-pub(crate) fn toml_string(text: &str) -> String {
+pub fn toml_string(text: &str) -> String {
     format!("\"{}\"", text.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
