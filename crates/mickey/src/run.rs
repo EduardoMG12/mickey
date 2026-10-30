@@ -243,7 +243,7 @@ pub fn run(command: Command) -> Result<(), String> {
             };
             println!("mickey: {next} switches focus");
             // Alone, no target tells this source it is controlled.
-            let (_, controlled) = std::sync::mpsc::channel();
+            let (_, target_news) = std::sync::mpsc::channel();
             source::run(
                 peers,
                 hotkey::Hotkey::from_config(&set),
@@ -253,7 +253,7 @@ pub fn run(command: Command) -> Result<(), String> {
                     trusted: trust::shared(&trust::dir()?)?,
                     name: config::Config::empty().this_pc.name(),
                     port: config::DEFAULT_PORT,
-                    controlled,
+                    target_news,
                     found: None,
                     keeper: clipboard::Keeper::start().ok(),
                     history: None,
@@ -371,7 +371,7 @@ fn run_from_config() -> Result<(), String> {
     }
     // The target tells the source when a peer's keyboard comes over, for
     // the status and the tray (PRD 0009).
-    let (controlled_sender, controlled) = std::sync::mpsc::channel();
+    let (news_sender, target_news) = std::sync::mpsc::channel();
     // One list of trusted PCs for the source and the target.
     let trusted = trust::shared(&trust::dir()?)?;
     // One clipboard for the whole process (PRD 0011).
@@ -382,7 +382,7 @@ fn run_from_config() -> Result<(), String> {
         let (listen, found, keeper) = (this_pc.listen, found.clone(), keeper.clone());
         let trusted = trusted.clone();
         crate::threads::spawn("target", move || {
-            target(listen, trusted, controlled_sender, found, keeper)
+            target(listen, trusted, news_sender, found, keeper)
         })
     });
     if source_wanted {
@@ -403,7 +403,7 @@ fn run_from_config() -> Result<(), String> {
                 trusted,
                 name: this_pc.name(),
                 port: this_pc.listen.port(),
-                controlled,
+                target_news,
                 found,
                 // Off: another clipboard manager keeps the history.
                 history: keeper

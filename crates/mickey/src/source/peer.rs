@@ -2,7 +2,7 @@
 //! said last, and the threads that connect to it, pair with it and read it.
 
 use super::RETRY_EVERY;
-use crate::clipboard::sync::Mover;
+use crate::clipboard::sync::DataLinks;
 use crate::monitors::Monitor;
 use crate::net::identity::Identity;
 use crate::net::latency::{self, Latency};
@@ -113,7 +113,7 @@ pub(super) fn connect_and_pair(
 }
 
 /// Opens the data link to a connected peer in the background and hands it
-/// to the mover. A peer without one (an older Mickey) only misses the
+/// to `DataLinks`. A peer without one (an older Mickey) only misses the
 /// shared clipboard.
 /// The data link must answer with `key`, the key of the input link just
 /// opened to the same peer: otherwise whoever answers the data port (a PC
@@ -123,12 +123,12 @@ pub(super) fn open_data_link(
     input: SocketAddr,
     key: [u8; 32],
     shared: &Arc<Shared>,
-    mover: &Mover,
+    data_links: &DataLinks,
 ) {
-    let (shared, mover) = (Arc::clone(shared), mover.clone());
+    let (shared, data_links) = (Arc::clone(shared), data_links.clone());
     crate::threads::spawn("open data link", move || {
         match transport::connect_data(input, &shared.identity) {
-            Ok(link) if *link.peer_key() == key => mover.link(index, link),
+            Ok(link) if *link.peer_key() == key => data_links.link(index, link),
             Ok(_) => eprintln!(
                 "mickey: the data port of {input} answered with another PC's key; no shared clipboard with it"
             ),

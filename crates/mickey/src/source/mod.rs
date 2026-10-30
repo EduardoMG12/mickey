@@ -3,10 +3,10 @@
 
 use crate::clipboard::Keeper;
 use crate::clipboard::history;
-use crate::clipboard::sync::Mover;
+use crate::clipboard::sync::DataLinks;
 use crate::control::{self, Control, Order, Request, Status};
 use crate::edges;
-use crate::focus::{Action, Focus, Switcher};
+use crate::focus::{Action, Focus, FocusMachine};
 use crate::input::Input;
 use crate::input::emit;
 use crate::input::event::InputEvent;
@@ -146,12 +146,12 @@ fn open_window(window: &str) {
 }
 
 /// Uses `config`'s hotkeys at once, if they are valid.
-fn use_hotkeys(config: &config::Config, switcher: &mut Switcher, window: &mut Duration) {
+fn use_hotkeys(config: &config::Config, focus_machine: &mut FocusMachine, window: &mut Duration) {
     match config.hotkeys() {
         Ok(set) => {
             let hotkey = Hotkey::from_config(&set);
             *window = hotkey.double_tap_window();
-            switcher.set_hotkeys(hotkey);
+            focus_machine.set_hotkeys(hotkey);
         }
         Err(err) => eprintln!("mickey: hotkeys not changed: {err}"),
     }
@@ -201,7 +201,7 @@ pub enum TargetNews {
 /// Mickey works without any of them.
 pub struct Services {
     /// What the target hears from the peers driving this PC.
-    pub controlled: mpsc::Receiver<TargetNews>,
+    pub target_news: mpsc::Receiver<TargetNews>,
     /// The PCs heard on the network (PRD 0010).
     pub found: Option<discovery::Table>,
     /// The PCs this one trusts, shared with the target.
@@ -230,7 +230,7 @@ pub fn run(
         trusted,
         name: my_name,
         port: my_port,
-        controlled,
+        target_news,
         found,
         keeper,
         history,
@@ -279,15 +279,15 @@ pub fn run(
         );
     }
     // The clipboard follows the keyboard (PRD 0011), over data links.
-    let mover = keeper.clone().map(Mover::start);
+    let data_links = keeper.clone().map(DataLinks::start);
     // Who listens, to every peer as its data link opens (PRD 0012).
     let mut audio = config::Config::load()
         .ok()
         .flatten()
         .map(|config| config.audio)
         .unwrap_or_default();
-    if let Some(mover) = &mover {
-        mover.share_audio(&audio.shared_lines());
+    if let Some(data_links) = &data_links {
+        data_links.share_audio(&audio.shared_lines());
     }
     // This PC's sound on its way to the listener, while it should be.
     let mut sending: Option<(usize, crate::audio::Sending)> = None;
@@ -315,7 +315,7 @@ pub fn run(
     {
         let wake = wake.clone();
         crate::threads::spawn("target news", move || {
-            for news in controlled {
+            for news in target_news {
                 let woken = match news {
                     TargetNews::Controlled(here) => Wake::Controlled(here),
                     TargetNews::Arranged { from, position } => Wake::Arranged(from, position),
@@ -350,7 +350,7 @@ pub fn run(
         });
     }
     let mut double_tap_window = hotkeys.double_tap_window();
-    let mut switcher = Switcher::with_hotkeys(hotkeys);
+    let mut focus_machine = FocusMachine::with_hotkeys(hotkeys);
     // Dropping a `Grab` gives its device back, on every way out of here,
     // including `?` and panics.
     let mut grabbed = None;
@@ -376,12 +376,12 @@ pub fn run(
     // The monitors again once a second: moving one in the display settings
     // used to need a restart, or the edges stayed where it was (#365). Not
     // on GNOME and KDE, whose edges are the portal's barriers.
-    let monitor_changes = monitors::follow_changes()
+    let monitor_changes = monitors::follows_changes()
         .then(|| monitors::watch(this_pc.clone(), PING_EVERY, monitors::this_pc));
     // GNOME and KDE: the InputCapture portal's barriers instead (PRD 0004,
     // phase 2), started once a peer is placed beside this PC.
     #[cfg(target_os = "linux")]
-    let mut edge_capture: Option<crate::edges::portal::EdgeCapture> = None;
+    let mut portal_edges: Option<crate::edges::portal::PortalEdges> = None;
     let mut online: Vec<bool> = Vec::with_capacity(peers.len());
     // PCs that were off when the owner saved a layout: told when they
     // connect (#288).
@@ -403,13 +403,13 @@ pub fn run(
                 None => save_key(&peers[index].name, link.peer_key()),
             }
             read_peer(index, &link, &pong_sender, start);
-            if let Some(mover) = &mover {
+            if let Some(data_links) = &data_links {
                 open_data_link(
                     index,
                     peers[index].address,
                     *link.peer_key(),
                     &shared,
-                    mover,
+                    data_links,
                 );
             }
             peers[index].key = Some(*link.peer_key());
@@ -442,12 +442,12 @@ pub fn run(
             match news {
                 News::Picked(card) => {
                     picked = true;
-                    if switcher.focus() == Focus::Remote(index) {
+                    if focus_machine.focus() == Focus::Remote(index) {
                         remote_pick = Some(card);
                     }
                 }
                 News::Refused => {
-                    if switcher.focus() == Focus::Remote(index) {
+                    if focus_machine.focus() == Focus::Remote(index) {
                         println!(
                             "mickey: {} refused the keyboard and mouse (a window running as administrator in front?); they are back here",
                             peers[index].name
@@ -456,7 +456,7 @@ pub fn run(
                     }
                 }
                 News::Leave(x, y) => {
-                    if switcher.focus() == Focus::Remote(index)
+                    if focus_machine.focus() == Focus::Remote(index)
                         && let Some(position) = positions[index]
                     {
                         home_at = edges::back(&this_pc, position, (x, y));
@@ -478,23 +478,23 @@ pub fn run(
                 }
             }
         }
-        if let Focus::WaitingForKeysUp(index) = switcher.focus()
+        if let Focus::WaitingForKeysUp(index) = focus_machine.focus()
             && !input.any_key_down()
         {
             grabbed = Some(input.grab()?);
-            switcher.grabbed();
+            focus_machine.grabbed();
             println!("mickey: focus is on {}", peers[index].name);
         }
 
         // Publish only when the focus or a peer's state changed; comparing
         // first keeps the per-event path free of allocations.
-        let focus = match switcher.focus() {
+        let focus = match focus_machine.focus() {
             Focus::Remote(peer) => Some(peer),
             Focus::Local | Focus::WaitingForKeysUp(_) => None,
         };
         if let Some(was) = in_control.focus_is(focus) {
-            if let Some(mover) = &mover {
-                mover.moved(was, focus);
+            if let Some(data_links) = &data_links {
+                data_links.moved(was, focus);
             }
             // Tell the peers the keyboard left and where it went.
             for (index, now_here) in [(was, false), (focus, true)] {
@@ -558,10 +558,10 @@ pub fn run(
                 .filter_map(|index| Some((peers[index].monitors.as_slice(), positions[index]?)))
                 .collect();
             let lines = edges::barriers(&this_pc, &placed);
-            match &edge_capture {
+            match &portal_edges {
                 Some(capture) => capture.set(lines),
                 None if !lines.is_empty() => {
-                    edge_capture = Some(crate::edges::portal::EdgeCapture::start(
+                    portal_edges = Some(crate::edges::portal::PortalEdges::start(
                         this_pc.clone(),
                         lines,
                     ));
@@ -584,7 +584,7 @@ pub fn run(
                     lost.push(index);
                 }
             }
-            let remote = matches!(switcher.focus(), Focus::Remote(_));
+            let remote = matches!(focus_machine.focus(), Focus::Remote(_));
             next_ping = now
                 + if bench && remote {
                     BENCH_PING_EVERY
@@ -597,7 +597,7 @@ pub fn run(
         // only while waiting for keys to go up, so an idle source wakes once
         // a second.
         let mut wait = next_ping.saturating_duration_since(now);
-        if matches!(switcher.focus(), Focus::WaitingForKeysUp(_)) {
+        if matches!(focus_machine.focus(), Focus::WaitingForKeysUp(_)) {
             wait = wait.min(KEYS_UP_POLL);
         }
         // Reuses one buffer: no allocation per input event.
@@ -607,9 +607,9 @@ pub fn run(
         if target.map(|(_, to)| to) != sending.as_ref().map(|(_, sending)| sending.to()) {
             // Dropping the old one gives the speakers back.
             sending = None;
-            if let (Some((index, to)), Some(mover)) = (target, &mover) {
-                let mover = mover.clone();
-                let give_key = move |hex: &str| mover.give_audio_key(index, hex);
+            if let (Some((index, to)), Some(data_links)) = (target, &data_links) {
+                let data_links = data_links.clone();
+                let give_key = move |hex: &str| data_links.give_audio_key(index, hex);
                 match crate::audio::Sending::start(to, audio.mode, give_key) {
                     Ok(started) => sending = Some((index, started)),
                     Err(err) => eprintln!("mickey: {err}"),
@@ -620,7 +620,7 @@ pub fn run(
         // The switcher shown on the focused peer instead (it is where the
         // owner is looking).
         let mut open_on = None;
-        let left = switcher.focus();
+        let left = focus_machine.focus();
         let mut act = |action| match action {
             Action::OpenSwitcher => open = true,
             Action::OpenSwitcherOn(peer) => open_on = Some(peer),
@@ -639,14 +639,16 @@ pub fn run(
             }
         };
         if home_at.is_some() || refused {
-            switcher.go_home(&mut act);
+            focus_machine.go_home(&mut act);
         }
         // 0 is this PC; `i + 1` is peer `i`; anything else is "none".
         match remote_pick.map(usize::from) {
-            Some(0) => switcher.go_home(&mut act),
-            Some(card) if card <= peer_count && switcher.focus() != Focus::Remote(card - 1) => {
-                switcher.go_home(&mut act);
-                switcher.go_to(Some(card - 1), &online);
+            Some(0) => focus_machine.go_home(&mut act),
+            Some(card)
+                if card <= peer_count && focus_machine.focus() != Focus::Remote(card - 1) =>
+            {
+                focus_machine.go_home(&mut act);
+                focus_machine.go_to(Some(card - 1), &online);
             }
             _ => {}
         }
@@ -693,9 +695,9 @@ pub fn run(
                 ));
             }
             Ok(Wake::Input(event)) => {
-                switcher.handle(event, &online, &mut act);
+                focus_machine.handle(event, &online, &mut act);
                 if let InputEvent::Motion { dx, dy } = event
-                    && switcher.focus() == Focus::Local
+                    && focus_machine.focus() == Focus::Local
                 {
                     pushed = edge_check.feed((dx, dy));
                 }
@@ -747,8 +749,8 @@ pub fn run(
             Ok(Wake::Tray(tray::Click::ListenHere)) => {
                 match listen_here(shared.identity.public()) {
                     Ok(taken) => {
-                        if let Some(mover) = &mover {
-                            mover.share_audio(&taken.shared_lines());
+                        if let Some(data_links) = &data_links {
+                            data_links.share_audio(&taken.shared_lines());
                         }
                         audio = taken;
                     }
@@ -757,22 +759,22 @@ pub fn run(
                     }
                 }
             }
-            Ok(Wake::Tray(tray::Click::Home)) => switcher.go_home(&mut act),
+            Ok(Wake::Tray(tray::Click::Home)) => focus_machine.go_home(&mut act),
             Ok(Wake::Tray(tray::Click::Go(peer))) => {
                 // As from the switcher: only from here, only to a PC online.
-                if switcher.focus() == Focus::Local && online[peer] {
-                    switcher.go_to(Some(peer), &online);
+                if focus_machine.focus() == Focus::Local && online[peer] {
+                    focus_machine.go_to(Some(peer), &online);
                 }
             }
             Ok(Wake::Pick(pick)) => {
                 switchers.here_open = false;
                 picked = true;
                 match pick {
-                    Ok(peer) => switcher.go_to(peer, &online),
+                    Ok(peer) => focus_machine.go_to(peer, &online),
                     Err(err) => {
                         // Without the window, behave like the M0 hotkey.
                         eprintln!("mickey: cannot show the switcher: {err}");
-                        switcher.go_to(online.iter().position(|&up| up), &online);
+                        focus_machine.go_to(online.iter().position(|&up| up), &online);
                     }
                 }
             }
@@ -814,7 +816,7 @@ pub fn run(
                 asked_for_peers = Some(request.reply);
             }
             Ok(Wake::Control(request)) => {
-                let answer = obey(request.order, &names, &online, &mut switcher, &mut act);
+                let answer = obey(request.order, &names, &online, &mut focus_machine, &mut act);
                 let _ = request.reply.send(answer);
             }
             Err(RecvTimeoutError::Timeout) => {}
@@ -860,11 +862,11 @@ pub fn run(
             let _ = reply.send(arrange(&mut positions, &mut peers, &mut arrange_unsent));
             // The hotkeys saved with it: used here at once, and shared.
             if let Ok(Some(config)) = config::Config::load() {
-                use_hotkeys(&config, &mut switcher, &mut double_tap_window);
+                use_hotkeys(&config, &mut focus_machine, &mut double_tap_window);
                 interface = config.interface.clone();
-                if let Some(mover) = &mover {
-                    mover.share_hotkeys(&config.hotkeys.to_lines());
-                    mover.share_audio(&config.audio.shared_lines());
+                if let Some(data_links) = &data_links {
+                    data_links.share_hotkeys(&config.hotkeys.to_lines());
+                    data_links.share_audio(&config.audio.shared_lines());
                 }
                 audio = config.audio.clone();
             }
@@ -914,12 +916,12 @@ pub fn run(
         }
         // Never while the keyboard is on another PC: new hotkeys could leave
         // no way home from there (#182). They wait until it is back.
-        if switcher.focus() == Focus::Local
+        if focus_machine.focus() == Focus::Local
             && let Some(lines) = pending_hotkeys.take()
         {
             match take_hotkeys(&lines) {
                 Ok(config) => {
-                    use_hotkeys(&config, &mut switcher, &mut double_tap_window);
+                    use_hotkeys(&config, &mut focus_machine, &mut double_tap_window);
                     println!("mickey: took the hotkeys saved on another PC");
                 }
                 Err(err) => eprintln!("mickey: cannot take another PC's hotkeys: {err}"),
@@ -950,7 +952,7 @@ pub fn run(
         // went), so a PC paired with this one reaches every other.
         let now_online: Vec<bool> = peers.iter().map(|peer| peer.link.is_some()).collect();
         if now_online != shared_with
-            && let Some(mover) = &mover
+            && let Some(data_links) = &data_links
         {
             let me = group::Member {
                 key: *shared.identity.public(),
@@ -970,7 +972,7 @@ pub fn run(
                     })
                 })
                 .collect();
-            mover.share_map(&group::encode(&me, &others));
+            data_links.share_map(&group::encode(&me, &others));
             shared_with = now_online;
         }
         if quit {
@@ -991,9 +993,9 @@ pub fn run(
         // An answer about earlier motion: the cursor is still being pushed.
         // On GNOME and KDE, a barrier the cursor pushed into says it.
         #[cfg(target_os = "linux")]
-        let hit = edge_capture
+        let hit = portal_edges
             .as_ref()
-            .and_then(crate::edges::portal::EdgeCapture::hit);
+            .and_then(crate::edges::portal::PortalEdges::hit);
         #[cfg(not(target_os = "linux"))]
         let hit = None;
         let crossed = edge
@@ -1002,7 +1004,7 @@ pub fn run(
             .or(hit)
             .and_then(|off| edge_crossed(&positions, &peers, off, &input));
         if let Some((index, (x, y))) = crossed {
-            switcher.go_to(Some(index), &online);
+            focus_machine.go_to(Some(index), &online);
             if let Some(link) = &mut peers[index].link
                 && link.send(&Message::Enter { x, y }).is_err()
             {
@@ -1012,7 +1014,7 @@ pub fn run(
         if let Some(reply) = asked_for_peers {
             let _ = reply.send(peers_text(&this_pc, &peers, &online));
         }
-        if switcher.focus() == Focus::Local && left != Focus::Local {
+        if focus_machine.focus() == Focus::Local && left != Focus::Local {
             println!("mickey: focus is back here");
         }
         // The switcher shows on the PC in use, and a copy on every other
@@ -1033,12 +1035,19 @@ pub fn run(
                 &positions,
                 &interface,
             );
-            switchers.show(in_use, &cards, &peers, mover.as_ref(), &interface, &wake);
+            switchers.show(
+                in_use,
+                &cards,
+                &peers,
+                data_links.as_ref(),
+                &interface,
+                &wake,
+            );
         }
         // Closed once a pick is made, or when the focus moved some other way.
-        let moved = in_use.is_none() && switcher.focus() != left;
+        let moved = in_use.is_none() && focus_machine.focus() != left;
         if switchers.out && (picked || toggled_off || moved) {
-            switchers.close_all(mover.as_ref());
+            switchers.close_all(data_links.as_ref());
         }
 
         lost.sort_unstable();
@@ -1046,7 +1055,7 @@ pub fn run(
         for index in lost {
             peers[index].link = None;
             println!("mickey: lost {}; retrying every 5 s", peers[index].name);
-            switcher.peer_lost(index, |_ungrab| {
+            focus_machine.peer_lost(index, |_ungrab| {
                 grabbed = None;
                 println!("mickey: focus is back here");
             });

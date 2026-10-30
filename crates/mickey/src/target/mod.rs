@@ -16,13 +16,13 @@ use std::net::SocketAddr;
 
 /// Serves every source that connects, each on its own thread (at most
 /// `MAX_CONNECTIONS` at once), forever, injecting what they send.
-/// `controlled` hears whether a source's keyboard and mouse control this PC;
+/// `target_news` hears whether a source's keyboard and mouse control this PC;
 /// `found`, when discovery runs, names a PC asking to pair; `keeper`, when
 /// the clipboard is reachable, lets paired PCs read and write it.
 pub fn target(
     listen: SocketAddr,
     trusted: trust::Shared,
-    controlled: std::sync::mpsc::Sender<source::TargetNews>,
+    target_news: std::sync::mpsc::Sender<source::TargetNews>,
     found: Option<discovery::Table>,
     keeper: Option<clipboard::Keeper>,
 ) -> Result<(), String> {
@@ -48,7 +48,7 @@ pub fn target(
             &identity,
             &trusted,
             keeper,
-            &controlled,
+            &target_news,
             &sources,
             &grants,
         );
@@ -68,7 +68,7 @@ pub fn target(
         // still open, must not hold up a paired PC that reconnects.
         let (identity, trusted, emitter) = (identity.clone(), trusted.clone(), emitter.clone());
         let around = Around {
-            controlled: controlled.clone(),
+            target_news: target_news.clone(),
             found: found.clone(),
             sources: sources.clone(),
             grants: grants.clone(),
@@ -91,7 +91,7 @@ pub(super) type Sources =
 
 /// What every source's thread on the target shares.
 pub(super) struct Around {
-    controlled: std::sync::mpsc::Sender<source::TargetNews>,
+    target_news: std::sync::mpsc::Sender<source::TargetNews>,
     found: Option<discovery::Table>,
     sources: Sources,
     /// When each source may read the clipboard (#185).
@@ -159,7 +159,7 @@ pub(super) fn serve_source(
     around: &Around,
 ) {
     let Around {
-        controlled,
+        target_news,
         found,
         sources,
         grants,
@@ -229,12 +229,12 @@ pub(super) fn serve_source(
                 } else {
                     emit::park();
                 }
-                let _ = controlled.send(source::TargetNews::Controlled(here));
+                let _ = target_news.send(source::TargetNews::Controlled(here));
                 Ok(())
             }
             transport::Effect::Arranged(position) => {
                 let from = peer.ip();
-                let _ = controlled.send(source::TargetNews::Arranged { from, position });
+                let _ = target_news.send(source::TargetNews::Arranged { from, position });
                 Ok(())
             }
         }

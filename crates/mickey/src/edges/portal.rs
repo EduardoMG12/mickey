@@ -25,7 +25,7 @@ use std::time::Duration;
 /// How often the capture thread looks for a new set of barriers.
 const LOOK_AGAIN: Duration = Duration::from_millis(500);
 
-pub struct EdgeCapture {
+pub struct PortalEdges {
     /// The barriers the source wants; the thread sets them.
     wanted: Arc<Mutex<Vec<Line>>>,
     /// The pixel just off this desktop each push reached.
@@ -34,17 +34,17 @@ pub struct EdgeCapture {
     wake: Option<Box<dyn Fn() + Send>>,
 }
 
-impl EdgeCapture {
+impl PortalEdges {
     /// Starts the session (the dialog, the first time in a session) on a
     /// thread of its own.
-    pub fn start(here: Vec<Monitor>, barriers: Vec<Line>) -> EdgeCapture {
+    pub fn start(here: Vec<Monitor>, barriers: Vec<Line>) -> PortalEdges {
         let wanted = Arc::new(Mutex::new(barriers));
         let (hit, hits) = std::sync::mpsc::channel();
         if crate::desktop::session() == crate::desktop::Session::Sway {
             let wake = crate::edges::sway::start(Arc::clone(&wanted), hit)
                 .inspect_err(|err| eprintln!("mickey: no screen edges here: {err}"))
                 .ok();
-            return EdgeCapture { wanted, hits, wake };
+            return PortalEdges { wanted, hits, wake };
         }
         let shared = Arc::clone(&wanted);
         crate::threads::spawn("edge capture", move || {
@@ -52,7 +52,7 @@ impl EdgeCapture {
                 eprintln!("mickey: no screen edges here: {err}");
             }
         });
-        EdgeCapture {
+        PortalEdges {
             wanted,
             hits,
             wake: None,
