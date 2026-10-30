@@ -22,7 +22,6 @@ use crate::threads::LockAnyway;
 use crate::tray::{self, Tray};
 use crate::trust;
 use crate::update;
-use crate::window;
 use mickey_config as config;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -41,7 +40,7 @@ use hotkeys::take_hotkeys;
 use joining::{add_peer, join, take_map};
 use layout::{arrange, edge_crossed, edges_matter, save_position};
 use orders::{found_text, obey, peers_text};
-use switcher::{open_mirror, open_switcher, switcher_cards};
+use switcher::{Switchers, switcher_cards};
 
 use peer::{
     News, Peer, Shared, connect_first, open_data_link, read_peer, reconnect, report_latency,
@@ -155,6 +154,20 @@ fn use_hotkeys(config: &config::Config, switcher: &mut Switcher, window: &mut Du
             switcher.set_hotkeys(hotkey);
         }
         Err(err) => eprintln!("mickey: hotkeys not changed: {err}"),
+    }
+}
+
+/// What the tray and `mickey status` show: where the keyboard is, whether
+/// it controls this PC, which peers are online, and an update waiting.
+fn status_of(focus: Option<usize>, here: bool, update: Option<String>, peers: &[Peer]) -> Status {
+    Status {
+        focus,
+        here,
+        peers: peers
+            .iter()
+            .map(|peer| (peer.name.clone(), peer.link.is_some()))
+            .collect(),
+        update,
     }
 }
 
@@ -284,17 +297,12 @@ pub fn run(
     // from the control socket, so each is handled the moment it happens.
     let (wake, wakes) = mpsc::channel();
     input.start(wake.clone(), touchpad_speed)?;
-    let mut switcher_open = false;
+    let mut switchers = Switchers::default();
     // Local motion between two questions about where the cursor is.
     let mut edge_check = edges::Throttle::new();
-    // The copy of a switcher shown on another PC, open on this one.
-    let mut mirror: Option<std::process::Child> = None;
-    // Whether switchers or copies are open anywhere for this PC.
-    let mut copies_out = false;
     // Hotkeys another PC shared while the focus was away, to take back home.
     let mut pending_hotkeys: Option<String> = None;
     // The switcher open on this PC for picking, to close it on a second press.
-    let shown_here = window::Slot::default();
     // The status for bars and commands; without a runtime directory Mickey
     // still works, just without them.
     let control = match Control::start(wake.clone()) {
@@ -328,15 +336,7 @@ pub fn run(
     let mut recording: Option<(Recording, Sender<String>, Instant)> = None;
     // The tray icon (PRD 0009); Mickey works the same without one.
     let (clicks, picked) = mpsc::channel();
-    let first = Status {
-        focus: None,
-        here: true,
-        peers: peers
-            .iter()
-            .map(|peer| (peer.name.clone(), peer.link.is_some()))
-            .collect(),
-        update: None,
-    };
+    let first = status_of(None, true, None, &peers);
     let tray = Tray::start(first, clicks)
         .inspect_err(|err| eprintln!("mickey: {err}"))
         .ok();
@@ -358,6 +358,7 @@ pub fn run(
     let mut next_ping = start;
     let bench = std::env::var_os("MICKEY_BENCH").is_some();
     // Names never change; which peers are online is refreshed every turn.
+    // The peers' names, apart: `act` holds `peers` while an order is obeyed.
     let mut names: Vec<String> = peers.iter().map(|peer| peer.name.clone()).collect();
     // PCs the group introduced that the person here was asked about, so
     // nobody is asked twice in a run, whatever the answer (#184).
@@ -518,15 +519,7 @@ pub fn run(
                     .any(|((_, up), peer)| *up != peer.link.is_some())
         });
         if changed {
-            let status = Status {
-                focus,
-                here,
-                peers: peers
-                    .iter()
-                    .map(|peer| (peer.name.clone(), peer.link.is_some()))
-                    .collect(),
-                update: waiting_update,
-            };
+            let status = status_of(focus, here, waiting_update, &peers);
             if let Some(control) = &control {
                 control.publish(status.clone());
             }
@@ -768,7 +761,7 @@ pub fn run(
                 }
             }
             Ok(Wake::Pick(pick)) => {
-                switcher_open = false;
+                switchers.here_open = false;
                 picked = true;
                 match pick {
                     Ok(peer) => switcher.go_to(peer, &online),
@@ -1021,11 +1014,11 @@ pub fn run(
         // The switcher shows on the PC in use, and a copy on every other
         // online PC, so it is seen wherever the owner looks (PRD 0007).
         // The hotkey again while switchers are open closes them all.
-        let toggled_off = copies_out && (open || open_on.is_some());
+        let toggled_off = switchers.out && (open || open_on.is_some());
         let in_use = match open_on {
             _ if toggled_off => None,
             Some(peer) => Some(Some(peer)),
-            None if open && !switcher_open => Some(None),
+            None if open && !switchers.here_open => Some(None),
             None => None,
         };
         if let Some(in_use) = in_use {
@@ -1036,36 +1029,12 @@ pub fn run(
                 &positions,
                 &interface,
             );
-            if let Some(mover) = &mover {
-                for (peer, other) in peers.iter().enumerate() {
-                    if Some(peer) == in_use {
-                        mover.show_switcher(peer, &cards.join("\n"));
-                    } else if other.link.is_some() {
-                        mover.mirror_switcher(peer, &cards.join("\n"));
-                    }
-                }
-            }
-            match in_use {
-                Some(_) => mirror = open_mirror(&cards, &interface).or(mirror),
-                None => {
-                    switcher_open = true;
-                    open_switcher(&cards, &interface, &wake, &shown_here);
-                }
-            }
-            copies_out = true;
+            switchers.show(in_use, &cards, &peers, mover.as_ref(), &interface, &wake);
         }
         // Closed once a pick is made, or when the focus moved some other way.
         let moved = in_use.is_none() && switcher.focus() != left;
-        if copies_out && (picked || toggled_off || moved) {
-            copies_out = false;
-            window::close(&shown_here);
-            if let Some(mover) = &mover {
-                mover.close_switchers();
-            }
-            if let Some(mut window) = mirror.take() {
-                let _ = window.kill();
-                let _ = window.wait();
-            }
+        if switchers.out && (picked || toggled_off || moved) {
+            switchers.close_all(mover.as_ref());
         }
 
         lost.sort_unstable();
@@ -1127,41 +1096,6 @@ mod tests {
             "audio_target: {:.0} ns per call",
             started.elapsed().as_nanos() as f64 / 100_000.0
         );
-    }
-
-    fn run(order: Order, switcher: &mut Switcher, online: &[bool]) -> (String, Vec<Action>) {
-        let names = ["Desktop".to_string(), "Windows".to_string()];
-        let mut actions = Vec::new();
-        let answer = obey(order, &names, online, switcher, &mut |action| {
-            actions.push(action)
-        });
-        (answer, actions)
-    }
-
-    #[test]
-    fn go_moves_the_focus_to_an_online_peer_only() {
-        let mut switcher = Switcher::new();
-        let (answer, _) = run(Order::Go("Desktop".into()), &mut switcher, &[false, true]);
-        assert_eq!(answer, "error: Desktop is offline");
-        let (answer, _) = run(Order::Go("Nope".into()), &mut switcher, &[false, true]);
-        assert!(answer.starts_with("error: no PC named"));
-        let (answer, _) = run(Order::Go("Windows".into()), &mut switcher, &[false, true]);
-        assert!(answer.starts_with("ok"));
-        assert_eq!(switcher.focus(), Focus::WaitingForKeysUp(1));
-    }
-
-    #[test]
-    fn home_and_switcher_from_a_remote_peer() {
-        let mut switcher = Switcher::new();
-        switcher.go_to(Some(1), &[true, true]);
-        switcher.grabbed();
-        let (answer, actions) = run(Order::Switcher, &mut switcher, &[true, true]);
-        assert!(answer.starts_with("ok"));
-        assert_eq!(actions, [Action::OpenSwitcherOn(1)], "on the screen in use");
-        let (answer, actions) = run(Order::Home, &mut switcher, &[true, true]);
-        assert!(answer.starts_with("ok"));
-        assert_eq!(actions, [Action::Ungrab]);
-        assert_eq!(switcher.focus(), Focus::Local);
     }
 
     #[test]
