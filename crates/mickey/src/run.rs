@@ -10,7 +10,7 @@ use crate::{
     platform, source, speakers, trust, update, window,
 };
 #[cfg(target_os = "linux")]
-use crate::{desktop, portal};
+use crate::{desktop, desktop::portal};
 
 pub fn run(command: Command) -> Result<(), String> {
     match command {

@@ -90,12 +90,12 @@ pub fn place(x: i32, y: i32) -> io::Result<()> {
 #[cfg(target_os = "linux")]
 pub fn place(x: i32, y: i32) -> io::Result<()> {
     use crate::desktop::Session;
-    use crate::monitors::hyprland;
+    use crate::desktop::hyprland;
     match crate::desktop::session() {
-        Session::X11 => return crate::x11::place(x, y).map_err(io::Error::other),
-        Session::Sway => return crate::sway::place(x, y).map_err(io::Error::other),
+        Session::X11 => return crate::desktop::x11::place(x, y).map_err(io::Error::other),
+        Session::Sway => return crate::desktop::sway::place(x, y).map_err(io::Error::other),
         Session::Portal => {
-            return crate::portal::get()
+            return crate::desktop::portal::get()
                 .ok_or_else(|| io::Error::other("no RemoteDesktop portal to place the cursor"))?
                 .place(x, y);
         }
@@ -128,10 +128,10 @@ pub fn cursor() -> Option<(i32, i32)> {
 pub fn cursor() -> Option<(i32, i32)> {
     use crate::desktop::Session;
     match crate::desktop::session() {
-        Session::Hyprland => crate::monitors::hyprland::cursor().ok(),
-        Session::X11 => crate::x11::cursor().ok(),
-        Session::Sway => crate::sway::cursor(),
-        Session::Portal => crate::portal::get()?.cursor(),
+        Session::Hyprland => crate::desktop::hyprland::cursor().ok(),
+        Session::X11 => crate::desktop::x11::cursor().ok(),
+        Session::Sway => crate::desktop::sway::cursor(),
+        Session::Portal => crate::desktop::portal::get()?.cursor(),
     }
 }
 
@@ -185,10 +185,10 @@ impl Emitter {
                 // where the cursor is (PRD 0004, #178).
                 match crate::desktop::session() {
                     crate::desktop::Session::Sway => {
-                        return crate::sway::move_by(dx, dy).map_err(io::Error::other);
+                        return crate::desktop::sway::move_by(dx, dy).map_err(io::Error::other);
                     }
                     crate::desktop::Session::Portal => {
-                        if let Some(portal) = crate::portal::get() {
+                        if let Some(portal) = crate::desktop::portal::get() {
                             return portal.move_by(dx, dy);
                         }
                     }

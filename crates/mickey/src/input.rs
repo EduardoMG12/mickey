@@ -35,8 +35,8 @@ mod linux {
     /// which may take a few milliseconds (#187).
     pub fn cursor_now() -> Option<(i32, i32)> {
         match crate::desktop::session() {
-            crate::desktop::Session::X11 => crate::x11::cursor().ok(),
-            _ => crate::monitors::hyprland::cursor().ok(),
+            crate::desktop::Session::X11 => crate::desktop::x11::cursor().ok(),
+            _ => crate::desktop::hyprland::cursor().ok(),
         }
     }
 

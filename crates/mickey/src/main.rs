@@ -32,13 +32,9 @@ mod latency;
 mod mcp;
 mod monitors;
 // The Linux build never translates keys for Windows.
-#[cfg(target_os = "linux")]
-mod edge_capture;
 #[cfg_attr(not(windows), allow(dead_code))]
 mod keymap;
 mod platform;
-#[cfg(target_os = "linux")]
-mod portal;
 mod protocol;
 mod received;
 mod record;
@@ -47,10 +43,6 @@ mod secure;
 mod sound;
 mod source;
 mod speakers;
-#[cfg(target_os = "linux")]
-mod sway;
-#[cfg(target_os = "linux")]
-mod sway_edges;
 mod target;
 mod threads;
 mod transport;
@@ -59,8 +51,6 @@ mod tray_picture;
 mod trust;
 mod update;
 mod window;
-#[cfg(target_os = "linux")]
-mod x11;
 
 fn main() {
     // Before anything is written: as administrator, never through a

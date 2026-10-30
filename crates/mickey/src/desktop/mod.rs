@@ -2,6 +2,11 @@
 //! the monitors its own way (Hyprland and Sway over their IPC sockets, the
 //! X server, or the portals on GNOME and KDE, PRD 0004).
 
+pub mod hyprland;
+pub mod portal;
+pub mod sway;
+pub mod x11;
+
 use std::ffi::OsString;
 use std::sync::OnceLock;
 

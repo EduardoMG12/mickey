@@ -152,7 +152,7 @@ pub fn move_by(dx: i32, dy: i32) -> Result<(), String> {
     }) else {
         return Ok(());
     };
-    let (x, y) = crate::portal::slide(&monitors, at, (dx, dy));
+    let (x, y) = crate::desktop::portal::slide(&monitors, at, (dx, dy));
     place(x, y)
 }
 

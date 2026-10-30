@@ -41,7 +41,7 @@ impl EdgeCapture {
         let wanted = Arc::new(Mutex::new(barriers));
         let (hit, hits) = std::sync::mpsc::channel();
         if crate::desktop::session() == crate::desktop::Session::Sway {
-            let wake = crate::sway_edges::start(Arc::clone(&wanted), hit)
+            let wake = crate::edges::sway::start(Arc::clone(&wanted), hit)
                 .inspect_err(|err| eprintln!("mickey: no screen edges here: {err}"))
                 .ok();
             return EdgeCapture { wanted, hits, wake };

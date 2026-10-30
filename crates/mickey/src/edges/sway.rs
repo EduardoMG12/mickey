@@ -191,7 +191,7 @@ impl Strips {
         let (Some(compositor), Some(layer_shell)) = (&self.compositor, &self.layer_shell) else {
             return;
         };
-        let named = crate::sway::outputs().unwrap_or_default();
+        let named = crate::desktop::sway::outputs().unwrap_or_default();
         let here: Vec<Monitor> = named.iter().map(|(_, monitor)| *monitor).collect();
         for line in wanted {
             let Some(Placement {
@@ -397,7 +397,7 @@ impl Dispatch<wl_pointer::WlPointer, ()> for Strips {
                 let Some(edge) = strips.edges.iter().find(|edge| edge.surface == surface) else {
                     return;
                 };
-                if !strips.armed || crate::sway::placed_within(PLACED_LATELY) {
+                if !strips.armed || crate::desktop::sway::placed_within(PLACED_LATELY) {
                     strips.armed = false;
                     return;
                 }
