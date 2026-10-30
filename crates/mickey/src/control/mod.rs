@@ -27,12 +27,16 @@ use std::io::{self, BufRead, BufReader, Write};
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// A follower that stops reading is dropped instead of slowing the source.
 const WRITE_TIMEOUT: Duration = Duration::from_millis(200);
 /// A client that connects and says nothing is dropped too.
 const READ_TIMEOUT: Duration = Duration::from_secs(1);
+/// The longest line a client may send: the token, or a request.
+const MAX_LINE: usize = 512;
+/// The whole request, token included, must arrive within this.
+const REQUEST_TIME: Duration = Duration::from_secs(2);
 /// How long a command waits for the source's main loop to answer.
 const ANSWER_TIMEOUT: Duration = Duration::from_secs(2);
 /// How long `record` waits for keys before giving up.
@@ -245,7 +249,7 @@ mod endpoint {
         }
 
         /// The directory's permissions already keep other users out.
-        pub fn admit(&self, _reader: &mut impl BufRead) -> bool {
+        pub fn admit(&self, _reader: &mut impl BufRead, _deadline: Instant) -> bool {
             true
         }
     }
@@ -336,9 +340,8 @@ mod endpoint {
 
         /// Only a client that read the token from the user's own file may
         /// talk: other users, and web pages reaching localhost, cannot.
-        pub fn admit(&self, reader: &mut impl BufRead) -> bool {
-            let mut line = String::new();
-            reader.read_line(&mut line).is_ok() && line.trim() == self.token
+        pub fn admit(&self, reader: &mut impl BufRead, deadline: Instant) -> bool {
+            read_line_by(reader, deadline).is_some_and(|line| line.trim() == self.token)
         }
     }
 
@@ -419,6 +422,33 @@ impl Control {
     }
 }
 
+/// One line, without its end, no longer than `MAX_LINE` and read before
+/// `deadline`: `None` for a client that sends more, or sends it too slowly,
+/// so one client never holds up the others (each read still waits at most
+/// `READ_TIMEOUT`).
+fn read_line_by(reader: &mut impl BufRead, deadline: Instant) -> Option<String> {
+    let mut line = Vec::new();
+    loop {
+        if Instant::now() > deadline || line.len() > MAX_LINE {
+            return None;
+        }
+        let chunk = reader.fill_buf().ok()?;
+        if chunk.is_empty() {
+            break;
+        }
+        if let Some(end) = chunk.iter().position(|&byte| byte == b'\n') {
+            line.extend_from_slice(&chunk[..end]);
+            reader.consume(end + 1);
+            break;
+        }
+        let read = chunk.len();
+        line.extend_from_slice(chunk);
+        reader.consume(read);
+    }
+    (line.len() <= MAX_LINE).then_some(())?;
+    String::from_utf8(line).ok()
+}
+
 fn accept<T: From<Request>>(
     listener: endpoint::Listener,
     latest: &Mutex<Option<Status>>,
@@ -430,10 +460,13 @@ fn accept<T: From<Request>>(
         let _ = stream.set_read_timeout(Some(READ_TIMEOUT));
         // One reader for both lines, so nothing read ahead is lost.
         let mut reader = BufReader::new(&stream);
-        let mut request = String::new();
-        if !listener.admit(&mut reader) || reader.read_line(&mut request).is_err() {
+        let deadline = Instant::now() + REQUEST_TIME;
+        if !listener.admit(&mut reader, deadline) {
             continue;
         }
+        let Some(request) = read_line_by(&mut reader, deadline) else {
+            continue;
+        };
         drop(reader);
         let mut stream = stream;
         let status = latest.lock_anyway().clone();
@@ -539,6 +572,21 @@ fn request_at(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_client_line_is_short_and_on_time_or_nothing() {
+        let soon = Instant::now() + REQUEST_TIME;
+        let mut two = io::Cursor::new(b"token\nstatus\n".to_vec());
+        assert_eq!(read_line_by(&mut two, soon).as_deref(), Some("token"));
+        assert_eq!(read_line_by(&mut two, soon).as_deref(), Some("status"));
+        let long = vec![b'a'; MAX_LINE * 4];
+        assert_eq!(read_line_by(&mut io::Cursor::new(long), soon), None);
+        let late = Instant::now() - Duration::from_millis(1);
+        assert_eq!(
+            read_line_by(&mut io::Cursor::new(b"status\n".to_vec()), late),
+            None
+        );
+    }
 
     fn status() -> Status {
         Status {

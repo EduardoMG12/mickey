@@ -117,11 +117,15 @@ impl Audio {
                 return Err("a PC named by something that is not a public key".into());
             }
         }
-        if heard.since <= self.since {
+        // A time ahead of this PC's clock would win over every later
+        // choice: it counts as now, so the next one made anywhere wins.
+        let since = heard.since.min(now_seconds());
+        if since <= self.since {
             return Ok(self.clone());
         }
         Ok(Audio {
             mode: self.mode,
+            since,
             ..heard
         })
     }
@@ -142,6 +146,15 @@ pub(crate) fn is_key(text: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_choice_dated_in_the_far_future_does_not_win_forever() {
+        let key = "ab".repeat(32);
+        let lines = format!("listener = \"{key}\"\nsince = {}\n", u64::MAX);
+        let taken = Audio::default().taking(&lines).unwrap();
+        assert_eq!(taken.listener.as_deref(), Some(key.as_str()));
+        assert!(taken.since <= now_seconds(), "dated now at the latest");
+    }
 
     const KEY_A: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 

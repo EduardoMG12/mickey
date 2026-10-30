@@ -32,13 +32,14 @@ impl Hotkeys {
     /// AltGr+RightShift)`. Unset hotkeys count as their defaults, so two PCs
     /// that only write them differently change nothing. Empty when equal.
     pub fn changes(&self, theirs: &Hotkeys) -> Vec<String> {
-        let shown = |text: &Option<String>, default: &str| match text
-            .as_deref()
-            .map(str::trim)
-            .unwrap_or(default)
-        {
-            "" => "off".to_string(),
-            text => text.to_string(),
+        // Spaces and line breaks collapsed: a peer's value is shown on one
+        // line, whatever it was padded with.
+        let shown = |text: &Option<String>, default: &str| {
+            let text = text.as_deref().unwrap_or(default);
+            match text.split_whitespace().collect::<Vec<_>>().join(" ") {
+                text if text.is_empty() => "off".to_string(),
+                text => text,
+            }
         };
         let rows = [
             ("Next PC / switcher", &self.next, &theirs.next, DEFAULT_NEXT),
