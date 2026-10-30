@@ -3,6 +3,7 @@
 //! to disk: a copy may be a password.
 
 use crate::clipboard::Content;
+use crate::threads::LockAnyway;
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
@@ -133,9 +134,7 @@ pub fn record(keeper: crate::clipboard::Keeper) -> Shared {
     crate::threads::spawn("history", move || {
         for () in changes {
             if let Some(content) = keeper.read() {
-                kept.lock()
-                    .unwrap_or_else(|p| p.into_inner())
-                    .add(content, SystemTime::now());
+                kept.lock_anyway().add(content, SystemTime::now());
             }
         }
     });

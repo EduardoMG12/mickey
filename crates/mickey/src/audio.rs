@@ -61,7 +61,7 @@ pub fn listen(port: u16) -> std::io::Result<()> {
 
 /// A stream's key, from the data link of the trusted PC at `from`.
 pub fn heard_key(hex: &str, from: IpAddr, name: &str) {
-    let key = unhex(hex).and_then(|bytes| StreamKey::from_bytes(&bytes));
+    let key = crate::hex::decode(hex).and_then(|bytes| StreamKey::from_bytes(&bytes));
     match (key, KEYS.get()) {
         (Some(key), Some(keys)) => {
             let _ = keys.send((key, from, name.to_string()));
@@ -69,17 +69,6 @@ pub fn heard_key(hex: &str, from: IpAddr, name: &str) {
         (None, _) => eprintln!("mickey: a bad audio key from {name}"),
         (_, None) => {}
     }
-}
-
-/// Hex digits back to bytes; `None` for anything else.
-fn unhex(text: &str) -> Option<Vec<u8>> {
-    if !text.len().is_multiple_of(2) {
-        return None;
-    }
-    (0..text.len())
-        .step_by(2)
-        .map(|i| u8::from_str_radix(text.get(i..i + 2)?, 16).ok())
-        .collect()
 }
 
 fn receive(socket: &UdpSocket, heard: &Receiver<(StreamKey, IpAddr, String)>) {
@@ -250,7 +239,7 @@ fn send(
     stop: &AtomicBool,
     give_key: &dyn Fn(&str),
 ) -> Result<(), String> {
-    let key = crate::trust::to_hex(&stream.to_bytes());
+    let key = crate::hex::encode(&stream.to_bytes());
     give_key(&key);
     let mut key_given = Instant::now();
     // Off the speakers first, then record: on Linux the recorder follows
@@ -284,9 +273,11 @@ mod tests {
     #[test]
     fn a_key_survives_hex() {
         let key = super::StreamKey::new().unwrap();
-        let hex = crate::trust::to_hex(&key.to_bytes());
-        assert!(super::unhex(&hex).and_then(|b| super::StreamKey::from_bytes(&b)) == Some(key));
-        assert_eq!(super::unhex("abc"), None);
-        assert_eq!(super::unhex("zz"), None);
+        let hex = crate::hex::encode(&key.to_bytes());
+        assert!(
+            crate::hex::decode(&hex).and_then(|b| super::StreamKey::from_bytes(&b)) == Some(key)
+        );
+        assert_eq!(crate::hex::decode("abc"), None);
+        assert_eq!(crate::hex::decode("zz"), None);
     }
 }

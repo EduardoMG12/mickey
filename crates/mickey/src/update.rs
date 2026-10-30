@@ -7,6 +7,7 @@
 //! Windows 10 1803 or newer have it), so Mickey carries no HTTP or TLS code.
 //! It sends nothing about the owner: only what any HTTPS request sends.
 
+use crate::threads::LockAnyway;
 use mickey_config::version;
 use std::process::Command;
 use std::sync::{Arc, Mutex};
@@ -27,10 +28,7 @@ impl Updates {
     /// Remembers `found` if it is newer than this build and than what was
     /// heard before.
     pub fn heard(&self, found: &str) {
-        let mut waiting = self
-            .0
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut waiting = self.0.lock_anyway();
         let newest = waiting.as_deref().unwrap_or(version::THIS);
         if version::is_newer(found, newest) {
             *waiting = Some(found.trim_start_matches('v').to_string());
@@ -39,10 +37,7 @@ impl Updates {
 
     /// The version to update to, if one is waiting.
     pub fn waiting(&self) -> Option<String> {
-        self.0
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .clone()
+        self.0.lock_anyway().clone()
     }
 }
 
@@ -114,15 +109,7 @@ fn release_key(text: &str) -> Option<[u8; 32]> {
     let hex = text
         .lines()
         .find(|line| !line.starts_with('#') && !line.trim().is_empty())?;
-    let hex = hex.trim();
-    if hex.len() != 64 {
-        return None;
-    }
-    let mut key = [0u8; 32];
-    for (byte, pair) in key.iter_mut().zip(hex.as_bytes().chunks(2)) {
-        *byte = u8::from_str_radix(std::str::from_utf8(pair).ok()?, 16).ok()?;
-    }
-    Some(key)
+    crate::hex::decode_key(hex.trim())
 }
 
 /// This system's file in `version`'s release: an exact name, so nothing
@@ -170,10 +157,7 @@ fn verified(
         .find(|(_, listed)| *listed == name)
         .map(|(hash, _)| hash)
         .ok_or_else(|| format!("{name} is not in SHA256SUMS"))?;
-    let hash: String = Sha256::digest(file)
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect();
+    let hash = crate::hex::encode(&Sha256::digest(file));
     if hash != listed {
         return Err(format!("{name} is not the file that was released"));
     }

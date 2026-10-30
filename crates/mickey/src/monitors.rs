@@ -4,6 +4,7 @@
 //! session, and the RemoteDesktop portal elsewhere (GNOME and KDE on
 //! Wayland).
 
+use crate::threads::LockAnyway;
 pub use mickey_config::peers::Monitor;
 
 pub fn this_pc() -> Result<Vec<Monitor>, String> {
@@ -82,12 +83,12 @@ pub fn keep_latest(every: std::time::Duration) -> Option<Latest> {
     }
     let latest = Latest::default();
     let first = this_pc().unwrap_or_default();
-    *latest.lock().unwrap_or_else(|p| p.into_inner()) = first.clone();
+    *latest.lock_anyway() = first.clone();
     let changes = watch(first, every, this_pc);
     let kept = latest.clone();
     crate::threads::spawn("monitor share", move || {
         for found in changes {
-            *kept.lock().unwrap_or_else(|p| p.into_inner()) = found;
+            *kept.lock_anyway() = found;
         }
     });
     Some(latest)

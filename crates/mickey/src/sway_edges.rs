@@ -12,6 +12,7 @@
 
 use crate::edges::Line;
 use crate::monitors::Monitor;
+use crate::threads::LockAnyway;
 use std::os::fd::AsFd;
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
@@ -175,11 +176,7 @@ fn place_strip(here: &[Monitor], (x1, y1, x2, y2): Line) -> Option<Placement> {
 impl Strips {
     /// Puts strips on the wanted lines, if they changed.
     fn apply(&mut self, handle: &QueueHandle<Strips>) {
-        let wanted = self
-            .wanted
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .clone();
+        let wanted = self.wanted.lock_anyway().clone();
         if wanted == self.applied {
             return;
         }

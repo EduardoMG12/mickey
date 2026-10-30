@@ -2,6 +2,7 @@
 //! Windows, a uinput virtual device on Linux (PRD 0008).
 
 use crate::event::InputEvent;
+use crate::threads::LockAnyway;
 use std::io;
 
 #[cfg(windows)]
@@ -54,7 +55,7 @@ pub fn park() {
     let Some(corner) = crate::monitors::this_pc().ok().as_deref().and_then(corner) else {
         return;
     };
-    let mut parked = PARKED_FROM.lock().unwrap_or_else(|p| p.into_inner());
+    let mut parked = PARKED_FROM.lock_anyway();
     if parked.is_none() {
         *parked = cursor();
     }
@@ -63,7 +64,7 @@ pub fn park() {
 
 /// Puts the cursor back where `park` found it, if it was parked.
 pub fn unpark() {
-    let from = PARKED_FROM.lock().unwrap_or_else(|p| p.into_inner()).take();
+    let from = PARKED_FROM.lock_anyway().take();
     if let Some((x, y)) = from {
         let _ = place(x, y);
     }

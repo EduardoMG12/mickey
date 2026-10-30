@@ -13,7 +13,6 @@
 
 use crate::control::{self, Status};
 use crate::identity;
-use crate::trust;
 use crate::update;
 use mickey_config::{self as config, peers::Peers, version};
 use serde_json::{Value, json};
@@ -200,7 +199,7 @@ fn answered(answer: String) -> Result<String, String> {
 fn key_of(pc: &str) -> Result<String, String> {
     if is_this_pc(pc) {
         let identity = identity::Identity::load_or_create(&identity::data_dir()?)?;
-        return Ok(trust::to_hex(identity.public()));
+        return Ok(crate::hex::encode(identity.public()));
     }
     let config = config::Config::load()?.ok_or("Mickey has no config.toml yet")?;
     let peer = config
@@ -370,7 +369,7 @@ fn listener(config: Option<&config::Config>) -> String {
     };
     let own = identity::data_dir()
         .and_then(|dir| identity::Identity::load_or_create(&dir))
-        .map(|identity| trust::to_hex(identity.public()));
+        .map(|identity| crate::hex::encode(identity.public()));
     if own.as_deref() == Ok(key.as_str()) {
         return "this PC".into();
     }

@@ -12,6 +12,7 @@
 
 use crate::edges::{self, Line};
 use crate::monitors::Monitor;
+use crate::threads::LockAnyway;
 use ashpd::desktop::input_capture::{
     Barrier, BarrierID, Capabilities, CreateSessionOptions, InputCapture, ReleaseOptions,
     StartOptions,
@@ -60,7 +61,7 @@ impl EdgeCapture {
 
     /// Asks for these barriers instead (the layout or who is online changed).
     pub fn set(&self, barriers: Vec<Line>) {
-        let mut wanted = self.wanted.lock().unwrap_or_else(|p| p.into_inner());
+        let mut wanted = self.wanted.lock_anyway();
         if *wanted == barriers {
             return;
         }
@@ -163,7 +164,7 @@ async fn watch(
     let mut activated = capture.receive_activated().await.map_err(text)?;
     let mut set: Option<Vec<Line>> = None;
     loop {
-        let now = wanted.lock().unwrap_or_else(|p| p.into_inner()).clone();
+        let now = wanted.lock_anyway().clone();
         if set.as_ref() != Some(&now) {
             let zones = capture
                 .zones(&session, Default::default())

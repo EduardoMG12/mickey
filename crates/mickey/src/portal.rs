@@ -8,6 +8,7 @@
 //! opened when Mickey starts, so the question never comes mid-switch.
 
 use crate::monitors::Monitor;
+use crate::threads::LockAnyway;
 use ashpd::desktop::{
     CreateSessionOptions, PersistMode,
     remote_desktop::{
@@ -102,13 +103,7 @@ impl Portal {
             .recv()
             .map_err(|_| "the portal thread ended".to_string())??;
         let until = Instant::now() + FIRST_MONITORS;
-        while shared
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .monitors
-            .is_empty()
-            && Instant::now() < until
-        {
+        while shared.lock_anyway().monitors.is_empty() && Instant::now() < until {
             std::thread::sleep(Duration::from_millis(20));
         }
         Ok(Portal { shared, context })
@@ -117,7 +112,7 @@ impl Portal {
     /// Puts the cursor at `(x, y)` of the desktop, exactly (absolute
     /// motion: no pointer acceleration in between).
     pub fn place(&self, x: i32, y: i32) -> std::io::Result<()> {
-        let mut shared = self.shared.lock().unwrap_or_else(|p| p.into_inner());
+        let mut shared = self.shared.lock_anyway();
         let pointer = shared
             .pointer
             .as_mut()
@@ -139,7 +134,7 @@ impl Portal {
     /// Moves the cursor by `(dx, dy)`, within the monitors (`slide`).
     pub fn move_by(&self, dx: i32, dy: i32) -> std::io::Result<()> {
         let (monitors, at) = {
-            let shared = self.shared.lock().unwrap_or_else(|p| p.into_inner());
+            let shared = self.shared.lock_anyway();
             (shared.monitors.clone(), shared.at)
         };
         // Never placed yet: start from the middle of the first monitor.
@@ -157,16 +152,12 @@ impl Portal {
 
     /// Where Mickey last put the cursor.
     pub fn cursor(&self) -> Option<(i32, i32)> {
-        self.shared.lock().unwrap_or_else(|p| p.into_inner()).at
+        self.shared.lock_anyway().at
     }
 
     /// This PC's monitors, as libei's absolute pointer regions.
     pub fn monitors(&self) -> Vec<Monitor> {
-        self.shared
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .monitors
-            .clone()
+        self.shared.lock_anyway().monitors.clone()
     }
 }
 
@@ -265,11 +256,11 @@ async fn listen(
                         height: region.height as i32,
                     })
                     .collect();
-                shared.lock().unwrap_or_else(|p| p.into_inner()).monitors = monitors;
+                shared.lock_anyway().monitors = monitors;
             }
             EiEvent::DeviceResumed(resumed) => {
                 if let Some(absolute) = resumed.device.interface::<ei::PointerAbsolute>() {
-                    shared.lock().unwrap_or_else(|p| p.into_inner()).pointer = Some(Pointer {
+                    shared.lock_anyway().pointer = Some(Pointer {
                         device: resumed.device.device().clone(),
                         absolute,
                         serial: resumed.serial,
@@ -283,7 +274,7 @@ async fn listen(
                     .device
                     .has_capability(DeviceCapability::PointerAbsolute) =>
             {
-                shared.lock().unwrap_or_else(|p| p.into_inner()).pointer = None;
+                shared.lock_anyway().pointer = None;
             }
             _ => {}
         }

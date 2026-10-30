@@ -8,6 +8,7 @@
 //! ```
 
 use crate::identity::fingerprint;
+use crate::threads::LockAnyway;
 use std::fs;
 use std::io::Write;
 use std::net::SocketAddr;
@@ -89,7 +90,7 @@ impl TrustedPeers {
                 continue;
             }
             let (key, note) = line.split_once(' ').unwrap_or((line, ""));
-            let key = from_hex(key)
+            let key = crate::hex::decode_key(key)
                 .ok_or_else(|| format!("{} line {} is damaged", path.display(), number + 1))?;
             peers.push((key, note.to_string()));
         }
@@ -121,7 +122,7 @@ impl TrustedPeers {
         let normalize = |text: &str| text.replace('-', "").to_ascii_uppercase();
         // A public key (64 hex digits, as config.toml and the settings keep
         // it) stands for its fingerprint.
-        let wanted = match from_hex(wanted) {
+        let wanted = match crate::hex::decode_key(wanted) {
             Some(key) => normalize(&fingerprint(&key)),
             None => normalize(wanted),
         };
@@ -143,7 +144,7 @@ impl TrustedPeers {
         let error = |err: std::io::Error| format!("cannot save {}: {err}", self.path.display());
         let mut text = String::new();
         for (key, note) in &self.peers {
-            text.push_str(&to_hex(key));
+            text.push_str(&crate::hex::encode(key));
             text.push(' ');
             text.push_str(note);
             text.push('\n');
@@ -179,7 +180,7 @@ pub fn trust_or_ask(
     code: &str,
     who: &str,
 ) -> Result<bool, String> {
-    let lock = || trusted.lock().unwrap_or_else(|p| p.into_inner());
+    let lock = || trusted.lock_anyway();
     if lock().is_trusted(peer_key) {
         return Ok(true);
     }
@@ -201,16 +202,15 @@ static OPEN_UNTIL: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mut
 /// Lets a new PC ask to pair for `PAIRING_OPEN`: from the settings, the
 /// command line, or a Connect the owner just clicked.
 pub fn open_pairing() {
-    *OPEN_UNTIL.lock().unwrap_or_else(|p| p.into_inner()) =
-        Some(std::time::Instant::now() + PAIRING_OPEN);
+    *OPEN_UNTIL.lock_anyway() = Some(std::time::Instant::now() + PAIRING_OPEN);
 }
 
 /// Whether a PC never paired may ask to pair now: while this PC trusts
 /// nobody yet (a fresh install pairs with no extra step), or while the
 /// owner has opened pairing. Anything else is refused without a window.
 pub fn pairing_open(trusted: &std::sync::Mutex<TrustedPeers>) -> bool {
-    let fresh = trusted.lock().unwrap_or_else(|p| p.into_inner()).is_empty();
-    let until = *OPEN_UNTIL.lock().unwrap_or_else(|p| p.into_inner());
+    let fresh = trusted.lock_anyway().is_empty();
+    let until = *OPEN_UNTIL.lock_anyway();
     fresh || until.is_some_and(|until| std::time::Instant::now() < until)
 }
 
@@ -230,8 +230,7 @@ static REFUSED: std::sync::Mutex<Vec<(std::net::IpAddr, std::time::Instant)>> =
 pub fn refused_for(ip: std::net::IpAddr) -> Option<std::time::Duration> {
     let now = std::time::Instant::now();
     REFUSED
-        .lock()
-        .unwrap_or_else(|p| p.into_inner())
+        .lock_anyway()
         .iter()
         .filter(|(known, _)| *known == ip)
         .map(|(_, at)| REFUSED_WAIT.saturating_sub(now.duration_since(*at)))
@@ -263,7 +262,7 @@ pub fn ask_once(
     use std::sync::atomic::Ordering;
     let ip = address.ip();
     {
-        let mut refused = REFUSED.lock().unwrap_or_else(|p| p.into_inner());
+        let mut refused = REFUSED.lock_anyway();
         if refused_recently(&mut refused, ip, std::time::Instant::now()) {
             return Ok(false);
         }
@@ -280,10 +279,7 @@ pub fn ask_once(
     let answer = ask(peer_key, address, code, &shown);
     ASKING.store(false, Ordering::SeqCst);
     if answer != Ok(true) {
-        REFUSED
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .push((ip, std::time::Instant::now()));
+        REFUSED.lock_anyway().push((ip, std::time::Instant::now()));
     }
     answer
 }
@@ -326,21 +322,6 @@ fn ask_in_terminal() -> Result<bool, String> {
         .read_line(&mut answer)
         .map_err(|err| format!("cannot read the answer: {err}"))?;
     Ok(matches!(answer.trim(), "y" | "Y" | "yes"))
-}
-
-pub fn to_hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
-}
-
-pub fn from_hex(text: &str) -> Option<[u8; 32]> {
-    if text.len() != 64 || !text.is_ascii() {
-        return None;
-    }
-    let mut key = [0u8; 32];
-    for (i, byte) in key.iter_mut().enumerate() {
-        *byte = u8::from_str_radix(&text[i * 2..i * 2 + 2], 16).ok()?;
-    }
-    Some(key)
 }
 
 #[cfg(test)]
@@ -402,7 +383,7 @@ mod tests {
         trusted.add([3; 32], "").unwrap();
         trusted.add([4; 32], "").unwrap();
         // As config.toml and the settings keep it (the settings' Remove).
-        assert!(trusted.forget(&to_hex(&[3; 32])).unwrap());
+        assert!(trusted.forget(&crate::hex::encode(&[3; 32])).unwrap());
         assert!(!trusted.is_trusted(&[3; 32]));
         assert!(trusted.is_trusted(&[4; 32]));
         fs::remove_dir_all(&dir).unwrap();
@@ -488,7 +469,7 @@ mod tests {
     #[test]
     fn hex_round_trips() {
         let key = [0xab; 32];
-        assert_eq!(from_hex(&to_hex(&key)), Some(key));
-        assert_eq!(from_hex("zz"), None);
+        assert_eq!(crate::hex::decode_key(&crate::hex::encode(&key)), Some(key));
+        assert_eq!(crate::hex::decode_key("zz"), None);
     }
 }

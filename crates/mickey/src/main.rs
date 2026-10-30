@@ -1,5 +1,6 @@
 //! Mickey: one keyboard and mouse shared across computers on the LAN.
 
+use crate::threads::LockAnyway;
 mod audio;
 mod audio_wire;
 mod autostart;
@@ -20,6 +21,7 @@ mod focus;
 mod fuzz;
 mod group;
 mod held;
+mod hex;
 mod history;
 mod hotkey;
 mod identity;
@@ -159,7 +161,7 @@ fn run(command: Command) -> Result<(), String> {
         }
         Command::IdKey => {
             let identity = identity::Identity::load_or_create(&identity::data_dir()?)?;
-            println!("{}", trust::to_hex(identity.public()));
+            println!("{}", crate::hex::encode(identity.public()));
             Ok(())
         }
         Command::Order(order) => {
@@ -598,7 +600,7 @@ fn target(
         let Some(slot) = Slot::take(&input_slots, peer.ip()) else {
             continue;
         };
-        on_its_thread("serve source", move || {
+        crate::threads::try_spawn("serve source", move || {
             let _slot = slot;
             serve_source(stream, peer, &identity, &trusted, &emitter, &around);
         });
@@ -631,7 +633,7 @@ impl Slot {
     /// `None` when the port already has `MAX_CONNECTIONS`, or this address
     /// `MAX_PER_ADDRESS`: the caller drops the stream, which closes it.
     fn take(slots: &SharedSlots, from: std::net::IpAddr) -> Option<Slot> {
-        let mut counts = slots.lock().unwrap_or_else(|p| p.into_inner());
+        let mut counts = slots.lock_anyway();
         let mine = counts.by_address.get(&from).copied().unwrap_or(0);
         if counts.total >= MAX_CONNECTIONS || mine >= MAX_PER_ADDRESS {
             return None;
@@ -644,7 +646,7 @@ impl Slot {
 
 impl Drop for Slot {
     fn drop(&mut self) {
-        let mut counts = self.0.lock().unwrap_or_else(|p| p.into_inner());
+        let mut counts = self.0.lock_anyway();
         counts.total -= 1;
         if let Some(mine) = counts.by_address.get_mut(&self.1) {
             *mine -= 1;
@@ -652,17 +654,6 @@ impl Drop for Slot {
                 counts.by_address.remove(&self.1);
             }
         }
-    }
-}
-
-/// Runs `work` on a new thread; when none can be made, says so instead
-/// of panicking (`thread::spawn` would end the accept loop).
-fn on_its_thread(name: &str, work: impl FnOnce() + Send + 'static) {
-    if let Err(err) = std::thread::Builder::new()
-        .name(name.to_string())
-        .spawn(work)
-    {
-        eprintln!("mickey: cannot start a thread for a connection: {err}");
     }
 }
 
@@ -703,14 +694,9 @@ fn serve_clipboard(
             let Ok(from) = stream.peer_addr().map(|address| address.ip()) else {
                 continue;
             };
-            on_its_thread("data link", move || {
+            crate::threads::try_spawn("data link", move || {
                 let _slot = slot;
-                let is_trusted = |key: &[u8; 32]| {
-                    trusted
-                        .lock()
-                        .unwrap_or_else(|p| p.into_inner())
-                        .is_trusted(key)
-                };
+                let is_trusted = |key: &[u8; 32]| trusted.lock_anyway().is_trusted(key);
                 match transport::accept_data(stream, &identity, is_trusted) {
                     Ok(link) => {
                         let by = *link.peer_key();
@@ -846,7 +832,7 @@ fn show_switcher_here(
         window::Outcome::Answered(text) => text.parse::<u8>().unwrap_or(u8::MAX),
         window::Outcome::Closed | window::Outcome::Failed(_) => u8::MAX,
     };
-    let mut sources = sources.lock().unwrap_or_else(|p| p.into_inner());
+    let mut sources = sources.lock_anyway();
     if let Some(link) = sources.get_mut(&from) {
         let _ = link.send(&protocol::Message::Picked { card });
     }
@@ -878,7 +864,7 @@ fn serve_source(
         }
     };
     let peer_key = *link.peer_key();
-    let lock = || trusted.lock().unwrap_or_else(|p| p.into_inner());
+    let lock = || trusted.lock_anyway();
     // The list is not held while the person decides.
     if !lock().is_trusted(&peer_key) {
         if !trust::pairing_open(trusted) {
@@ -911,10 +897,7 @@ fn serve_source(
     println!("mickey: source {peer} connected");
     // Kept so a switcher shown here can send the pick back to this source.
     if let Ok(clone) = link.try_clone() {
-        sources
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .insert(peer.ip(), clone);
+        sources.lock_anyway().insert(peer.ip(), clone);
     }
     let mut reported = false;
     // Asked per connection: monitors may have changed since the last one.
@@ -923,7 +906,7 @@ fn serve_source(
         Vec::new()
     });
     let output = |effect| {
-        let mut emitter = emitter.lock().unwrap_or_else(|p| p.into_inner());
+        let mut emitter = emitter.lock_anyway();
         match effect {
             transport::Effect::Input(event) => emitter.emit(event),
             transport::Effect::Place { x, y } => emitter.place(x, y),
@@ -949,11 +932,7 @@ fn serve_source(
     // Newer monitors than the last sent, for `serve` to pass on.
     let mut sent = monitors.clone();
     let moved = || {
-        let now = latest
-            .as_ref()?
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .clone();
+        let now = latest.as_ref()?.lock_anyway().clone();
         if now.is_empty() || now == sent {
             return None;
         }
@@ -976,10 +955,7 @@ fn serve_source(
         },
         emit::cursor,
     );
-    sources
-        .lock()
-        .unwrap_or_else(|p| p.into_inner())
-        .remove(&peer.ip());
+    sources.lock_anyway().remove(&peer.ip());
     match result {
         Ok(()) => println!("mickey: source {peer} disconnected"),
         Err(err) => eprintln!("mickey: source {peer} dropped: {err}"),

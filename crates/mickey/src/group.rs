@@ -75,21 +75,6 @@ pub struct Member {
     pub position: Option<[i32; 2]>,
 }
 
-fn hex(key: &[u8; 32]) -> String {
-    key.iter().map(|byte| format!("{byte:02x}")).collect()
-}
-
-fn unhex(text: &str) -> Option<[u8; 32]> {
-    let mut key = [0u8; 32];
-    if text.len() != 64 || !text.is_ascii() {
-        return None;
-    }
-    for (i, byte) in key.iter_mut().enumerate() {
-        *byte = u8::from_str_radix(&text[i * 2..i * 2 + 2], 16).ok()?;
-    }
-    Some(key)
-}
-
 /// `sender` first (its address goes as `:port`), then the others.
 pub fn encode(sender: &Member, others: &[Member]) -> String {
     let line = |member: &Member, address: String| {
@@ -98,7 +83,7 @@ pub fn encode(sender: &Member, others: &[Member]) -> String {
             .map_or("-".to_string(), |[x, y]| format!("{x},{y}"));
         format!(
             "{}\t{}\t{address}\t{position}",
-            hex(&member.key),
+            crate::hex::encode(&member.key),
             member.name
         )
     };
@@ -127,7 +112,7 @@ pub fn decode(text: &str, from: IpAddr) -> Result<Vec<Member>, String> {
             let [key, name, address, position] = line.split('\t').collect::<Vec<_>>()[..] else {
                 return Err(bad());
             };
-            let key = unhex(key).ok_or_else(bad)?;
+            let key = crate::hex::decode_key(key).ok_or_else(bad)?;
             if name.len() > 64 || !crate::discovery::plain_name(name) {
                 return Err(bad());
             }

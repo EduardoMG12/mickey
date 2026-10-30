@@ -6,6 +6,7 @@
 //! desktop.
 
 use crate::monitors::Monitor;
+use crate::threads::LockAnyway;
 use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
 use std::sync::Mutex;
@@ -111,10 +112,7 @@ static PLACED: Mutex<Option<Instant>> = Mutex::new(None);
 
 /// Whether Mickey put the cursor somewhere in the last `within`.
 pub fn placed_within(within: Duration) -> bool {
-    PLACED
-        .lock()
-        .unwrap_or_else(|p| p.into_inner())
-        .is_some_and(|at| at.elapsed() < within)
+    PLACED.lock_anyway().is_some_and(|at| at.elapsed() < within)
 }
 
 static TRACKED: Mutex<Tracked> = Mutex::new(Tracked {
@@ -125,7 +123,7 @@ static TRACKED: Mutex<Tracked> = Mutex::new(Tracked {
 
 /// Puts the cursor at `x, y` of the desktop, exactly.
 pub fn place(x: i32, y: i32) -> Result<(), String> {
-    *PLACED.lock().unwrap_or_else(|p| p.into_inner()) = Some(Instant::now());
+    *PLACED.lock_anyway() = Some(Instant::now());
     let answer = ask(RUN_COMMAND, &format!("seat - cursor set {x} {y}"))?;
     let done = answer
         .get(0)
@@ -134,14 +132,14 @@ pub fn place(x: i32, y: i32) -> Result<(), String> {
     if done != Some(true) {
         return Err(format!("Sway refused to place the cursor: {answer}"));
     }
-    TRACKED.lock().unwrap_or_else(|p| p.into_inner()).at = Some((x, y));
+    TRACKED.lock_anyway().at = Some((x, y));
     Ok(())
 }
 
 /// Moves the cursor by `(dx, dy)`, within the monitors (`portal::slide`).
 pub fn move_by(dx: i32, dy: i32) -> Result<(), String> {
     let (monitors, at) = {
-        let mut tracked = TRACKED.lock().unwrap_or_else(|p| p.into_inner());
+        let mut tracked = TRACKED.lock_anyway();
         if tracked
             .read
             .is_none_or(|read| read.elapsed() > Duration::from_secs(1))
@@ -165,7 +163,7 @@ pub fn move_by(dx: i32, dy: i32) -> Result<(), String> {
 
 /// Where Mickey last put the cursor.
 pub fn cursor() -> Option<(i32, i32)> {
-    TRACKED.lock().unwrap_or_else(|p| p.into_inner()).at
+    TRACKED.lock_anyway().at
 }
 
 #[cfg(test)]
