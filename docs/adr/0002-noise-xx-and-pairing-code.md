@@ -98,6 +98,6 @@ Bad, and known limits:
 - [PRD 0010, easy pairing](../prds/0010-easy-pairing.md), *Discoveries*.
 - [protocol.md](../protocol.md#the-noise-handshake), [flows.md](../flows.md#pairing).
 - Issues #31, #32; PRs #42, #43, #123, #124.
-- Code: `crates/mickey/src/secure.rs` (`Link`, `code_from`),
-  `crates/mickey/src/identity.rs`, `crates/mickey/src/trust.rs`,
+- Code: `crates/mickey/src/net/secure.rs` (`Link`, `code_from`),
+  `crates/mickey/src/net/identity.rs`, `crates/mickey/src/net/trust.rs`,
   `crates/mickey-ui/src/pair.rs`.

@@ -185,7 +185,7 @@ impossible to brute-force.
 - **`trusted_peers` holds the full public key, not the fingerprint.**
   Each line is `<public key, 64 hex digits> <note>`, the note being
   informational, e.g. the address the peer was paired from
-  (`crates/mickey/src/trust.rs`). A fingerprint is a hash and cannot be
+  (`crates/mickey/src/net/trust.rs`). A fingerprint is a hash and cannot be
   turned back into the key, and the code needs the key itself: it is
   compared with the key the Noise handshake proved, and discovery
   (PRD 0010) announces and matches PCs by it. `mickey forget` still takes

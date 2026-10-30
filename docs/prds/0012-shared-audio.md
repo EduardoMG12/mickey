@@ -95,7 +95,7 @@ speakers stay silent the whole time.
 
 - **Audio uses its own key, not the Noise session keys.** The plan was
   snow's stateless transport over the peers' session keys. The code
-  (`audio_wire.rs`) instead seals each datagram with ChaCha20-Poly1305
+  (`audio/wire.rs`) instead seals each datagram with ChaCha20-Poly1305
   under a random key the sender makes per stream and hands to the
   listener as a kind 22 payload over the already-encrypted data link,
   resent every 2 s (see protocol.md, *Audio datagrams*). The datagrams

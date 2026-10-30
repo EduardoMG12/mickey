@@ -39,13 +39,13 @@ running Mickey over the control socket.
 
 ## One process, two sides
 
-`mickey run` (`crates/mickey/src/main.rs`, `run_from_config`) reads
+`mickey run` (`crates/mickey/src/run.rs`, `run_from_config`) reads
 `[this_pc]` from `config.toml` and plays both roles in one process:
 
-- **The source side**, `source::run` in `crates/mickey/src/source.rs`:
+- **The source side**, `source::run` in `crates/mickey/src/source/mod.rs`:
   captures this PC's keyboard and mouse, decides where they go, and keeps a
   link to every peer.
-- **The target side**, `target` in `crates/mickey/src/main.rs`: listens for
+- **The target side**, `target` in `crates/mickey/src/target/mod.rs`: listens for
   peers and turns what they send into real input on this PC.
 
 Peers are symmetric: every PC runs both sides, so any keyboard can drive any
@@ -66,7 +66,7 @@ flowchart LR
         direction TB
         capA["capture.rs or platform/hooks.rs<br/>reads the devices"]
         loopA["source.rs main loop<br/>focus.rs, hotkey.rs, edges.rs"]
-        moverA["clip_sync.rs Mover"]
+        moverA["clipboard/sync.rs DataLinks"]
         ctlA["control.rs<br/>control socket"]
         trayA["tray.rs<br/>tray icon"]
         capA --> loopA
@@ -99,23 +99,23 @@ direction when its own keyboard is in use.
 Mickey uses plain `std::thread` and `std::sync::mpsc` channels; there is no
 async runtime. The main loop of the source is the only place that decides
 anything about focus; every other thread feeds it through one channel of
-`Wake` values (`source.rs`), or talks to a link it owns.
+`Wake` values (`source/mod.rs`), or talks to a link it owns.
 
 | Thread | Started in | Does |
 |---|---|---|
 | Capture, one per device (Linux) | `capture::spawn_readers` | Blocks on `read_event`, turns raw evdev events into `InputEvent`s, sends them to the main loop |
 | Hook thread and translator (Windows) | `platform/hooks.rs`, `input.rs` | A message loop for the low-level hooks; a second thread turns hook events into `InputEvent`s with evdev codes |
-| Source main loop | `source::run` | Waits on the `Wake` channel, runs `Switcher`, sends to the focused peer, pings every second, publishes the status |
+| Source main loop | `source::run` | Waits on the `Wake` channel, runs `FocusMachine`, sends to the focused peer, pings every second, publishes the status |
 | Connect, one per peer | `connect_first`, `reconnect` | TCP connect, Noise handshake, pairing if needed, `Hello`; hands the link to the main loop. Retries every 5 s |
 | Peer reader, one per connected peer | `read_peer` | Reads what the peer sends back (`Pong`, `Monitors`, `Leave`, `Refused`, `Picked`) |
-| Mover | `clip_sync::Mover::start` | Owns every outgoing data link; moves the clipboard when the focus moves, sends the group map, hotkeys and switcher cards |
-| Target accept loop | `main.rs` `target` | Accepts input links |
-| Serve, one per connected source | `main.rs` `serve_source` | Pairing on this side, then `transport::serve`: decrypt, track held keys, emit |
-| Data link accept, and one per data link | `main.rs` `serve_clipboard` | `clip_sync::answer`: answers `Ask`, writes received content, passes kinds 16 and up on |
+| DataLinks | `clipboard::sync::DataLinks::start` | Owns every outgoing data link; moves the clipboard when the focus moves, sends the group map, hotkeys and switcher cards |
+| Target accept loop | `target/mod.rs` `target` | Accepts input links |
+| Serve, one per connected source | `target/mod.rs` `serve_source` | Pairing on this side, then `transport::serve`: decrypt, track held keys, emit |
+| Data link accept, and one per data link | `target/data.rs` `serve_clipboard` | `clipboard::sync::answer`: answers `Ask`, writes received content, passes kinds 16 and up on |
 | Switcher shown for a peer | `show_switcher_here` | Runs `mickey-ui switcher` and sends the pick back as `Picked` |
 | Discovery, two | `discovery::start` | One broadcasts this PC every 3 s on UDP 4243, one listens and fills the table |
 | Clipboard keeper | `clipboard::Keeper::start` | The only owner of the system clipboard in the process |
-| Clipboard watch and history | `clip_watch.rs`, `history::record` | Notice every copy, add it to the in-memory history |
+| Clipboard watch and history | `clipboard/watch.rs`, `history::record` | Notice every copy, add it to the in-memory history |
 | Control socket, two | `control::Control::start` | One accepts requests, one pushes status lines to `follow` clients |
 | Tray | `tray.rs`, `platform/tray.rs` | `ksni` on its own thread on Linux; a hidden window with a message loop on Windows |
 | Audio in | `audio::listen` | Receives audio datagrams on UDP 4244, opens them with the keys the data links brought, hands each to its sending PC's player |
@@ -169,7 +169,7 @@ sequenceDiagram
     participant Emit as Emitter, PC B
     Dev->>Cap: evdev event, or a hook callback on Windows
     Cap->>Main: Wake Input, Key code 30 pressed
-    Main->>Main: Switcher handle, then Hotkey feed
+    Main->>Main: FocusMachine handle, then Hotkey feed
     Note over Main: the last key of a hotkey is held back here, modifiers go on at once
     Main->>Link: send Message Input Key
     Link->>Link: protocol encode, Noise seal, 16-byte tag
@@ -180,12 +180,12 @@ sequenceDiagram
     Emit->>Emit: uinput write on Linux, SendInput on Windows
 ```
 
-In code: `capture.rs` (`Translator::feed`) → `source.rs` (`Wake::Input`,
-`switcher.handle`) → `focus.rs` (`Switcher::handle`) → `hotkey.rs`
+In code: `input/capture.rs` (`Translator::feed`) → `source/mod.rs` (`Wake::Input`,
+`focus_machine.handle`) → `focus.rs` (`FocusMachine::handle`) → `input/hotkey.rs`
 (`Hotkey::feed`, which decides whether the key is forwarded now, later or
 never) → `Action::Send` → `secure.rs` (`Link::send`) → `protocol.rs`
 (`encode`). On the target: `transport.rs` (`serve`) → `held.rs`
-(`HeldSet::set`) → `main.rs` (`serve_source`'s `output`) → `emit.rs`
+(`HeldSet::set`) → `target/mod.rs` (`serve_source`'s `output`) → `input/emit.rs`
 (`Emitter::emit`).
 
 The link itself does not allocate per event: `Link::send` and `Link::recv`
@@ -205,7 +205,7 @@ A grab that is never released locks the owner out of their own desktop
   another one; the `next` hotkey with a single peer; with more peers,
   *This PC* in the switcher (`hotkey.rs`, `focus.rs`).
 - **A peer that goes quiet loses the focus.** A failed send, or no answer
-  for 4 s (`SILENT_LIMIT` in `source.rs`), drops the link and brings the
+  for 4 s (`SILENT_LIMIT` in `source/mod.rs`), drops the link and brings the
   focus home. Sends time out after 1 s (`WRITE_TIMEOUT` in `transport.rs`).
 - **A target that cannot inject** (Windows, an elevated window in front)
   sends `Refused`, and the source brings the focus home.

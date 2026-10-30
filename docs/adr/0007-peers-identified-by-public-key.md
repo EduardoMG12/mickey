@@ -37,7 +37,7 @@ Two later features leaned on that:
 - **`config.toml` pins each peer's key** (`[[peer]] key`, written when it
   first connects). From then on Mickey talks to that address only with that
   key; a different trusted key answering there is refused
-  (`crates/mickey-config/src/lib.rs`, `source.rs`).
+  (`crates/mickey-config/src/lib.rs`, `source/`).
 - **A PC the group introduces is asked about once** (#184). Each PC shows
   "Let *X* in? *Y* says *X* is one of your PCs" in a `mickey-ui join`
   window, on its own thread so keys keep moving, and trusts *X* only on
@@ -90,7 +90,7 @@ Bad, and known limits:
 - [flows.md](../flows.md#group-trust), *Group trust*;
   [protocol.md](../protocol.md#discovery), *Discovery*.
 - Issues #172, #184; PRs #150-#152 (group map), #201, #260, #294.
-- Code: `crates/mickey/src/trust.rs`, `crates/mickey/src/group.rs`
-  (`is_local`), `crates/mickey/src/source.rs` (`join`, `ask_to_join`),
-  `crates/mickey/src/discovery.rs`, `crates/mickey-config/src/lib.rs`
+- Code: `crates/mickey/src/net/trust.rs`, `crates/mickey/src/net/group.rs`
+  (`is_local`), `crates/mickey/src/source/joining.rs` (`join`, `ask_to_join`),
+  `crates/mickey/src/net/discovery.rs`, `crates/mickey-config/src/lib.rs`
   (`Peer::key`).

@@ -50,8 +50,8 @@ bindings in `platform/` are hand-written).
   buffer, the keymap. Fast and exact.
 - **Link tests**: both ends of a link in one process over a real
   localhost socket, with a closure as the fake emitter
-  ([`transport.rs:297`](../../crates/mickey/src/transport.rs#L297),
-  [`secure.rs:459`](../../crates/mickey/src/secure.rs#L459) for a tampered
+  ([`net/transport.rs:314`](../../crates/mickey/src/net/transport.rs#L314),
+  [`net/secure.rs:567`](../../crates/mickey/src/net/secure.rs#L567) for a tampered
   byte). CI never needs real devices.
 - **By hand**: about ten tests are `#[ignore]` with the reason written in
   (they create a real input device, play a tone, mute the speakers). Run

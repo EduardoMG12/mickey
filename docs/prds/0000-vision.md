@@ -239,7 +239,7 @@ Until a *Someday* item gets its own PRD:
 
 - **The default listen address is `0.0.0.0:4242`**, every interface of
   the PC (`[this_pc] listen`, `crates/mickey-config/src/lib.rs`), and
-  discovery binds UDP `0.0.0.0:4243` (`crates/mickey/src/discovery.rs`).
+  discovery binds UDP `0.0.0.0:4243` (`crates/mickey/src/net/discovery.rs`).
   This breaks the "never listening on all interfaces by default" line
   above, on purpose: the other PCs on the LAN must be able to reach this
   one, and asking the owner for this PC's own IP is what PRD 0010 set out

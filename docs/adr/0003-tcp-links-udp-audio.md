@@ -92,5 +92,5 @@ Bad, and known limits:
   framing), [PRD 0011](../prds/0011-shared-clipboard.md) (data link),
   [PRD 0012](../prds/0012-shared-audio.md) (audio).
 - PRs #136 (data link), #246 (data link key check), #273 (audio wire).
-- Code: `crates/mickey/src/transport.rs`, `secure.rs` (`send_bulk`),
-  `clip_sync.rs`, `audio_wire.rs`, `audio.rs`, `discovery.rs`.
+- Code: `crates/mickey/src/net/transport.rs`, `secure.rs` (`send_bulk`),
+  `clipboard/sync.rs`, `audio/wire.rs`, `audio.rs`, `discovery.rs`.

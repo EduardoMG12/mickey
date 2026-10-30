@@ -30,9 +30,9 @@ flowchart TD
 - **Starting it.** The settings window lists the PCs heard on the LAN
   (`discovery.rs`). *Connect* runs `mickey connect <address> <name>`, which
   adds the PC to `config.toml` and connects (`Order::Connect` in
-  `source.rs`). Listing a peer in `config.toml` by hand does the same at
+  `source/joining.rs`). Listing a peer in `config.toml` by hand does the same at
   the next start.
-- **Reconnects never ask** (`reconnect` in `source.rs`): they run in the
+- **Reconnects never ask** (`reconnect` in `source/peer.rs`): they run in the
   background while the owner may be typing elsewhere.
 - `mickey forget <fingerprint>` removes a key; that PC must pair again.
 
@@ -44,7 +44,7 @@ already trusted vouches for it (`group.rs`). Every source side sends its
 to every peer over the data link, when a data link opens and whenever the
 set of PCs online changes. A PC that receives a map trusts each member,
 adds the new ones to `config.toml` and connects to them without a window
-(`join` in `source.rs`).
+(`join` in `source/joining.rs`).
 
 PC A pairs with PC B, which already knows PC C:
 
@@ -72,7 +72,7 @@ sender's desktop, a PC at `p` there is at `p - m` here.
 
 ## Focus
 
-Where the keyboard and mouse go is one state machine, `Switcher` in
+Where the keyboard and mouse go is one state machine, `FocusMachine` in
 `focus.rs`, driven by the source's main loop:
 
 ```mermaid
@@ -167,7 +167,7 @@ With the focus on this PC:
 sequenceDiagram
     participant LA as PC A main loop
     participant WA as switcher on A
-    participant MA as PC A Mover
+    participant MA as PC A DataLinks
     participant B as PC B
     Note over LA: next hotkey, two or more peers, focus Local
     LA->>WA: mickey-ui switcher with the cards
@@ -185,7 +185,7 @@ With the focus on PC B, the window opens on B instead:
 ```mermaid
 sequenceDiagram
     participant LA as PC A main loop
-    participant MA as PC A Mover
+    participant MA as PC A DataLinks
     participant B as PC B
     participant C as PC C
     Note over LA: next hotkey while the focus is on B
@@ -209,7 +209,7 @@ never changes what a pick means.
 
 The clipboard follows the keyboard (PRD 0011): when the focus moves from X
 to Y, what is copied on X is put on Y. Nothing crosses on every copy. The
-`Mover` thread does it (`clip_sync.rs`, `carry`), over the data links:
+`DataLinks` thread does it (`clipboard/sync.rs`, `carry`), over the data links:
 
 ```mermaid
 flowchart LR
@@ -247,7 +247,7 @@ flowchart LR
     win -->|history copy id| keeper["Keeper write"]
 ```
 
-`clip_watch.rs` notices copies without reading the clipboard over and
+`clipboard/watch.rs` notices copies without reading the clipboard over and
 over: Wayland selection events, the Windows clipboard counter, or else the
 text compared once a second. Copying the same thing again moves it to the
 top. The history window searches the entries, and picking one runs
