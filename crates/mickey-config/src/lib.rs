@@ -343,6 +343,14 @@ mod tests {
             mine.changes(&same).is_empty(),
             "written or default, the same"
         );
+        let padded = Hotkeys {
+            next: Some("\n\n\nLeftCtrl +\n F12".into()),
+            ..Hotkeys::default()
+        };
+        assert_eq!(
+            mine.changes(&padded),
+            ["Next PC / switcher: LeftCtrl + F12 (now AltGr+RightShift)"]
+        );
         let theirs = Hotkeys {
             next: Some("LeftCtrl+F12".into()),
             double_tap: Some(String::new()),

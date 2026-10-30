@@ -2,12 +2,39 @@
 //! taken only once the person here says yes (#349).
 
 use super::Wake;
+use crate::threads::LockAnyway;
 use mickey_config as config;
+use std::collections::HashSet;
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
+use std::time::{Duration, Instant};
 
 /// Whether a "use these hotkeys?" question is on screen.
 static ASKING: AtomicBool = AtomicBool::new(false);
+
+/// After "Keep mine", no question for this long: a peer resending, or
+/// sending something new each time, cannot keep a window open (#349).
+const REFUSED_WAIT: Duration = Duration::from_secs(60);
+
+/// When the last refusal was, and the hotkeys refused in this run.
+static REFUSED: Mutex<(Option<Instant>, Option<HashSet<String>>)> = Mutex::new((None, None));
+
+/// Whether `lines` were refused already, or anything was too recently.
+fn refused(lines: &str) -> bool {
+    let refused = REFUSED.lock_anyway();
+    let recently = refused.0.is_some_and(|at| at.elapsed() < REFUSED_WAIT);
+    recently || refused.1.as_ref().is_some_and(|seen| seen.contains(lines))
+}
+
+fn remember_refused(lines: &str) {
+    let mut refused = REFUSED.lock_anyway();
+    refused.0 = Some(Instant::now());
+    refused
+        .1
+        .get_or_insert_with(HashSet::new)
+        .insert(lines.to_string());
+}
 
 /// What to do with hotkeys another PC shared.
 #[derive(Debug, PartialEq)]
@@ -61,7 +88,7 @@ pub(super) fn offer_hotkeys(lines: String, who: &str, wake: &Sender<Wake>) {
         }
         Offer::Ask(changes) => changes,
     };
-    if ASKING.swap(true, Ordering::SeqCst) {
+    if refused(&lines) || ASKING.swap(true, Ordering::SeqCst) {
         return;
     }
     let (who, wake) = (who.to_string(), wake.clone());
@@ -72,7 +99,10 @@ pub(super) fn offer_hotkeys(lines: String, who: &str, wake: &Sender<Wake>) {
             Ok(Some(0)) => {
                 let _ = wake.send(Wake::HotkeysAccepted(lines));
             }
-            Ok(Some(1)) => println!("mickey: kept this PC's hotkeys; {who}'s were not taken"),
+            Ok(Some(1)) => {
+                remember_refused(&lines);
+                println!("mickey: kept this PC's hotkeys; {who}'s were not taken");
+            }
             _ => eprintln!(
                 "mickey: cannot ask whether to take {who}'s hotkeys; this PC keeps its own"
             ),

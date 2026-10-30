@@ -8,9 +8,10 @@ use crate::threads::LockAnyway;
 use mickey_config as config;
 use std::collections::HashSet;
 use std::net::SocketAddr;
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 /// The PCs in a peer's map (`members`, sent by `by`) this PC should know:
 /// trusted ones join at once; for the others the person here is asked,
@@ -35,6 +36,7 @@ pub(super) fn take_map(
             // map names them again.
             if group::is_local(member.address.ip())
                 && !JOIN_ASKING.load(Ordering::SeqCst)
+                && !refused_recently()
                 && asked.insert(member.key)
             {
                 let introducer = peers.iter().find(|peer| peer.key == Some(by)).map_or_else(
@@ -52,6 +54,18 @@ pub(super) fn take_map(
 
 /// Whether a "let this PC in?" question is on screen (see `ask_to_join`).
 static JOIN_ASKING: AtomicBool = AtomicBool::new(false);
+
+/// After a refusal, no question for this long: maps naming new made-up
+/// PCs each time cannot keep a window open.
+const REFUSED_WAIT: Duration = Duration::from_secs(60);
+
+static LAST_REFUSED: Mutex<Option<Instant>> = Mutex::new(None);
+
+fn refused_recently() -> bool {
+    LAST_REFUSED
+        .lock_anyway()
+        .is_some_and(|at| at.elapsed() < REFUSED_WAIT)
+}
 
 /// Asks, on its own thread (the main loop must keep moving keys), whether
 /// to let `member` join, as `introducer` (who sent the map) says it is in
@@ -75,7 +89,10 @@ pub(super) fn ask_to_join(
             Ok(Some(0)) => {
                 let _ = wake.send(Wake::Accepted(member, by));
             }
-            Ok(Some(1)) => println!("mickey: {} was not let in", member.name),
+            Ok(Some(1)) => {
+                *LAST_REFUSED.lock_anyway() = Some(Instant::now());
+                println!("mickey: {} was not let in", member.name);
+            }
             _ => eprintln!(
                 "mickey: cannot ask whether to let {} in; it stays out",
                 member.name
