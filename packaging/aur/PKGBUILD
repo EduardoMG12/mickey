@@ -4,7 +4,7 @@
 # pkgver and sha256sums from the release's SHA256SUMS, then
 # `makepkg --printsrcinfo > .SRCINFO` and push to the AUR repository.
 pkgname=mickey-bin
-pkgver=0.4.2
+pkgver=0.4.3
 pkgrel=1
 pkgdesc="One keyboard and mouse for all your computers"
 arch=('x86_64')
@@ -17,7 +17,7 @@ install=mickey-bin.install
 options=('!debug')
 backup=('etc/xdg/autostart/mickey.desktop')
 source=("mickey-linux-x86_64-$pkgver.tar.gz::$url/releases/download/v$pkgver/mickey-linux-x86_64.tar.gz")
-sha256sums=('f7326c85d9a87ad8a3084bcb78cd7a95bb1a7fd6112753de1116b630e7922906')
+sha256sums=('063bf48467eaa5b0a435036fd92368ccbafa805f226da10e45e5e875b9e889cf')
 
 package() {
     cd mickey-linux-x86_64
