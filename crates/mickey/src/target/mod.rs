@@ -6,6 +6,7 @@ mod slots;
 use data::serve_clipboard;
 use slots::{SharedSlots, Slot};
 
+use crate::input::event::InputEvent;
 use crate::threads::LockAnyway;
 use crate::{
     clipboard, input::emit, monitors, net::discovery, net::identity, net::protocol, net::secure,
@@ -218,7 +219,14 @@ pub(super) fn serve_source(
     let output = |effect| {
         let mut emitter = emitter.lock_anyway();
         match effect {
-            transport::Effect::Input(event) => emitter.emit(event),
+            transport::Effect::Input(event) => {
+                if let InputEvent::Key { pressed: true, .. }
+                | InputEvent::Button { pressed: true, .. } = event
+                {
+                    clipboard::sync::pressed(grants, peer.ip());
+                }
+                emitter.emit(event)
+            }
             transport::Effect::Place { x, y } => emitter.place(x, y),
             // Nobody listens when this PC only waits to be controlled.
             transport::Effect::Controlled(here) => {
