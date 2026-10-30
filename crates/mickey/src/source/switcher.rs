@@ -1,6 +1,7 @@
 //! The switcher window, shown when the hotkey is pressed (PRD 0007).
 
 use super::{Peer, Wake};
+use crate::clip_sync::Mover;
 use crate::window;
 use mickey_config as config;
 use std::sync::mpsc::Sender;
@@ -32,10 +33,7 @@ pub(super) fn switcher_cards(
 
 /// Opens a view-only copy of the switcher on this PC; the caller kills it
 /// once a pick is made.
-pub(super) fn open_mirror(
-    cards: &[String],
-    interface: &config::Interface,
-) -> Option<std::process::Child> {
+fn open_mirror(cards: &[String], interface: &config::Interface) -> Option<std::process::Child> {
     crate::window::ui_command(&crate::window::switcher_args(cards, interface, true))
         .and_then(|mut ui| ui.stdout(std::process::Stdio::null()).spawn())
         .ok()
@@ -45,7 +43,7 @@ pub(super) fn open_mirror(
 /// thread, and sends the owner's pick when the window closes: `Some(peer)`,
 /// `None` for this PC or Esc, or an error if the window could not run.
 /// The GUI is a separate program so this one stays small (PRD 0003).
-pub(super) fn open_switcher(
+fn open_switcher(
     cards: &[String],
     interface: &config::Interface,
     wake: &Sender<Wake>,
@@ -65,4 +63,63 @@ pub(super) fn open_switcher(
         };
         let _ = wake.send(Wake::Pick(pick));
     });
+}
+
+/// The switcher windows out for this PC: its own, a copy of the one shown
+/// on another PC, and those it asked its peers to show.
+#[derive(Default)]
+pub(super) struct Switchers {
+    /// This PC's own switcher, waiting for a pick.
+    here: window::Slot,
+    pub(super) here_open: bool,
+    /// The copy of a switcher shown on another PC, open on this one.
+    mirror: Option<std::process::Child>,
+    /// Whether switchers or copies are open anywhere for this PC.
+    pub(super) out: bool,
+}
+
+impl Switchers {
+    /// Shows the switcher on the PC in use (`in_use`, `None` for this one)
+    /// and a copy on every other PC online, so it is seen wherever the
+    /// owner looks (PRD 0007).
+    pub(super) fn show(
+        &mut self,
+        in_use: Option<usize>,
+        cards: &[String],
+        peers: &[Peer],
+        mover: Option<&Mover>,
+        interface: &config::Interface,
+        wake: &Sender<Wake>,
+    ) {
+        if let Some(mover) = mover {
+            for (peer, other) in peers.iter().enumerate() {
+                if Some(peer) == in_use {
+                    mover.show_switcher(peer, &cards.join("\n"));
+                } else if other.link.is_some() {
+                    mover.mirror_switcher(peer, &cards.join("\n"));
+                }
+            }
+        }
+        match in_use {
+            Some(_) => self.mirror = open_mirror(cards, interface).or(self.mirror.take()),
+            None => {
+                self.here_open = true;
+                open_switcher(cards, interface, wake, &self.here);
+            }
+        }
+        self.out = true;
+    }
+
+    /// Closes every switcher and copy, here and on the peers.
+    pub(super) fn close_all(&mut self, mover: Option<&Mover>) {
+        self.out = false;
+        window::close(&self.here);
+        if let Some(mover) = mover {
+            mover.close_switchers();
+        }
+        if let Some(mut window) = self.mirror.take() {
+            let _ = window.kill();
+            let _ = window.wait();
+        }
+    }
 }

@@ -108,3 +108,43 @@ pub(super) fn peers_text(this_pc: &[Monitor], peers: &[Peer], online: &[bool]) -
     }
     .to_text()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn run(order: Order, switcher: &mut Switcher, online: &[bool]) -> (String, Vec<Action>) {
+        let names = ["Desktop".to_string(), "Windows".to_string()];
+        let mut actions = Vec::new();
+        let answer = obey(order, &names, online, switcher, &mut |action| {
+            actions.push(action)
+        });
+        (answer, actions)
+    }
+
+    #[test]
+    fn go_moves_the_focus_to_an_online_peer_only() {
+        let mut switcher = Switcher::new();
+        let (answer, _) = run(Order::Go("Desktop".into()), &mut switcher, &[false, true]);
+        assert_eq!(answer, "error: Desktop is offline");
+        let (answer, _) = run(Order::Go("Nope".into()), &mut switcher, &[false, true]);
+        assert!(answer.starts_with("error: no PC named"));
+        let (answer, _) = run(Order::Go("Windows".into()), &mut switcher, &[false, true]);
+        assert!(answer.starts_with("ok"));
+        assert_eq!(switcher.focus(), Focus::WaitingForKeysUp(1));
+    }
+
+    #[test]
+    fn home_and_switcher_from_a_remote_peer() {
+        let mut switcher = Switcher::new();
+        switcher.go_to(Some(1), &[true, true]);
+        switcher.grabbed();
+        let (answer, actions) = run(Order::Switcher, &mut switcher, &[true, true]);
+        assert!(answer.starts_with("ok"));
+        assert_eq!(actions, [Action::OpenSwitcherOn(1)], "on the screen in use");
+        let (answer, actions) = run(Order::Home, &mut switcher, &[true, true]);
+        assert!(answer.starts_with("ok"));
+        assert_eq!(actions, [Action::Ungrab]);
+        assert_eq!(switcher.focus(), Focus::Local);
+    }
+}
