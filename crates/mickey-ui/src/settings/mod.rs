@@ -2,223 +2,18 @@
 //! What it saves is checked with `mickey_config::parse`, the same rules
 //! `mickey` applies, before anything is written.
 
+mod form;
+mod pcs;
+
+use form::Form;
+pub use form::PcRow;
+use pcs::{Nearby, load_nearby, load_peers, pairing_with};
+
 use crate::layout;
 use eframe::egui;
 use mickey_config::peers::Peers;
-use mickey_config::{self as config, Audio, Config, SWITCHER_POSITIONS, SoundMode};
-use std::process::Command;
+use mickey_config::{self as config, Config, SWITCHER_POSITIONS, SoundMode};
 use std::time::{Duration, Instant};
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PcRow {
-    pub name: String,
-    pub address: String,
-    pub hotkey: String,
-    pub position: Option<[i32; 2]>,
-    /// Its public key, written by Mickey when it first connects; kept
-    /// as it is, never shown or edited.
-    pub key: Option<String>,
-}
-
-/// Everything editable, as the text the fields show.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Form {
-    /// Empty: the host name.
-    pub name: String,
-    pub controls_others: bool,
-    pub controlled: bool,
-    pub listen: String,
-    pub pcs: Vec<PcRow>,
-    pub next: String,
-    pub home: String,
-    pub switcher: String,
-    pub forward: String,
-    pub back: String,
-    /// A key name; empty turns the double tap off.
-    pub double_tap: String,
-    /// How close the two taps must be, in milliseconds.
-    pub double_tap_ms: u64,
-    pub position: String,
-    /// The switcher as a column.
-    pub vertical: bool,
-    /// Keep a clipboard history here: always, never (another manager keeps
-    /// it), or `None`, only when no other manager runs.
-    pub history: Option<bool>,
-    /// Ask GitHub once a day for a newer Mickey (PRD 0013).
-    pub check_updates: bool,
-    /// Who listens (PRD 0012): a PC's public key; `None`, nobody.
-    pub listener: Option<String>,
-    /// Where this PC's own sound goes.
-    pub mode: SoundMode,
-    /// Each PC's volume on the listener (0–100) and the muted PCs, by key.
-    pub volumes: std::collections::BTreeMap<String, u8>,
-    pub muted: Vec<String>,
-    /// When what every PC shares last changed (`Audio::since`).
-    pub since: u64,
-    /// The switcher's custom order, by name; empty: as the layout goes.
-    pub order: Vec<String>,
-    pub speed: i32,
-}
-
-impl Form {
-    pub fn from_config(config: &Config) -> Form {
-        let text = |value: &Option<String>| value.clone().unwrap_or_default();
-        Form {
-            name: text(&config.this_pc.name),
-            controls_others: config.this_pc.controls_others,
-            controlled: config.this_pc.controlled,
-            listen: config.this_pc.listen.to_string(),
-            pcs: config
-                .peers
-                .iter()
-                .map(|peer| PcRow {
-                    name: peer.name.clone(),
-                    address: peer.address.to_string(),
-                    hotkey: text(&peer.hotkey),
-                    position: peer.position,
-                    key: peer.key.clone(),
-                })
-                .collect(),
-            next: text(&config.hotkeys.next),
-            home: text(&config.hotkeys.home),
-            switcher: text(&config.hotkeys.switcher),
-            forward: text(&config.hotkeys.forward),
-            back: text(&config.hotkeys.back),
-            double_tap: config
-                .hotkeys
-                .double_tap
-                .clone()
-                .unwrap_or_else(|| config::DEFAULT_DOUBLE_TAP.into()),
-            double_tap_ms: config
-                .hotkeys
-                .double_tap_ms
-                .unwrap_or(config::DEFAULT_DOUBLE_TAP_MS),
-            position: config.interface.switcher_position.clone(),
-            vertical: config.interface.switcher_vertical,
-            history: config.clipboard.history,
-            check_updates: config.updates.check,
-            listener: config.audio.listener.clone(),
-            mode: config.audio.mode,
-            volumes: config.audio.volumes.clone(),
-            muted: config.audio.muted.clone(),
-            since: config.audio.since,
-            order: config.interface.switcher_order.clone(),
-            speed: config.touchpad.speed,
-        }
-    }
-
-    /// The form as config.toml, with a comment on every setting. Empty
-    /// optional fields are left out.
-    pub fn to_toml(&self) -> String {
-        let mut out =
-            String::from("# Mickey settings; the settings window rewrites this file.\n\n");
-        out += "[this_pc]\n";
-        if !self.name.trim().is_empty() {
-            out += &format!(
-                "name = {}    # how the other PCs see this one\n",
-                config::toml_string(self.name.trim())
-            );
-        }
-        out += &format!(
-            "controls_others = {}    # send this PC's keyboard and mouse to the PCs below\n",
-            self.controls_others
-        );
-        out += &format!(
-            "controlled = {}         # let paired PCs drive this one\n",
-            self.controlled
-        );
-        out += &format!(
-            "listen = {}    # where the other PCs connect\n",
-            config::toml_string(&self.listen)
-        );
-        for pc in &self.pcs {
-            out += "\n[[peer]]\n";
-            out += &format!("name = {}\n", config::toml_string(&pc.name));
-            out += &format!("address = {}\n", config::toml_string(&pc.address));
-            if !pc.hotkey.trim().is_empty() {
-                out += &format!(
-                    "hotkey = {}    # straight to this PC\n",
-                    config::toml_string(pc.hotkey.trim())
-                );
-            }
-            if let Some([x, y]) = pc.position {
-                out += &format!("position = [{x}, {y}]    # where it sits next to this PC\n");
-            }
-            if let Some(key) = &pc.key {
-                out += &format!(
-                    "key = {}    # this PC's identity, set by Mickey\n",
-                    config::toml_string(key)
-                );
-            }
-        }
-        let hotkeys: Vec<(&str, &str)> = [
-            ("next", &self.next),
-            ("home", &self.home),
-            ("switcher", &self.switcher),
-            ("forward", &self.forward),
-            ("back", &self.back),
-        ]
-        .into_iter()
-        .map(|(key, value)| (key, value.trim()))
-        .filter(|(_, value)| !value.is_empty())
-        .collect();
-        out += "\n[hotkeys]\n";
-        for (key, value) in hotkeys {
-            out += &format!("{key} = {}\n", config::toml_string(value));
-        }
-        // Written even when empty: "" is how the double tap is turned off.
-        out += &format!(
-            "double_tap = {}    # a key tapped twice quickly: next PC\n",
-            config::toml_string(self.double_tap.trim())
-        );
-        out += &format!(
-            "double_tap_ms = {}    # how close the two taps must be\n",
-            self.double_tap_ms
-        );
-        out += "\n[interface]\n";
-        out += &format!(
-            "switcher_position = {}\n",
-            config::toml_string(&self.position)
-        );
-        if self.vertical {
-            out += "switcher_vertical = true\n";
-        }
-        if !self.order.is_empty() {
-            let names: Vec<String> = self
-                .order
-                .iter()
-                .map(|name| config::toml_string(name))
-                .collect();
-            out += &format!("switcher_order = [{}]\n", names.join(", "));
-        }
-        let audio = Audio {
-            listener: self.listener.clone(),
-            mode: self.mode,
-            volumes: self.volumes.clone(),
-            muted: self.muted.clone(),
-            since: self.since,
-        };
-        if audio != Audio::default() {
-            out += "\n[audio]\n";
-            out += &audio.to_lines();
-        }
-        match self.history {
-            None => {}
-            Some(true) => {
-                out += "\n[clipboard]\nhistory = true    # even with another clipboard manager\n"
-            }
-            Some(false) => {
-                out += "\n[clipboard]\nhistory = false    # another clipboard manager keeps the history\n"
-            }
-        }
-        if !self.check_updates {
-            out += "\n[updates]\ncheck = false    # never ask GitHub for a newer Mickey\n";
-        }
-        out += "\n[touchpad]\n";
-        out += &format!("speed = {}    # higher is faster\n", self.speed);
-        out
-    }
-}
 
 /// A TOML basic string: quotes and backslashes escaped.
 /// A PC's volume on the listener and its mute, by its key; every PC shows
@@ -424,9 +219,12 @@ impl Settings {
     pub fn load() -> Settings {
         let (config, message) = match Config::load() {
             Ok(Some(config)) => (config, String::new()),
-            Ok(None) => (empty(), "No config.toml yet; Save creates one.".into()),
+            Ok(None) => (
+                Config::empty(),
+                "No config.toml yet; Save creates one.".into(),
+            ),
             Err(err) => (
-                empty(),
+                Config::empty(),
                 format!("config.toml has an error ({err}); Save replaces it."),
             ),
         };
@@ -434,8 +232,8 @@ impl Settings {
         Settings {
             saved: form.clone(),
             form,
-            fingerprint: ask_mickey(&["id"]).unwrap_or_else(|_| "(run `mickey id`)".into()),
-            own_key: ask_mickey(&["id", "--key"])
+            fingerprint: crate::mickey::ask(&["id"]).unwrap_or_else(|_| "(run `mickey id`)".into()),
+            own_key: crate::mickey::ask(&["id", "--key"])
                 .ok()
                 .map(|key| key.trim().to_string()),
             confirm_remove: None,
@@ -448,10 +246,10 @@ impl Settings {
             recording: None,
             typing: None,
             nearby: load_nearby(),
-            autostart: ask_mickey(&["autostart", "status"])
+            autostart: crate::mickey::ask(&["autostart", "status"])
                 .is_ok_and(|answer| answer.trim() == "on"),
             autostart_change: None,
-            update: ask_mickey(&["update", "status"])
+            update: crate::mickey::ask(&["update", "status"])
                 .ok()
                 .and_then(|answer| mickey_config::version::checked(answer.trim())),
             updating: None,
@@ -548,7 +346,7 @@ impl Settings {
         self.message = match written {
             Ok(()) => {
                 for key in &removed {
-                    if let Err(err) = ask_mickey(&["forget", key]) {
+                    if let Err(err) = crate::mickey::ask(&["forget", key]) {
                         eprintln!("mickey-ui: could not stop trusting a removed PC: {err}");
                     }
                 }
@@ -557,7 +355,7 @@ impl Settings {
                 self.config_changed = config_time();
                 // The layout is used at once and the other PCs follow it;
                 // other settings still wait for a restart.
-                match ask_mickey(&["arranged"]) {
+                match crate::mickey::ask(&["arranged"]) {
                     Ok(_) => {
                         "Saved. Layout and hotkeys apply on every PC now; the rest after a restart."
                             .into()
@@ -568,77 +366,6 @@ impl Settings {
             Err(err) => format!("Not saved: {err}"),
         };
     }
-}
-
-fn empty() -> Config {
-    Config::empty()
-}
-
-/// Runs `mickey <argument>` from next to this program: its output, or
-/// what it said went wrong.
-pub fn ask_mickey(arguments: &[&str]) -> Result<String, String> {
-    std::env::current_exe()
-        .map(|exe| exe.with_file_name(format!("mickey{}", std::env::consts::EXE_SUFFIX)))
-        .and_then(|mickey| {
-            let mut command = Command::new(mickey);
-            command.args(arguments);
-            // mickey.exe is a console program; without this, Windows would
-            // flash a console window over the settings.
-            #[cfg(windows)]
-            {
-                use std::os::windows::process::CommandExt;
-                const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-                command.creation_flags(CREATE_NO_WINDOW);
-            }
-            command.output()
-        })
-        .map_err(|err| err.to_string())
-        .and_then(|output| match output.status.success() {
-            true => Ok(String::from_utf8_lossy(&output.stdout).trim().to_string()),
-            false => Err(String::from_utf8_lossy(&output.stderr).trim().to_string()),
-        })
-}
-
-/// A PC running Mickey heard on the network.
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct Nearby {
-    name: String,
-    address: String,
-    fingerprint: String,
-}
-
-/// `mickey discover --lines`: name, address, fingerprint per line. Empty
-/// when Mickey cannot say.
-fn load_nearby() -> Vec<Nearby> {
-    parse_nearby(&ask_mickey(&["discover", "--lines"]).unwrap_or_default())
-}
-
-fn parse_nearby(text: &str) -> Vec<Nearby> {
-    text.lines()
-        .filter_map(|line| {
-            let [name, address, fingerprint] = line.split('\t').collect::<Vec<_>>()[..] else {
-                return None;
-            };
-            Some(Nearby {
-                name: name.to_string(),
-                address: address.to_string(),
-                fingerprint: fingerprint.to_string(),
-            })
-        })
-        .collect()
-}
-
-/// The PC named in `mickey connect`'s answer (its `mickey: ` already
-/// taken off), when a pairing started.
-fn pairing_with(answer: &str) -> Option<String> {
-    let rest = answer.strip_prefix("pairing with ")?;
-    let (name, _) = rest.split_once(": ")?;
-    Some(name.to_string())
-}
-
-fn load_peers() -> Result<Peers, String> {
-    let text = ask_mickey(&["peers"])?;
-    Peers::from_text(&text).ok_or_else(|| format!("mickey peers answered `{text}`"))
 }
 
 impl eframe::App for Settings {
@@ -686,7 +413,7 @@ impl eframe::App for Settings {
                         // prompt: on a thread.
                         let (send, answer) = std::sync::mpsc::channel();
                         std::thread::spawn(move || {
-                            let _ = send.send(ask_mickey(&["update", "apply"]));
+                            let _ = send.send(crate::mickey::ask(&["update", "apply"]));
                         });
                         self.updating = Some(answer);
                     }
@@ -785,7 +512,7 @@ impl Settings {
             let (send, answers) = std::sync::mpsc::channel();
             std::thread::spawn(move || {
                 let word = if wanted { "on" } else { "off" };
-                let _ = send.send(ask_mickey(&["autostart", word]));
+                let _ = send.send(crate::mickey::ask(&["autostart", word]));
             });
             self.autostart_change = Some(answers);
         }
@@ -795,8 +522,8 @@ impl Settings {
             .and_then(|answers| answers.try_recv().ok())
         {
             self.autostart_change = None;
-            self.autostart =
-                ask_mickey(&["autostart", "status"]).is_ok_and(|answer| answer.trim() == "on");
+            self.autostart = crate::mickey::ask(&["autostart", "status"])
+                .is_ok_and(|answer| answer.trim() == "on");
             if let Err(err) = answer {
                 self.message = format!("Could not change starting with this PC: {err}");
             }
@@ -911,7 +638,7 @@ impl Settings {
         );
         ui.horizontal(|ui| {
             if ui.button(format!("{}  Let a new PC pair (2 min)", icon::LINK)).clicked() {
-                self.message = match ask_mickey(&["pairing"]) {
+                self.message = match crate::mickey::ask(&["pairing"]) {
                     Ok(_) => "For 2 minutes, a new PC may ask to pair with this one. Check the code on both.".into(),
                     Err(err) => format!("Could not open pairing: {err}"),
                 };
@@ -945,7 +672,7 @@ impl Settings {
                 }
             });
         if let Some((address, name)) = connect {
-            self.message = match ask_mickey(&["connect", &address, &name]) {
+            self.message = match crate::mickey::ask(&["connect", &address, &name]) {
                 Ok(answer) => {
                     let answer = answer.trim().trim_start_matches("mickey: ").to_string();
                     // "pairing with <name>: check …": Mickey may have
@@ -1083,7 +810,7 @@ impl Settings {
                     {
                         let (send, answer) = std::sync::mpsc::channel();
                         std::thread::spawn(move || {
-                            let _ = send.send(ask_mickey(&["record"]));
+                            let _ = send.send(crate::mickey::ask(&["record"]));
                         });
                         self.recording = Some((row, answer));
                     }
@@ -1272,9 +999,11 @@ fn game_keys(form: &Form) -> Vec<&'static str> {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     #[test]
     fn keys_games_use_are_found_in_hotkeys() {
-        let mut form = Form::from_config(&config::parse("").unwrap());
+        let mut form = Form::from_config(&Config::empty());
         assert!(
             game_keys(&form).is_empty(),
             "the defaults hold back nothing games use"
@@ -1284,48 +1013,9 @@ mod tests {
         assert_eq!(game_keys(&form), ["LeftCtrl", "LeftShift"]);
     }
 
-    use super::*;
-
-    #[test]
-    fn the_pairing_pc_is_read_from_mickeys_answer() {
-        // What `mickey connect` prints, without its "mickey: ".
-        assert_eq!(
-            pairing_with("pairing with Desk PC: check that both PCs show the same code").as_deref(),
-            Some("Desk PC")
-        );
-        assert_eq!(
-            pairing_with("192.0.2.10:4242 is already one of this PC's PCs"),
-            None
-        );
-    }
-
-    #[test]
-    fn what_the_form_writes_parses_back_to_the_same_form() {
-        let original = config::parse(
-            "[[peer]]\nname = \"Windows \\\"main\\\"\"\naddress = \"192.0.2.10:4242\"\nhotkey = \"AltGr+RightShift+1\"\nposition = [-1920, 0]\nkey = \"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"\n\n[hotkeys]\nhome = \"AltGr+RightShift+H\"\n\n[interface]\nswitcher_position = \"top-left\"\n\n[clipboard]\nhistory = false\n\n[updates]\ncheck = false\n\n[audio]\nlistener = \"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"\nmode = \"both\"\n\n[this_pc]\ncontrolled = false\nname = \"Desk\"\n",
-        )
-        .unwrap();
-        let form = Form::from_config(&original);
-        let reread = config::parse(&form.to_toml()).unwrap();
-        assert_eq!(Form::from_config(&reread), form);
-        assert!(
-            reread.clipboard.history == Some(false),
-            "the history setting survives a save"
-        );
-        assert!(
-            !reread.updates.check,
-            "turning the update check off survives a save"
-        );
-        assert_eq!(
-            reread.audio, original.audio,
-            "who listens and the mode survive a save"
-        );
-        assert_eq!(reread.audio.mode, config::SoundMode::Both);
-    }
-
     #[test]
     fn a_recording_lands_in_the_right_row_or_says_why_not() {
-        let mut form = Form::from_config(&empty());
+        let mut form = Form::from_config(&Config::empty());
         recorded(&mut form, 3, Ok("ok: AltGr+Right\n".into()));
         assert_eq!(form.forward, "AltGr+Right");
         recorded(&mut form, DOUBLE_TAP_ROW, Ok("ok: double LeftShift".into()));
@@ -1341,25 +1031,5 @@ mod tests {
             recorded(&mut form, 0, Ok("error: no keys were pressed".into())),
             "no keys were pressed"
         );
-    }
-
-    #[test]
-    fn nearby_lines_become_pcs() {
-        let nearby = parse_nearby("Desk\t192.0.2.64:4242\tVK2A-L4MJ\nnonsense\n");
-        assert_eq!(nearby.len(), 1);
-        assert_eq!(nearby[0].address, "192.0.2.64:4242");
-    }
-
-    #[test]
-    fn a_bad_field_is_caught_by_the_same_rules_as_mickey() {
-        let mut form = Form::from_config(&empty());
-        form.pcs.push(PcRow {
-            name: "A".into(),
-            address: "nowhere".into(),
-            hotkey: String::new(),
-            position: None,
-            key: None,
-        });
-        assert!(config::parse(&form.to_toml()).is_err());
     }
 }

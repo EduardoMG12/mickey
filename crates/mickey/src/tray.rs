@@ -231,13 +231,13 @@ fn keep_in_sight() {
     // Explorer may take a few seconds to note a new icon.
     for _ in 0..6 {
         std::thread::sleep(std::time::Duration::from_secs(5));
-        use std::os::windows::process::CommandExt;
-        // CREATE_NO_WINDOW: no console flashing up.
-        let _ = std::process::Command::new(crate::autostart::system_tool("powershell.exe"))
+        let mut powershell =
+            std::process::Command::new(crate::autostart::system_tool("powershell.exe"));
+        powershell
             .args(["-NoProfile", "-Command", SCRIPT])
-            .env("MICKEY_EXE", &exe)
-            .creation_flags(0x0800_0000)
-            .output();
+            .env("MICKEY_EXE", &exe);
+        crate::platform::hide_console(&mut powershell);
+        let _ = powershell.output();
     }
 }
 

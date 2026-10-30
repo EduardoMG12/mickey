@@ -3,7 +3,6 @@
 //! found) copies it again and closes the window; Esc closes it.
 
 use eframe::egui;
-use std::process::Command;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Entry {
@@ -35,25 +34,6 @@ fn ago(seconds: u64) -> String {
         0..60 => format!("{seconds} s"),
         60..3600 => format!("{} min", seconds / 60),
         _ => format!("{} h", seconds / 3600),
-    }
-}
-
-/// Runs `mickey <args>` from next to this program.
-fn mickey(args: &[&str]) -> Result<String, String> {
-    let exe = std::env::current_exe().map_err(|err| err.to_string())?;
-    let mut command =
-        Command::new(exe.with_file_name(format!("mickey{}", std::env::consts::EXE_SUFFIX)));
-    command.args(args);
-    // mickey.exe is a console program: no console flashing over the window.
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        command.creation_flags(0x0800_0000);
-    }
-    let output = command.output().map_err(|err| err.to_string())?;
-    match output.status.success() {
-        true => Ok(String::from_utf8_lossy(&output.stdout).into_owned()),
-        false => Err(String::from_utf8_lossy(&output.stderr).trim().to_string()),
     }
 }
 
@@ -138,7 +118,7 @@ impl eframe::App for History {
                 }
             });
             if let Some(id) = picked {
-                let _ = mickey(&["history", "copy", &id.to_string()]);
+                let _ = crate::mickey::run(&["history", "copy", &id.to_string()]);
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             }
         });
@@ -146,7 +126,7 @@ impl eframe::App for History {
 }
 
 pub fn window() -> std::process::ExitCode {
-    let entries = mickey(&["history", "--lines"]).map(|text| parse(&text));
+    let entries = crate::mickey::run(&["history", "--lines"]).map(|text| parse(&text));
     // A small floating window in the middle, not a tile (Hyprland).
     crate::place::ask_compositor(crate::place::Corner::Center, "mickey-history");
     let options = eframe::NativeOptions {
