@@ -170,7 +170,7 @@ fn save(files: Vec<(String, Vec<u8>)>) -> Option<Vec<std::path::PathBuf>> {
 /// went. On its own thread, so reading, compressing and sending a big
 /// image never holds up the keyboard.
 #[derive(Clone)]
-pub struct Mover(Sender<Job>);
+pub struct DataLinks(Sender<Job>);
 
 enum Job {
     /// A data link to this peer is open.
@@ -190,8 +190,8 @@ enum Job {
     },
 }
 
-impl Mover {
-    pub fn start(keeper: Keeper) -> Mover {
+impl DataLinks {
+    pub fn start(keeper: Keeper) -> DataLinks {
         let (jobs, todo) = mpsc::channel();
         crate::threads::spawn("clip mover", move || {
             let mut links: HashMap<usize, Link> = HashMap::new();
@@ -243,7 +243,7 @@ impl Mover {
                 }
             }
         });
-        Mover(jobs)
+        DataLinks(jobs)
     }
 
     pub fn link(&self, peer: usize, link: Link) {

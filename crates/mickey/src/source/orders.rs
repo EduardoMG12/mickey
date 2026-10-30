@@ -3,7 +3,7 @@
 
 use super::Peer;
 use crate::control::Order;
-use crate::focus::{Action, Focus, Switcher};
+use crate::focus::{Action, Focus, FocusMachine};
 use crate::monitors::Monitor;
 use crate::net::discovery;
 use crate::net::identity;
@@ -17,19 +17,19 @@ pub(super) fn obey(
     order: Order,
     names: &[String],
     online: &[bool],
-    switcher: &mut Switcher,
+    focus_machine: &mut FocusMachine,
     act: &mut impl FnMut(Action),
 ) -> String {
     match order {
         Order::Home => {
-            switcher.go_home(act);
+            focus_machine.go_home(act);
             "ok: the focus is on this PC".into()
         }
-        Order::Switcher if switcher.focus() == Focus::Local => {
+        Order::Switcher if focus_machine.focus() == Focus::Local => {
             act(Action::OpenSwitcher);
             "ok: showing the switcher".into()
         }
-        Order::Switcher => match switcher.focus() {
+        Order::Switcher => match focus_machine.focus() {
             Focus::Remote(peer) => {
                 act(Action::OpenSwitcherOn(peer));
                 "ok: showing the switcher on the PC in use".into()
@@ -60,10 +60,10 @@ pub(super) fn obey(
             if !online[peer] {
                 return format!("error: {name} is offline");
             }
-            if switcher.focus() != Focus::Local {
+            if focus_machine.focus() != Focus::Local {
                 return "error: the focus is on another PC; use the hotkey or `mickey home`".into();
             }
-            switcher.go_to(Some(peer), online);
+            focus_machine.go_to(Some(peer), online);
             format!("ok: going to {name} once every key is released")
         }
     }
@@ -113,10 +113,14 @@ pub(super) fn peers_text(this_pc: &[Monitor], peers: &[Peer], online: &[bool]) -
 mod tests {
     use super::*;
 
-    fn run(order: Order, switcher: &mut Switcher, online: &[bool]) -> (String, Vec<Action>) {
+    fn run(
+        order: Order,
+        focus_machine: &mut FocusMachine,
+        online: &[bool],
+    ) -> (String, Vec<Action>) {
         let names = ["Desktop".to_string(), "Windows".to_string()];
         let mut actions = Vec::new();
-        let answer = obey(order, &names, online, switcher, &mut |action| {
+        let answer = obey(order, &names, online, focus_machine, &mut |action| {
             actions.push(action)
         });
         (answer, actions)
@@ -124,27 +128,35 @@ mod tests {
 
     #[test]
     fn go_moves_the_focus_to_an_online_peer_only() {
-        let mut switcher = Switcher::new();
-        let (answer, _) = run(Order::Go("Desktop".into()), &mut switcher, &[false, true]);
+        let mut focus_machine = FocusMachine::new();
+        let (answer, _) = run(
+            Order::Go("Desktop".into()),
+            &mut focus_machine,
+            &[false, true],
+        );
         assert_eq!(answer, "error: Desktop is offline");
-        let (answer, _) = run(Order::Go("Nope".into()), &mut switcher, &[false, true]);
+        let (answer, _) = run(Order::Go("Nope".into()), &mut focus_machine, &[false, true]);
         assert!(answer.starts_with("error: no PC named"));
-        let (answer, _) = run(Order::Go("Windows".into()), &mut switcher, &[false, true]);
+        let (answer, _) = run(
+            Order::Go("Windows".into()),
+            &mut focus_machine,
+            &[false, true],
+        );
         assert!(answer.starts_with("ok"));
-        assert_eq!(switcher.focus(), Focus::WaitingForKeysUp(1));
+        assert_eq!(focus_machine.focus(), Focus::WaitingForKeysUp(1));
     }
 
     #[test]
     fn home_and_switcher_from_a_remote_peer() {
-        let mut switcher = Switcher::new();
-        switcher.go_to(Some(1), &[true, true]);
-        switcher.grabbed();
-        let (answer, actions) = run(Order::Switcher, &mut switcher, &[true, true]);
+        let mut focus_machine = FocusMachine::new();
+        focus_machine.go_to(Some(1), &[true, true]);
+        focus_machine.grabbed();
+        let (answer, actions) = run(Order::Switcher, &mut focus_machine, &[true, true]);
         assert!(answer.starts_with("ok"));
         assert_eq!(actions, [Action::OpenSwitcherOn(1)], "on the screen in use");
-        let (answer, actions) = run(Order::Home, &mut switcher, &[true, true]);
+        let (answer, actions) = run(Order::Home, &mut focus_machine, &[true, true]);
         assert!(answer.starts_with("ok"));
         assert_eq!(actions, [Action::Ungrab]);
-        assert_eq!(switcher.focus(), Focus::Local);
+        assert_eq!(focus_machine.focus(), Focus::Local);
     }
 }

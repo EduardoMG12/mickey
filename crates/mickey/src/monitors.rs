@@ -61,7 +61,7 @@ pub fn watch(
 /// Windows and Hyprland. Not on GNOME and KDE: each read goes through the
 /// RemoteDesktop portal, which reports them once per session, and reading
 /// every second could ask for permission again.
-pub fn follow_changes() -> bool {
+pub fn follows_changes() -> bool {
     #[cfg(target_os = "linux")]
     return crate::desktop::session() != crate::desktop::Session::Portal;
     #[cfg(windows)]
@@ -73,9 +73,9 @@ pub type Latest = std::sync::Arc<std::sync::Mutex<Vec<Monitor>>>;
 
 /// One `watch` for the whole target, not one per connection: a source
 /// that reconnects would leave a thread reading the monitors behind.
-/// `None` where they do not follow a change (`follow_changes`).
+/// `None` where they do not follow a change (`follows_changes`).
 pub fn keep_latest(every: std::time::Duration) -> Option<Latest> {
-    if !follow_changes() {
+    if !follows_changes() {
         return None;
     }
     let latest = Latest::default();

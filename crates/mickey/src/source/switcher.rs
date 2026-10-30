@@ -1,7 +1,7 @@
 //! The switcher window, shown when the hotkey is pressed (PRD 0007).
 
 use super::{Peer, Wake};
-use crate::clipboard::sync::Mover;
+use crate::clipboard::sync::DataLinks;
 use crate::window;
 use mickey_config as config;
 use std::sync::mpsc::Sender;
@@ -87,16 +87,16 @@ impl Switchers {
         in_use: Option<usize>,
         cards: &[String],
         peers: &[Peer],
-        mover: Option<&Mover>,
+        data_links: Option<&DataLinks>,
         interface: &config::Interface,
         wake: &Sender<Wake>,
     ) {
-        if let Some(mover) = mover {
+        if let Some(data_links) = data_links {
             for (peer, other) in peers.iter().enumerate() {
                 if Some(peer) == in_use {
-                    mover.show_switcher(peer, &cards.join("\n"));
+                    data_links.show_switcher(peer, &cards.join("\n"));
                 } else if other.link.is_some() {
-                    mover.mirror_switcher(peer, &cards.join("\n"));
+                    data_links.mirror_switcher(peer, &cards.join("\n"));
                 }
             }
         }
@@ -111,11 +111,11 @@ impl Switchers {
     }
 
     /// Closes every switcher and copy, here and on the peers.
-    pub(super) fn close_all(&mut self, mover: Option<&Mover>) {
+    pub(super) fn close_all(&mut self, data_links: Option<&DataLinks>) {
         self.out = false;
         window::close(&self.here);
-        if let Some(mover) = mover {
-            mover.close_switchers();
+        if let Some(data_links) = data_links {
+            data_links.close_switchers();
         }
         if let Some(mut window) = self.mirror.take() {
             let _ = window.kill();

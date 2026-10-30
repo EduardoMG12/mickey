@@ -42,7 +42,7 @@ pub enum Action {
     OpenSwitcherOn(usize),
 }
 
-pub struct Switcher {
+pub struct FocusMachine {
     focus: Focus,
     hotkey: Hotkey,
     /// What the focused peer holds down because we sent it.
@@ -50,11 +50,11 @@ pub struct Switcher {
     buttons: HeldSet,
 }
 
-impl Switcher {
+impl FocusMachine {
     /// With only the M0 hotkey.
     #[cfg(test)]
-    pub fn new() -> Switcher {
-        Switcher::with_hotkeys(Hotkey::new())
+    pub fn new() -> FocusMachine {
+        FocusMachine::with_hotkeys(Hotkey::new())
     }
 
     /// New hotkeys, from the settings or another PC, used at once.
@@ -62,8 +62,8 @@ impl Switcher {
         self.hotkey = hotkey;
     }
 
-    pub fn with_hotkeys(hotkey: Hotkey) -> Switcher {
-        Switcher {
+    pub fn with_hotkeys(hotkey: Hotkey) -> FocusMachine {
+        FocusMachine {
             focus: Focus::Local,
             hotkey,
             keys: HeldSet::new(),
@@ -236,29 +236,29 @@ mod tests {
     }
 
     /// Presses and releases the hotkey, then grabs if a peer was picked.
-    fn hotkey(switcher: &mut Switcher, online: &[bool], actions: &mut Vec<Action>) {
+    fn hotkey(machine: &mut FocusMachine, online: &[bool], actions: &mut Vec<Action>) {
         for event in [
             key(KEY_RIGHTALT, true),
             key(KEY_RIGHTSHIFT, true),
             key(KEY_RIGHTSHIFT, false),
             key(KEY_RIGHTALT, false),
         ] {
-            switcher.handle(event, online, |action| actions.push(action));
+            machine.handle(event, online, |action| actions.push(action));
         }
-        switcher.grabbed();
+        machine.grabbed();
     }
 
     #[test]
     fn one_peer_toggles_like_m0() {
-        let (mut switcher, mut actions) = (Switcher::new(), Vec::new());
-        switcher.handle(key(A, true), &[true], |action| actions.push(action));
+        let (mut machine, mut actions) = (FocusMachine::new(), Vec::new());
+        machine.handle(key(A, true), &[true], |action| actions.push(action));
         assert!(actions.is_empty(), "local input is never sent");
 
-        hotkey(&mut switcher, &[true], &mut actions);
-        assert_eq!(switcher.focus(), Focus::Remote(0));
-        switcher.handle(key(A, true), &[true], |action| actions.push(action));
-        hotkey(&mut switcher, &[true], &mut actions);
-        assert_eq!(switcher.focus(), Focus::Local);
+        hotkey(&mut machine, &[true], &mut actions);
+        assert_eq!(machine.focus(), Focus::Remote(0));
+        machine.handle(key(A, true), &[true], |action| actions.push(action));
+        hotkey(&mut machine, &[true], &mut actions);
+        assert_eq!(machine.focus(), Focus::Local);
         // The hotkey's modifiers reach the peer as pressed and released
         // (#188); A is let go there since it was still held.
         assert_eq!(
@@ -278,31 +278,31 @@ mod tests {
     #[test]
     fn with_two_peers_the_hotkey_asks_for_the_switcher() {
         let online = [true, false, true];
-        let (mut switcher, mut actions) = (Switcher::new(), Vec::new());
-        hotkey(&mut switcher, &online, &mut actions);
-        assert_eq!(switcher.focus(), Focus::Local);
+        let (mut machine, mut actions) = (FocusMachine::new(), Vec::new());
+        hotkey(&mut machine, &online, &mut actions);
+        assert_eq!(machine.focus(), Focus::Local);
         assert_eq!(actions, [Action::OpenSwitcher]);
 
-        switcher.go_to(Some(1), &online);
-        assert_eq!(switcher.focus(), Focus::Local, "peer 1 is offline");
-        switcher.go_to(Some(2), &online);
-        switcher.grabbed();
-        assert_eq!(switcher.focus(), Focus::Remote(2));
+        machine.go_to(Some(1), &online);
+        assert_eq!(machine.focus(), Focus::Local, "peer 1 is offline");
+        machine.go_to(Some(2), &online);
+        machine.grabbed();
+        assert_eq!(machine.focus(), Focus::Remote(2));
     }
 
     #[test]
     fn from_a_peer_the_hotkey_asks_there() {
         let online = [true, true];
-        let (mut switcher, mut actions) = (Switcher::new(), Vec::new());
-        switcher.go_to(Some(1), &online);
-        switcher.grabbed();
-        switcher.handle(key(A, true), &online, |action| actions.push(action));
+        let (mut machine, mut actions) = (FocusMachine::new(), Vec::new());
+        machine.go_to(Some(1), &online);
+        machine.grabbed();
+        machine.handle(key(A, true), &online, |action| actions.push(action));
         actions.clear();
 
         // The owner is looking at peer 1: the switcher shows there, and the
         // focus stays until a card is picked.
-        hotkey(&mut switcher, &online, &mut actions);
-        assert_eq!(switcher.focus(), Focus::Remote(1));
+        hotkey(&mut machine, &online, &mut actions);
+        assert_eq!(machine.focus(), Focus::Remote(1));
         // The modifiers reached peer 1 as they were pressed (#188).
         assert_eq!(
             actions,
@@ -318,28 +318,24 @@ mod tests {
 
     #[test]
     fn with_its_only_peer_offline_the_hotkey_stays_home() {
-        let (mut switcher, mut actions) = (Switcher::new(), Vec::new());
-        hotkey(&mut switcher, &[false], &mut actions);
-        assert_eq!(switcher.focus(), Focus::Local);
+        let (mut machine, mut actions) = (FocusMachine::new(), Vec::new());
+        hotkey(&mut machine, &[false], &mut actions);
+        assert_eq!(machine.focus(), Focus::Local);
         assert!(actions.is_empty());
     }
 
     #[test]
     fn losing_the_focused_peer_brings_the_devices_home() {
-        let (mut switcher, mut actions) = (Switcher::new(), Vec::new());
-        switcher.go_to(Some(0), &[true, true]);
-        switcher.grabbed();
-        switcher.handle(key(A, true), &[true, true], |action| actions.push(action));
+        let (mut machine, mut actions) = (FocusMachine::new(), Vec::new());
+        machine.go_to(Some(0), &[true, true]);
+        machine.grabbed();
+        machine.handle(key(A, true), &[true, true], |action| actions.push(action));
         actions.clear();
 
-        switcher.peer_lost(1, |action| actions.push(action));
-        assert_eq!(
-            switcher.focus(),
-            Focus::Remote(0),
-            "another peer is ignored"
-        );
-        switcher.peer_lost(0, |action| actions.push(action));
-        assert_eq!(switcher.focus(), Focus::Local);
+        machine.peer_lost(1, |action| actions.push(action));
+        assert_eq!(machine.focus(), Focus::Remote(0), "another peer is ignored");
+        machine.peer_lost(0, |action| actions.push(action));
+        assert_eq!(machine.focus(), Focus::Local);
         assert_eq!(actions, [Action::Ungrab], "no releases to a gone peer");
     }
 
@@ -352,7 +348,7 @@ mod tests {
         .unwrap()
         .hotkeys()
         .unwrap();
-        let mut switcher = Switcher::with_hotkeys(Hotkey::from_config(&set));
+        let mut machine = FocusMachine::with_hotkeys(Hotkey::from_config(&set));
         let mut actions = Vec::new();
         let two = 3; // KEY_2
         for event in [
@@ -363,11 +359,11 @@ mod tests {
             key(KEY_RIGHTSHIFT, false),
             key(KEY_RIGHTALT, false),
         ] {
-            switcher.handle(event, &[true, true], |action| actions.push(action));
+            machine.handle(event, &[true, true], |action| actions.push(action));
         }
-        switcher.grabbed();
+        machine.grabbed();
         assert_eq!(
-            switcher.focus(),
+            machine.focus(),
             Focus::Remote(1),
             "straight to the second PC"
         );
@@ -395,8 +391,8 @@ mod tests {
 
     #[test]
     fn grabbed_is_ignored_unless_waiting() {
-        let mut switcher = Switcher::new();
-        switcher.grabbed();
-        assert_eq!(switcher.focus(), Focus::Local);
+        let mut machine = FocusMachine::new();
+        machine.grabbed();
+        assert_eq!(machine.focus(), Focus::Local);
     }
 }

@@ -17,7 +17,7 @@ pub(super) fn serve_clipboard(
     identity: &std::sync::Arc<identity::Identity>,
     trusted: &std::sync::Arc<std::sync::Mutex<trust::TrustedPeers>>,
     keeper: clipboard::Keeper,
-    controlled: &std::sync::mpsc::Sender<source::TargetNews>,
+    target_news: &std::sync::mpsc::Sender<source::TargetNews>,
     sources: &Sources,
     grants: &clipboard::sync::Grants,
 ) {
@@ -29,7 +29,7 @@ pub(super) fn serve_clipboard(
             return;
         }
     };
-    let (identity, trusted, controlled) = (identity.clone(), trusted.clone(), controlled.clone());
+    let (identity, trusted, target_news) = (identity.clone(), trusted.clone(), target_news.clone());
     let (sources, grants) = (sources.clone(), grants.clone());
     let shown = Shown::default();
     crate::threads::spawn("data accept", move || {
@@ -42,7 +42,8 @@ pub(super) fn serve_clipboard(
                 continue;
             };
             let (identity, trusted, keeper) = (identity.clone(), trusted.clone(), keeper.clone());
-            let (controlled, sources, shown) = (controlled.clone(), sources.clone(), shown.clone());
+            let (target_news, sources, shown) =
+                (target_news.clone(), sources.clone(), shown.clone());
             let grants = grants.clone();
             let from = from.ip();
             crate::threads::try_spawn("data link", move || {
@@ -52,7 +53,7 @@ pub(super) fn serve_clipboard(
                     Ok(link) => {
                         let by = *link.peer_key();
                         let payload = |kind: u8, text: &str| {
-                            on_payload(kind, text, from, by, &controlled, &sources, &shown)
+                            on_payload(kind, text, from, by, &target_news, &sources, &shown)
                         };
                         let _ = clipboard::sync::answer(
                             link,
@@ -78,14 +79,14 @@ fn on_payload(
     text: &str,
     from: std::net::IpAddr,
     by: [u8; 32],
-    controlled: &std::sync::mpsc::Sender<source::TargetNews>,
+    target_news: &std::sync::mpsc::Sender<source::TargetNews>,
     sources: &Sources,
     shown: &Shown,
 ) {
     match kind {
         group::KIND => match group::decode(text, from) {
             Ok(members) => {
-                let _ = controlled.send(source::TargetNews::Group { members, by });
+                let _ = target_news.send(source::TargetNews::Group { members, by });
             }
             Err(err) => eprintln!("mickey: {err}"),
         },
@@ -101,7 +102,7 @@ fn on_payload(
             crate::threads::spawn("switcher close", move || window::close(&shown));
         }
         group::HOTKEYS => {
-            let _ = controlled.send(source::TargetNews::Hotkeys(text.to_string()));
+            let _ = target_news.send(source::TargetNews::Hotkeys(text.to_string()));
         }
         group::AUDIO_KEY => {
             // Named after the PC, as config.toml knows it.
@@ -118,12 +119,12 @@ fn on_payload(
             audio::heard_key(text, from, &name);
         }
         group::AUDIO => {
-            let _ = controlled.send(source::TargetNews::Audio(text.to_string()));
+            let _ = target_news.send(source::TargetNews::Audio(text.to_string()));
         }
         group::VERSION => {
             // A peer's word: shown only if it is a version.
             if let Some(version) = config::version::checked(text) {
-                let _ = controlled.send(source::TargetNews::Version { from, version });
+                let _ = target_news.send(source::TargetNews::Version { from, version });
             }
         }
         _ => {}
