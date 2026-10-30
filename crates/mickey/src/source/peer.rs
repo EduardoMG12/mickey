@@ -11,6 +11,7 @@ use crate::secure::Link;
 use crate::threads::LockAnyway;
 use crate::transport;
 use crate::trust;
+use mickey_config as config;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::mpsc::Sender;
@@ -212,5 +213,18 @@ pub(super) fn report_latency(peer: &Peer) {
             peer.name,
             peer.latency.len()
         );
+    }
+}
+
+/// Writes `key` into the peer's block in config.toml, the first time it
+/// connects (#184).
+pub(super) fn save_key(name: &str, key: &[u8; 32]) {
+    let saved = config::path().and_then(|path| {
+        let text = std::fs::read_to_string(&path).map_err(|err| err.to_string())?;
+        let text = config::set_key(&text, name, &crate::hex::encode(key))?;
+        config::write(&path, &text)
+    });
+    if let Err(err) = saved {
+        eprintln!("mickey: cannot remember {name}'s key: {err}");
     }
 }
