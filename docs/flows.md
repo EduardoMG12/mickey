@@ -147,8 +147,9 @@ sequenceDiagram
 
 The source knows its own cursor, so it notices leaving; the target knows
 its own, acceleration included, so it notices coming back (`edges.rs`,
-`transport::serve`). On Linux the cursor comes from Hyprland's IPC, the
-only Linux desktop supported for edges so far (`monitors.rs`). When a
+`transport::serve`). On Linux the cursor comes from the desktop: Hyprland
+or Sway IPC, X11, or the portal's edge barriers on GNOME and KDE
+(`monitors.rs`, `edges.rs`). When a
 source's keyboard leaves a target (`Focus` with `here` 0), the target parks
 its cursor in the bottom-right corner (`emit::park`), and puts it back when
 that keyboard returns.

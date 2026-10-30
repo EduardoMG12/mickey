@@ -118,8 +118,8 @@ pub mod hyprland {
 
     /// Hyprland's request socket for this session.
     pub fn socket() -> Result<PathBuf, String> {
-        let signature = std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE")
-            .ok_or("not running under Hyprland, the only Linux desktop supported for now")?;
+        let signature =
+            std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE").ok_or("not running under Hyprland")?;
         let runtime = std::env::var_os("XDG_RUNTIME_DIR").ok_or("XDG_RUNTIME_DIR is not set")?;
         Ok(PathBuf::from(runtime)
             .join("hypr")

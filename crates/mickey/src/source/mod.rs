@@ -291,7 +291,6 @@ pub fn run(
     }
     // This PC's sound on its way to the listener, while it should be.
     let mut sending: Option<(usize, crate::audio::Sending)> = None;
-    println!("mickey: AltGr + Right Shift switches focus");
 
     // One channel wakes the loop for input, a switcher pick or an order
     // from the control socket, so each is handled the moment it happens.

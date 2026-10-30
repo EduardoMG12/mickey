@@ -234,6 +234,13 @@ pub struct Hotkeys {
     pub double_tap_ms: Option<u64>,
 }
 
+impl Hotkeys {
+    /// The hotkey to the next PC, as written (the default if unset).
+    pub fn next_or_default(&self) -> &str {
+        self.next.as_deref().unwrap_or(DEFAULT_NEXT)
+    }
+}
+
 /// Every hotkey, parsed. `peers[i]` is peer `i`'s own hotkey, if any.
 #[derive(Debug, Clone, PartialEq)]
 pub struct HotkeySet {
@@ -639,6 +646,13 @@ pub fn toml_string(text: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn the_next_hotkey_names_the_default_when_unset() {
+        assert_eq!(Config::empty().hotkeys.next_or_default(), DEFAULT_NEXT);
+        let set = parse("[hotkeys]\nnext = \"Ctrl+F12\"\n").unwrap();
+        assert_eq!(set.hotkeys.next_or_default(), "Ctrl+F12");
+    }
     #[test]
     fn a_peer_gets_its_key_in_place() {
         let text =
