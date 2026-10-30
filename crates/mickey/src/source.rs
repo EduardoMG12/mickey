@@ -28,7 +28,6 @@ use crate::window;
 use mickey_config as config;
 use mickey_config::peers::{PeerInfo, Peers};
 use std::net::SocketAddr;
-use std::process::Command;
 use std::sync::Arc;
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
 use std::thread;
@@ -208,9 +207,7 @@ impl InControl {
 /// Opens `mickey-ui <window>` (settings, history), installed next to this
 /// program, and leaves it running on its own.
 fn open_window(window: &str) {
-    let ui = std::env::current_exe()
-        .map(|exe| exe.with_file_name(format!("mickey-ui{}", std::env::consts::EXE_SUFFIX)));
-    if let Err(err) = ui.and_then(|ui| Command::new(ui).arg(window).spawn()) {
+    if let Err(err) = crate::window::ui_command(&[window]).and_then(|mut ui| ui.spawn()) {
         eprintln!("mickey: cannot open the {window} window: {err}");
     }
 }
@@ -345,13 +342,8 @@ fn ask_to_join(member: group::Member, by: [u8; 32], introducer: String, wake: &S
     }
     let wake = wake.clone();
     crate::threads::spawn("ask to join", move || {
-        let ui = std::env::current_exe()
-            .map(|exe| exe.with_file_name(format!("mickey-ui{}", std::env::consts::EXE_SUFFIX)));
-        let answer = ui.and_then(|ui| {
-            Command::new(ui)
-                .args(["join", &member.name, &introducer])
-                .status()
-        });
+        let answer = crate::window::ui_command(&["join", &member.name, &introducer])
+            .and_then(|mut ui| ui.status());
         match answer.map(|status| status.code()) {
             Ok(Some(0)) => {
                 let _ = wake.send(Wake::Accepted(member, by));
@@ -1629,31 +1621,11 @@ fn switcher_cards(
     cards
 }
 
-/// `mickey-ui` arguments for the switcher (a view-only copy if `mirror`).
-fn switcher_args(cards: &[String], interface: &config::Interface, mirror: bool) -> Vec<String> {
-    let mut args = vec!["switcher".to_string()];
-    if mirror {
-        args.push("--mirror".to_string());
-    }
-    args.extend(["--at".to_string(), interface.switcher_position.clone()]);
-    if interface.switcher_vertical {
-        args.push("--vertical".to_string());
-    }
-    args.extend(cards.iter().cloned());
-    args
-}
-
 /// Opens a view-only copy of the switcher on this PC; the caller kills it
 /// once a pick is made.
 fn open_mirror(cards: &[String], interface: &config::Interface) -> Option<std::process::Child> {
-    std::env::current_exe()
-        .map(|exe| exe.with_file_name(format!("mickey-ui{}", std::env::consts::EXE_SUFFIX)))
-        .and_then(|ui| {
-            Command::new(ui)
-                .args(switcher_args(cards, interface, true))
-                .stdout(std::process::Stdio::null())
-                .spawn()
-        })
+    crate::window::ui_command(&crate::window::switcher_args(cards, interface, true))
+        .and_then(|mut ui| ui.stdout(std::process::Stdio::null()).spawn())
         .ok()
 }
 
@@ -1667,7 +1639,7 @@ fn open_switcher(
     wake: &Sender<Wake>,
     slot: &window::Slot,
 ) {
-    let args = switcher_args(cards, interface, false);
+    let args = crate::window::switcher_args(cards, interface, false);
     let (wake, slot) = (wake.clone(), slot.clone());
     crate::threads::spawn("switcher", move || {
         let pick = match window::run(&args, &slot) {
