@@ -22,9 +22,14 @@ pub fn answer(
     may_write: impl Fn() -> bool,
     write: impl Fn(Content),
     other: impl Fn(u8, &str),
+    still_trusted: impl Fn() -> bool,
 ) -> io::Result<()> {
     loop {
         let bytes = link.recv_bulk()?;
+        // Forgotten while connected: nothing more from it.
+        if !still_trusted() {
+            return Err(io::Error::other("this PC forgot the peer"));
+        }
         if let Some((&kind, text)) = bytes.split_first()
             && kind >= crate::net::group::KIND
         {
@@ -422,6 +427,7 @@ mod tests {
                 || true,
                 |content| target_written.lock().unwrap().push(content),
                 |_, _| {},
+                || true,
             );
         });
         let stream = TcpStream::connect(addr).unwrap();

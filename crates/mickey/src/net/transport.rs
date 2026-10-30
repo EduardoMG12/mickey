@@ -126,6 +126,7 @@ pub fn serve(
     mut moved: impl FnMut() -> Option<Vec<Monitor>>,
     mut act: impl FnMut(Effect) -> bool,
     cursor: fn() -> Option<(i32, i32)>,
+    still_trusted: impl Fn() -> bool,
 ) -> io::Result<()> {
     let first = link.recv().map_err(|err| match err.kind() {
         io::ErrorKind::UnexpectedEof => {
@@ -159,6 +160,11 @@ pub fn serve(
             Err(err) if err.kind() == io::ErrorKind::UnexpectedEof => break Ok(()),
             Err(err) => break Err(err),
         };
+        // Forgotten while connected (a lost laptop): nothing more from it,
+        // and what it holds down is let go below.
+        if !still_trusted() {
+            break Err(invalid("this PC forgot the peer".into()));
+        }
         match message {
             Message::Input(event) => {
                 match event {
@@ -273,12 +279,18 @@ mod tests {
 
     /// Starts a target with a fake emitter that records what it is given.
     fn fake_target() -> (SocketAddr, thread::JoinHandle<Outcome>) {
+        fake_target_trusting(usize::MAX)
+    }
+
+    /// The same, but the source is forgotten after `messages` messages.
+    fn fake_target_trusting(messages: usize) -> (SocketAddr, thread::JoinHandle<Outcome>) {
         let (listener, addr) = listener();
         let handle = thread::spawn(move || {
             let (stream, _) = listener.accept().expect("the test connects");
             let identity = Identity::generate().unwrap();
             let mut link = accept(stream, &identity).expect("handshake");
             let mut emitted = Vec::new();
+            let trusted_for = std::cell::Cell::new(messages);
             let result = serve(
                 &mut link,
                 &[],
@@ -290,6 +302,11 @@ mod tests {
                     true
                 },
                 || None,
+                || {
+                    let left = trusted_for.get();
+                    trusted_for.set(left.saturating_sub(1));
+                    left > 0
+                },
             );
             (result, emitted)
         });
@@ -347,6 +364,26 @@ mod tests {
     }
 
     #[test]
+    fn a_source_forgotten_while_connected_is_cut_off_and_its_keys_let_go() {
+        let (addr, target) = fake_target_trusting(1);
+        let mut link = source(addr);
+        link.send(&Message::Input(KEY_A)).unwrap();
+        let key_b = InputEvent::Key {
+            code: 48,
+            pressed: true,
+        };
+        // Forgotten now: this one must not reach the system.
+        let _ = link.send(&Message::Input(key_b));
+        let (result, emitted) = target.join().unwrap();
+        assert!(result.is_err());
+        let released = InputEvent::Key {
+            code: 30,
+            pressed: false,
+        };
+        assert_eq!(emitted, [KEY_A, released]);
+    }
+
+    #[test]
     fn the_target_places_on_enter_and_says_once_when_pushed_off() {
         let (listener, addr) = listener();
         let target = thread::spawn(move || {
@@ -371,6 +408,7 @@ mod tests {
                     true
                 },
                 || Some((1535, 284)),
+                || true,
             );
             (result, placed)
         });
@@ -407,7 +445,14 @@ mod tests {
                 width: 1536,
                 height: 864,
             }];
-            serve(&mut link, &laptop, || None, |_| true, || Some((1535, 284)))
+            serve(
+                &mut link,
+                &laptop,
+                || None,
+                |_| true,
+                || Some((1535, 284)),
+                || true,
+            )
         });
         let mut link = source(addr);
         let push = Message::Input(InputEvent::Motion { dx: 4, dy: 0 });
@@ -455,7 +500,7 @@ mod tests {
             let mut link = accept(stream, &Identity::generate().unwrap()).unwrap();
             // Moved once, then still.
             let mut news = Some(vec![moved_to]);
-            serve(&mut link, &[], || news.take(), |_| true, || None)
+            serve(&mut link, &[], || news.take(), |_| true, || None, || true)
         });
         let mut link = source(addr);
         link.send(&Message::Ping { id: 1 }).unwrap();
@@ -527,7 +572,7 @@ mod tests {
             let (stream, _) = listener.accept().unwrap();
             let mut link = accept(stream, &Identity::generate().unwrap()).unwrap();
             // A system that refuses every injected event.
-            serve(&mut link, &[], || None, |_| false, || None)
+            serve(&mut link, &[], || None, |_| false, || None, || true)
         });
         let mut link = source(addr);
         link.send(&Message::Input(KEY_A)).unwrap();

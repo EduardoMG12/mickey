@@ -62,6 +62,7 @@ pub(super) fn serve_clipboard(
                             || clipboard::sync::may_write(&grants, from),
                             |content| keeper.write(content),
                             payload,
+                            || trusted.lock_anyway().is_trusted(&by),
                         );
                     }
                     Err(err) => eprintln!("mickey: data link refused: {err}"),
