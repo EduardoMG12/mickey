@@ -29,18 +29,25 @@ use std::sync::Arc;
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
 use std::time::{Duration, Instant};
 
+mod hotkeys;
+mod joining;
 mod layout;
 mod orders;
 mod peer;
+mod sound;
 mod switcher;
 
+use hotkeys::take_hotkeys;
+use joining::{add_peer, join, take_map};
 use layout::{arrange, edge_crossed, edges_matter, save_position};
 use orders::{found_text, obey, peers_text};
 use switcher::{open_mirror, open_switcher, switcher_cards};
 
 use peer::{
     News, Peer, Shared, connect_first, open_data_link, read_peer, reconnect, report_latency,
+    save_key,
 };
+use sound::{audio_target, listen_here, take_audio};
 
 const PING_EVERY: Duration = Duration::from_secs(1);
 /// With `MICKEY_BENCH` set, while the keyboard is on another PC: a ping
@@ -148,194 +155,6 @@ fn use_hotkeys(config: &config::Config, switcher: &mut Switcher, window: &mut Du
             switcher.set_hotkeys(hotkey);
         }
         Err(err) => eprintln!("mickey: hotkeys not changed: {err}"),
-    }
-}
-
-/// Writes who listens, as a peer shared it, into config.toml, keeping this
-/// PC's own mode; nothing when it is already so (every new data link
-/// sends it again).
-fn take_audio(lines: &str) -> Result<config::Audio, String> {
-    let path = config::path()?;
-    let text = std::fs::read_to_string(&path).unwrap_or_default();
-    let mine = config::parse(&text)?.audio;
-    let taken = mine.taking(lines)?;
-    if taken != mine {
-        config::write(&path, &config::set_audio(&text, &taken)?)?;
-        println!("mickey: another PC changed who listens");
-    }
-    Ok(taken)
-}
-
-/// Makes this PC the one that listens, in config.toml (the tray's
-/// "Listen here").
-fn listen_here(me: &[u8; 32]) -> Result<config::Audio, String> {
-    let path = config::path()?;
-    let text = std::fs::read_to_string(&path).unwrap_or_default();
-    let audio = config::Audio {
-        listener: Some(crate::hex::encode(me)),
-        since: config::now_seconds(),
-        ..config::parse(&text)?.audio
-    };
-    config::write(&path, &config::set_audio(&text, &audio)?)?;
-    println!("mickey: this PC listens now");
-    Ok(audio)
-}
-
-/// Where this PC's sound should go now (PRD 0012): the listener's audio
-/// port and its index, when another PC listens, is online, and this PC's
-/// mode sends.
-fn audio_target(
-    audio: &config::Audio,
-    me: &[u8; 32],
-    peers: &[Peer],
-    online: &[bool],
-) -> Option<(usize, SocketAddr)> {
-    if audio.mode == config::SoundMode::Here {
-        return None;
-    }
-    // Compared as bytes: this runs on every input event, and writing two
-    // keys as hex text cost 66 allocations and 7 us each time.
-    let listener = crate::hex::decode_key(audio.listener.as_deref()?)?;
-    if listener == *me {
-        return None;
-    }
-    let index = peers.iter().position(|peer| peer.key == Some(listener))?;
-    let address = peers[index].address;
-    online[index].then(|| {
-        (
-            index,
-            SocketAddr::new(address.ip(), crate::audio::port(address.port())),
-        )
-    })
-}
-
-/// Whether a "let this PC in?" question is on screen (see `ask_to_join`).
-static JOIN_ASKING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-
-/// Asks, on its own thread (the main loop must keep moving keys), whether
-/// to let `member` join, as `introducer` (who sent the map) says it is in
-/// the group. A yes comes back as `Wake::Accepted`; anything else leaves
-/// it out.
-fn ask_to_join(member: group::Member, by: [u8; 32], introducer: String, wake: &Sender<Wake>) {
-    use std::sync::atomic::Ordering;
-    if JOIN_ASKING.swap(true, Ordering::SeqCst) {
-        return;
-    }
-    let wake = wake.clone();
-    crate::threads::spawn("ask to join", move || {
-        let answer = crate::window::ui_command(&["join", &member.name, &introducer])
-            .and_then(|mut ui| ui.status());
-        match answer.map(|status| status.code()) {
-            Ok(Some(0)) => {
-                let _ = wake.send(Wake::Accepted(member, by));
-            }
-            Ok(Some(1)) => println!("mickey: {} was not let in", member.name),
-            _ => eprintln!(
-                "mickey: cannot ask whether to let {} in; it stays out",
-                member.name
-            ),
-        }
-        JOIN_ASKING.store(false, Ordering::SeqCst);
-    });
-}
-
-/// One PC from a peer's map (already in this PC's coordinates): trusted,
-/// because a trusted member vouches for it (the owner's choice, PRD 0010);
-/// its place taken if it has one; added to config.toml and to `peers` if
-/// this PC did not know it. Returns the new peer's index, to connect to.
-fn join(
-    member: group::Member,
-    by: &[u8; 32],
-    shared: &Shared,
-    peers: &mut Vec<Peer>,
-    positions: &mut Vec<Option<[i32; 2]>>,
-) -> Option<usize> {
-    // Only PCs on a local network: a group map cannot make this PC call
-    // out to the internet, or to itself (#184).
-    if !group::is_local(member.address.ip()) {
-        eprintln!(
-            "mickey: {} from the group is not on a local network; ignored",
-            member.name
-        );
-        return None;
-    }
-    {
-        let mut trusted = shared.trusted.lock_anyway();
-        // Noted with who introduced it, so forgetting that PC forgets it too.
-        let note = format!(
-            "{} via {}",
-            member.address,
-            crate::identity::fingerprint(by)
-        );
-        if !trusted.is_trusted(&member.key)
-            && let Err(err) = trusted.add(member.key, &note)
-        {
-            eprintln!("mickey: {err}");
-            return None;
-        }
-    }
-    let known = peers
-        .iter()
-        .position(|peer| peer.key == Some(member.key) || peer.address == member.address);
-    if let Some(index) = known {
-        if let Some(position) = member.position
-            && positions[index] != Some(position)
-        {
-            positions[index] = Some(position);
-            save_position(&peers[index].name, position);
-        }
-        return None;
-    }
-    match add_peer(
-        peers,
-        positions,
-        &member.name,
-        member.address,
-        member.position,
-    ) {
-        Ok(index) => {
-            peers[index].key = Some(member.key);
-            save_key(&peers[index].name, &member.key);
-            println!("mickey: {} joined through the group", peers[index].name);
-            Some(index)
-        }
-        Err(err) => {
-            eprintln!("mickey: cannot add {} from the group: {err}", member.name);
-            None
-        }
-    }
-}
-
-/// A PC new to this one: written into config.toml (a name already taken
-/// gets a number) and added to `peers`, not yet connected. Its index.
-fn add_peer(
-    peers: &mut Vec<Peer>,
-    positions: &mut Vec<Option<[i32; 2]>>,
-    name: &str,
-    address: SocketAddr,
-    position: Option<[i32; 2]>,
-) -> Result<usize, String> {
-    let name = config::path().and_then(|path| {
-        let text = std::fs::read_to_string(&path).unwrap_or_default();
-        let (text, name) = config::add_peer(&text, name, address, position)?;
-        config::write(&path, &text)?;
-        Ok(name)
-    })?;
-    peers.push(Peer::new(name, address, None, Instant::now()));
-    positions.push(position);
-    Ok(peers.len() - 1)
-}
-
-/// Writes `key` into the peer's block in config.toml, the first time it
-/// connects (#184).
-fn save_key(name: &str, key: &[u8; 32]) {
-    let saved = config::path().and_then(|path| {
-        let text = std::fs::read_to_string(&path).map_err(|err| err.to_string())?;
-        let text = config::set_key(&text, name, &crate::hex::encode(key))?;
-        config::write(&path, &text)
-    });
-    if let Err(err) = saved {
-        eprintln!("mickey: cannot remember {name}'s key: {err}");
     }
 }
 
@@ -1101,16 +920,7 @@ pub fn run(
         if switcher.focus() == Focus::Local
             && let Some(lines) = pending_hotkeys.take()
         {
-            let taken = config::Hotkeys::from_lines(&lines).and_then(|hotkeys| {
-                let path = config::path()?;
-                let text = std::fs::read_to_string(&path).map_err(|err| err.to_string())?;
-                let new = config::set_hotkeys(&text, &hotkeys)?;
-                // Checked as hotkeys before anything is written.
-                config::parse(&new)?.hotkeys()?;
-                config::write(&path, &new)?;
-                config::Config::load()?.ok_or_else(|| "config.toml is gone".to_string())
-            });
-            match taken {
+            match take_hotkeys(&lines) {
                 Ok(config) => {
                     use_hotkeys(&config, &mut switcher, &mut double_tap_window);
                     println!("mickey: took the hotkeys saved on another PC");
@@ -1125,32 +935,18 @@ pub fn run(
             reconnect(index, peers[index].address, &shared, &back_sender);
         }
         if let Some((members, by)) = heard_map {
-            let me = *shared.identity.public();
-            for member in group::as_seen_by(&members, &me) {
-                let trusted = shared.trusted.lock_anyway().is_trusted(&member.key);
-                // A PC this one never paired with joins only once the
-                // person here says so (#184), asked once per run.
-                if !trusted {
-                    // One question on screen at a time: a paired PC could
-                    // send map after map of made-up PCs. The others are
-                    // asked when a later map names them again.
-                    if group::is_local(member.address.ip())
-                        && !JOIN_ASKING.load(std::sync::atomic::Ordering::SeqCst)
-                        && asked.insert(member.key)
-                    {
-                        let introducer =
-                            peers.iter().find(|peer| peer.key == Some(by)).map_or_else(
-                                || crate::identity::fingerprint(&by),
-                                |peer| peer.name.clone(),
-                            );
-                        ask_to_join(member, by, introducer, &wake);
-                    }
-                    continue;
-                }
-                if let Some(index) = join(member, &by, &shared, &mut peers, &mut positions) {
-                    names.push(peers[index].name.clone());
-                    reconnect(index, peers[index].address, &shared, &back_sender);
-                }
+            let joined = take_map(
+                &members,
+                by,
+                &shared,
+                &mut peers,
+                &mut positions,
+                &mut asked,
+                &wake,
+            );
+            for index in joined {
+                names.push(peers[index].name.clone());
+                reconnect(index, peers[index].address, &shared, &back_sender);
             }
         }
         // Share the group map when the PCs online changed (one came, or
