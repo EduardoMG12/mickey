@@ -303,8 +303,8 @@ any HTTPS request does (your IP and `mickey/<version>`), and `[updates]
 check = false` in `config.toml` turns it off. Everything else stays
 between the PCs on your network that run Mickey: it announces this PC's
 name and key so they can find it, and, once you pair them, sends them
-your keyboard and mouse while they have the focus and your clipboard
-when it moves there, all encrypted. Typed keys are never logged or
+your keyboard and mouse while they have the focus, your clipboard when
+it moves there, and this PC's sound when you share it, all encrypted. Typed keys are never logged or
 written to disk. Clipboard history and received files stay on your PCs.
 
 ## Code signing policy
@@ -316,11 +316,15 @@ open source by [SignPath.io](https://about.signpath.io), certificate by
 - **Who builds:** only the release workflow
   ([`.github/workflows/release.yml`](.github/workflows/release.yml)),
   from a version tag on `main`, with `Cargo.lock`.
-- **Who reviews:** every change reaches `main` through a pull request;
-  pull requests from contributors are reviewed by the maintainer.
-- **Who approves a release:** the maintainer,
-  [@EduardoMG12](https://github.com/EduardoMG12), who also approves each
-  signing request.
+- **Team roles:** authors, reviewers and approvers are the maintainer,
+  [@EduardoMG12](https://github.com/EduardoMG12). Authors commit; every
+  change reaches `main` through a pull request, which a reviewer reviews;
+  an approver approves each release (the workflow's `release`
+  environment) and each signing request.
+- **Accounts:** every team member uses multi-factor authentication on
+  GitHub and on SignPath.
+- **Only this project's code:** nothing is signed that was not built from
+  this repository by the release workflow.
 - **Checking a download:** every release has `SHA256SUMS`, signed with
   the release key in
   [`packaging/release-key.pub`](packaging/release-key.pub)
