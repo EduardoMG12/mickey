@@ -1,6 +1,6 @@
 pkgbase = mickey-bin
 	pkgdesc = One keyboard and mouse for all your computers
-	pkgver = 0.4.0
+	pkgver = 0.4.2
 	pkgrel = 1
 	url = https://github.com/EduardoMG12/mickey
 	install = mickey-bin.install
@@ -13,7 +13,7 @@ pkgbase = mickey-bin
 	conflicts = mickey
 	options = !debug
 	backup = etc/xdg/autostart/mickey.desktop
-	source = mickey-linux-x86_64-0.4.0.tar.gz::https://github.com/EduardoMG12/mickey/releases/download/v0.4.0/mickey-linux-x86_64.tar.gz
-	sha256sums = 21cc1c4ae2acd65659312dd983306c76d518cafdcd44bc64837b1e23cff7ed49
+	source = mickey-linux-x86_64-0.4.2.tar.gz::https://github.com/EduardoMG12/mickey/releases/download/v0.4.2/mickey-linux-x86_64.tar.gz
+	sha256sums = f7326c85d9a87ad8a3084bcb78cd7a95bb1a7fd6112753de1116b630e7922906
 
 pkgname = mickey-bin
