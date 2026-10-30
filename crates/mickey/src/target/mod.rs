@@ -264,6 +264,7 @@ pub(super) fn serve_source(
             }
         },
         emit::cursor,
+        || lock().is_trusted(&peer_key),
     );
     sources.lock_anyway().remove(&peer.ip());
     match result {
