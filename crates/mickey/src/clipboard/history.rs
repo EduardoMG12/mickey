@@ -124,7 +124,7 @@ impl History {
 /// The history shared by the recorder and whoever asks.
 pub type Shared = Arc<Mutex<History>>;
 
-/// Keeps every copy made on this PC, as `clip_watch` notices them, until
+/// Keeps every copy made on this PC, as `clipboard::watch` notices them, until
 /// Mickey ends. Returns the history to ask.
 pub fn record(keeper: crate::clipboard::Keeper) -> Shared {
     let history = Shared::default();

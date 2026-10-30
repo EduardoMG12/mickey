@@ -1,4 +1,5 @@
-//! Command-line parsing, by hand: four commands do not need a crate.
+//! Command-line parsing, by hand: a few dozen fixed commands, each with a
+//! couple of flags, do not need a crate.
 
 use std::net::SocketAddr;
 
