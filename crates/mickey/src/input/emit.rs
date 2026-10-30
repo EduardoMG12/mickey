@@ -1,7 +1,7 @@
 //! Turns Mickey events into real input on the target: `SendInput` on
 //! Windows, a uinput virtual device on Linux (PRD 0008).
 
-use crate::event::InputEvent;
+use crate::input::event::InputEvent;
 use crate::threads::LockAnyway;
 use std::io;
 
@@ -19,7 +19,7 @@ impl Emitter {
     // ponytail: dropped silently; the PRD wants each unknown code logged
     // once, which waits for a logger that keeps codes at trace level.
     pub fn emit(&mut self, event: InputEvent) -> io::Result<()> {
-        use crate::keymap;
+        use crate::input::keymap;
         use crate::platform::windows;
         match event {
             InputEvent::Key { code, pressed } => match keymap::scan_code(code) {

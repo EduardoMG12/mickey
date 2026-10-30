@@ -1,9 +1,9 @@
 //! The connection from source to target: TCP carrying the secure link.
 
 use crate::edges;
-use crate::event::InputEvent;
-use crate::held::HeldSet;
 use crate::identity::Identity;
+use crate::input::event::InputEvent;
+use crate::input::held::HeldSet;
 use crate::monitors::Monitor;
 use crate::protocol::{Message, VERSION};
 use crate::secure::Link;

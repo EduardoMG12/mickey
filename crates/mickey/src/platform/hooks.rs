@@ -7,7 +7,7 @@
 //! (`LowLevelHooksTimeout`), never routes Ctrl+Alt+Del through hooks, and
 //! removes them when the process ends, however it ends.
 
-use crate::keymap::ScanCode;
+use crate::input::keymap::ScanCode;
 use std::io;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::mpsc::{self, Sender};

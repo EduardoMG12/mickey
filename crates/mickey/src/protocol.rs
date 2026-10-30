@@ -8,7 +8,7 @@
 //! Numbers are big-endian. Every byte from the network is untrusted, so
 //! decoding returns an error for anything unexpected and never panics.
 
-use crate::event::InputEvent;
+use crate::input::event::InputEvent;
 use crate::monitors::Monitor;
 use std::fmt;
 

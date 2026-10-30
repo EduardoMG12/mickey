@@ -466,7 +466,7 @@ mod tests {
     }
 
     use super::*;
-    use crate::event::InputEvent;
+    use crate::input::event::InputEvent;
     use std::net::{SocketAddr, TcpListener};
     use std::thread;
 

@@ -10,7 +10,7 @@
 //! target never sees that key; if something else comes first, it is sent
 //! after all, so AltGr+Q and Shift+1 still type.
 
-use crate::event::InputEvent;
+use crate::input::event::InputEvent;
 use mickey_config::HotkeySet;
 use mickey_config::chord::{self, Chord};
 use std::time::{Duration, Instant};
