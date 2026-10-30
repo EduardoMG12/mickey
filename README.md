@@ -23,13 +23,20 @@ lan-mouse, built from scratch to be understood line by line.
 > and a Windows PC, and tested on ten more Linux setups (below). Expect
 > rough edges, and read the [known limits](#known-limits).
 
-**Contents:** [What it does](#what-it-does) · [Install](#install) ·
+**Contents:** [What it does](#what-it-does) · [Screenshots](#screenshots) · [Install](#install) ·
 [First steps](#first-steps) · [Everyday use](#everyday-use) ·
 [Known limits](#known-limits) · [Security](#security) ·
 [Privacy](#privacy) · [Build from source](#build-from-source) ·
 [How it is developed](#how-this-project-is-developed)
 
 ---
+
+<p align="center">
+  <a href="assets/video/mickey-cursor.mp4"><img src="assets/video/cursor.gif" width="49%" alt="The cursor crosses from one screen to the next, then drags a PC into place in the Layout tab"></a>
+  <a href="assets/video/mickey-antes-depois.mp4"><img src="assets/video/antes-depois.gif" width="49%" alt="Four PCs, each with its own keyboard and mouse, become one row in the Layout tab"></a>
+  <br>
+  <sub>Click either one for the whole film (35 s, no sound).</sub>
+</p>
 
 ## What it does
 
@@ -58,6 +65,24 @@ lan-mouse, built from scratch to be understood line by line.
 - **A tray icon** that shows where the keyboard is (a green dot: here; red:
   on another PC) with a menu to move it; a settings window for the rest;
   it starts with your session.
+
+## Screenshots
+
+<p align="center">
+  <img src="assets/screenshots/settings-layout.png" width="80%" alt="Settings, Layout tab: Notebook, This PC and Workstation side by side">
+</p>
+<p align="center"><sub>The <b>Layout</b> tab: drag each PC to where its screens sit.</sub></p>
+
+<p align="center">
+  <img src="assets/screenshots/pair-desktop.png" width="48%" alt="Pairing window: Connect with Desktop? and the code 482 913">
+  <img src="assets/screenshots/settings-thispc.png" width="48%" alt="Settings, This PC tab">
+</p>
+<p align="center"><sub>Pairing shows the same six-digit code on both PCs · the settings window.</sub></p>
+
+<p align="center">
+  <img src="assets/screenshots/switcher.png" width="70%" alt="The switcher: one card per PC, a green dot where the keyboard is">
+</p>
+<p align="center"><sub>The <b>switcher</b>: one card per PC, shown on the screen you are looking at.</sub></p>
 
 ## Install
 
