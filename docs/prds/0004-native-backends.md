@@ -170,3 +170,13 @@ other, GNOME, KDE and Windows alike.
   sent the focus there, moved the cursor and left through Sway's left
   edge. Driving others from Sway needs to see the cursor reach an edge:
   next.
+- **Sway driving others** (#178): no portal and no cursor position, so
+  the barrier lines become one-pixel wlr-layer-shell surfaces, on the
+  output Sway's IPC names, and the cursor entering one is the push. Two
+  things keep it from bouncing: a strip arms only after the cursor has
+  left it, and Sway answers a `cursor set` onto a strip with a leave and
+  an enter, so an enter within 300 ms of Mickey placing the cursor does
+  not count. Checked with a headless Sway 1.9 reading a uinput test
+  mouse and the Ubuntu VM's GNOME placed to its right: three rounds of
+  crossing right and coming back through GNOME's left edge, none
+  bouncing back within 2 s.

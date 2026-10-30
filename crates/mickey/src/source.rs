@@ -950,7 +950,7 @@ pub fn run(
         let now = Instant::now();
         // Once a second: the edges that lead to a placed, online peer.
         #[cfg(target_os = "linux")]
-        if now >= next_ping && crate::monitors::uses_portal() {
+        if now >= next_ping && (crate::monitors::uses_portal() || crate::sway::session()) {
             // The portal may come up after Mickey at login.
             if this_pc.is_empty()
                 && let Ok(found) = monitors::this_pc()

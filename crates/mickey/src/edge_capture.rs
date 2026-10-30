@@ -6,6 +6,9 @@
 //!
 //! GNOME 46's dialog for this has no "remember", so the capture starts only
 //! once a peer is placed beside this PC: with no edge to watch, no question.
+//!
+//! On Sway, which has no InputCapture portal, the same lines become
+//! one-pixel layer surfaces instead (`sway_edges`, #178).
 
 use crate::edges::{self, Line};
 use crate::monitors::Monitor;
@@ -26,6 +29,8 @@ pub struct EdgeCapture {
     wanted: Arc<Mutex<Vec<Line>>>,
     /// The pixel just off this desktop each push reached.
     hits: Receiver<(i32, i32)>,
+    /// On Sway: makes its thread read `wanted` again.
+    wake: Option<Box<dyn Fn() + Send>>,
 }
 
 impl EdgeCapture {
@@ -34,18 +39,36 @@ impl EdgeCapture {
     pub fn start(here: Vec<Monitor>, barriers: Vec<Line>) -> EdgeCapture {
         let wanted = Arc::new(Mutex::new(barriers));
         let (hit, hits) = std::sync::mpsc::channel();
+        if crate::sway::session() {
+            let wake = crate::sway_edges::start(Arc::clone(&wanted), hit)
+                .inspect_err(|err| eprintln!("mickey: no screen edges here: {err}"))
+                .ok();
+            return EdgeCapture { wanted, hits, wake };
+        }
         let shared = Arc::clone(&wanted);
         crate::threads::spawn("edge capture", move || {
             if let Err(err) = async_io::block_on(watch(&here, &shared, &hit)) {
                 eprintln!("mickey: no screen edges here: {err}");
             }
         });
-        EdgeCapture { wanted, hits }
+        EdgeCapture {
+            wanted,
+            hits,
+            wake: None,
+        }
     }
 
     /// Asks for these barriers instead (the layout or who is online changed).
     pub fn set(&self, barriers: Vec<Line>) {
-        *self.wanted.lock().unwrap_or_else(|p| p.into_inner()) = barriers;
+        let mut wanted = self.wanted.lock().unwrap_or_else(|p| p.into_inner());
+        if *wanted == barriers {
+            return;
+        }
+        *wanted = barriers;
+        drop(wanted);
+        if let Some(wake) = &self.wake {
+            wake();
+        }
     }
 
     /// The pixel off this desktop the cursor last pushed onto, if it did.
