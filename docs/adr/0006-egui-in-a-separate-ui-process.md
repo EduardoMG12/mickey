@@ -88,6 +88,6 @@ Bad, and known limits:
 - [PRD 0006, setup window](../prds/0006-setup-window.md), *Approach*.
 - [architecture.md](../architecture.md#three-crates).
 - Issues #47, #218; PRs #54, #55, #56.
-- Code: `crates/mickey-ui/` (`main.rs`, `settings.rs`, `pair.rs`,
-  `place.rs`), `crates/mickey/src/window.rs`, `crates/mickey/src/control.rs`,
+- Code: `crates/mickey-ui/` (`main.rs`, `settings/`, `pair.rs`,
+  `place.rs`), `crates/mickey/src/window.rs`, `crates/mickey/src/control/mod.rs`,
   `crates/mickey-config/`.

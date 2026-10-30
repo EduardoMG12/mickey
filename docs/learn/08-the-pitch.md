@@ -97,12 +97,12 @@ README *Privacy*) is a selling point.
 | Question | Short answer | Backed by |
 |---|---|---|
 | Why Rust? | Parsing untrusted bytes from the network and calling OS APIs; Rust keeps the memory safety, and every `unsafe` is confined to one folder with a `// SAFETY:` comment | `crates/mickey/src/platform/`, CLAUDE.md rule 6 |
-| Why TCP for input and UDP for audio? | A lost key release is a stuck key, so input needs order and delivery; a late audio packet is useless, so audio takes a 5 ms gap instead of a stall | [`transport.rs:24`](../../crates/mickey/src/transport.rs#L24), [`audio_wire.rs:1`](../../crates/mickey/src/audio_wire.rs#L1) |
-| How is it secure? | Noise `XX` with X25519, ChaCha20-Poly1305 and BLAKE2s; trust by key; a pairing code from the handshake hash | [`secure.rs:233`](../../crates/mickey/src/secure.rs#L233), [protocol.md](../protocol.md) |
-| What if the network dies with a key held? | The target releases everything it saw pressed; the source drops the grab after 4 s of silence | [`transport.rs:218`](../../crates/mickey/src/transport.rs#L218), [`source.rs:45`](../../crates/mickey/src/source.rs#L45) |
+| Why TCP for input and UDP for audio? | A lost key release is a stuck key, so input needs order and delivery; a late audio packet is useless, so audio takes a 5 ms gap instead of a stall | [`net/transport.rs:24`](../../crates/mickey/src/net/transport.rs#L24), [`audio/wire.rs:1`](../../crates/mickey/src/audio/wire.rs#L1) |
+| How is it secure? | Noise `XX` with X25519, ChaCha20-Poly1305 and BLAKE2s; trust by key; a pairing code from the handshake hash | [`net/secure.rs:238`](../../crates/mickey/src/net/secure.rs#L238), [protocol.md](../protocol.md) |
+| What if the network dies with a key held? | The target releases everything it saw pressed; the source drops the grab after 4 s of silence | [`net/transport.rs:234`](../../crates/mickey/src/net/transport.rs#L234), [`source/mod.rs:61`](../../crates/mickey/src/source/mod.rs#L61) |
 | Why no async runtime? | Each thread blocks on exactly one thing; the main loop never waits on the network or a window. Simpler to read and debug | [architecture.md](../architecture.md), *Threads* |
-| How do you test input code in CI? | Both ends of the link in one process on localhost, with a closure as the emitter | [`transport.rs:297`](../../crates/mickey/src/transport.rs#L297) |
-| Is it fast? | Wi-Fi p50 2.1 ms, p99 22.6 ms one way; no allocation per event | PRD 0001 *Step 8*, [`secure.rs:92`](../../crates/mickey/src/secure.rs#L92) |
+| How do you test input code in CI? | Both ends of the link in one process on localhost, with a closure as the emitter | [`net/transport.rs:314`](../../crates/mickey/src/net/transport.rs#L314) |
+| Is it fast? | Wi-Fi p50 2.1 ms, p99 22.6 ms one way; no allocation per event | PRD 0001 *Step 8*, [`net/secure.rs:93`](../../crates/mickey/src/net/secure.rs#L93) |
 | How did you use AI? | As a pair programmer under rules: small PRs, review questions, only the owner merges | [CLAUDE.md](../../CLAUDE.md), [CONTRIBUTING.md](../../CONTRIBUTING.md) |
 | What's next? | Portals for any Linux desktop, packages, macOS, signed builds | README, *Roadmap* |
 

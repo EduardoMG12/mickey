@@ -10,9 +10,9 @@ happens around it (pairing windows, edges, the switcher) is in
 | Channel | Transport | Port | Opened by | Carries | Code |
 |---|---|---|---|---|---|
 | Input link | TCP, Noise | `[this_pc] listen`, 4242 by default | The source side | Keys, motion, pings, focus, edges | `transport.rs`, `secure.rs`, `protocol.rs` |
-| Data link | TCP, Noise | The input port + 1 (4243) | The source side, once its input link is up | Clipboard, group map, hotkeys, switcher cards | `transport.rs`, `secure.rs`, `clip_wire.rs`, `group.rs` |
+| Data link | TCP, Noise | The input port + 1 (4243) | The source side, once its input link is up | Clipboard, group map, hotkeys, switcher cards | `transport.rs`, `secure.rs`, `clipboard/wire.rs`, `group.rs` |
 | Discovery | UDP broadcast | 4243 | Everyone, every 3 s | Name, port and public key | `discovery.rs` |
-| Audio | UDP, sealed datagrams | The input port + 2 (4244) | A PC sending its sound to the PC that listens | 5 ms of sound each | `audio.rs`, `audio_wire.rs` |
+| Audio | UDP, sealed datagrams | The input port + 2 (4244) | A PC sending its sound to the PC that listens | 5 ms of sound each | `audio.rs`, `audio/wire.rs` |
 
 TCP 4243 and UDP 4243 do not collide: TCP and UDP ports are separate.
 
@@ -47,7 +47,7 @@ After them each side knows the other's public key, proven by the
 handshake, and both hold the same handshake hash. The whole handshake
 must finish within 5 s, however its bytes trickle in, or the peer is
 dropped; each port takes at most 32 connections at once, paired or not
-(`main.rs`), so nobody can use up its threads. The handshake carries no payload, and a
+(`target/slots.rs`), so nobody can use up its threads. The handshake carries no payload, and a
 peer that sends one is refused: who the peer is comes only from its key, which `trust.rs` looks up in
 `trusted_peers` (a peer is trusted by its key, never by its address).
 
@@ -141,17 +141,17 @@ button the source still held there.
 ## The data link
 
 The source side opens it in the background once the input link is up
-(`open_data_link` in `source.rs`): TCP to the input port + 1, then the same
+(`open_data_link` in `source/peer.rs`): TCP to the input port + 1, then the same
 Noise `XX` handshake with the same identities. The source keeps it only if
 it answers with the key of the input link just opened to that PC: whoever
 took over the address could otherwise answer only this port and get the
 clipboard and the group map. The target side (`transport::accept_data`)
 refuses any key that is not already trusted: a data link never asks to
-pair. Writes may take 10 s here (megabytes), not 1 s, and the `Mover`
+pair. Writes may take 10 s here (megabytes), not 1 s, and the `DataLinks`
 drops a link that stays silent for 10 s in the middle of an answer.
 
-All data links of a source are owned by one thread, the `Mover`
-(`clip_sync.rs`); on the target each data link has its own thread running
+All data links of a source are owned by one thread, the `DataLinks`
+(`clipboard/sync.rs`); on the target each data link has its own thread running
 `clip_sync::answer`.
 
 ### Bulk payloads
@@ -170,8 +170,8 @@ refuses a length over 64 MiB and pieces that do not add up to it.
 ### Payload kinds
 
 The first byte of each payload says what it is. Kinds below 16 are the
-clipboard's (`clip_wire.rs`); 16 and up are passed to the target's
-`group` handler in `main.rs` (`serve_clipboard`).
+clipboard's (`clipboard/wire.rs`); 16 and up are passed to the target's
+`on_payload` in `target/data.rs` (from `serve_clipboard`).
 
 | Kind | Name | Body | Sent |
 |---|---|---|---|
@@ -193,13 +193,13 @@ A group map line is `<public key, 64 hex>`, `<name>`, `<ip:port>` (or
 `:port` for the sender itself) and `<x,y>` or `-`, separated by tabs
 (`group.rs`). A switcher card is `<id>=online:<name>` or
 `<id>=offline:<name>`; id 0 is the sending PC, `i + 1` its peer `i`
-(`switcher_cards` in `source.rs`). Only `Ask` gets a reply.
+(`switcher_cards` in `source/switcher.rs`). Only `Ask` gets a reply.
 
 ## Audio datagrams
 
 Shared audio (PRD 0012) does not ride the data link: a lost or late piece
 of sound must cost 5 ms, never stall what follows, which TCP would do.
-Each datagram is 989 bytes (`audio_wire.rs`):
+Each datagram is 989 bytes (`audio/wire.rs`):
 
 | Bytes | Field |
 |---|---|
@@ -278,7 +278,7 @@ hotkey, copies something on B and comes back:
 ```mermaid
 sequenceDiagram
     participant LA as PC A main loop
-    participant MA as PC A Mover
+    participant MA as PC A DataLinks
     participant TB as PC B input link thread
     participant DB as PC B data link thread
     Note over LA: hotkey released, focus is WaitingForKeysUp B
@@ -299,7 +299,7 @@ sequenceDiagram
     MA->>MA: write it into the clipboard of A
 ```
 
-The clipboard moves on the Mover's thread, so a big image never delays the
+The clipboard moves on the DataLinks's thread, so a big image never delays the
 first keys on B; it may arrive a moment after them. Going straight from B
 to another peer C passes through this PC: B's clipboard comes to A, then
 goes from A to C.

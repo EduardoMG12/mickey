@@ -65,7 +65,7 @@ crosses, with no terminal and no restart.
 ### The code and the discovery packet as built (2026-10-22)
 
 - **The pairing code comes from the Noise handshake hash**, not from the
-  two public keys. `code_from` in `crates/mickey/src/secure.rs` takes the
+  two public keys. `code_from` in `crates/mickey/src/net/secure.rs` takes the
   first four bytes of the hash both sides hold when the `XX` handshake
   ends, as a big-endian `u32`, modulo 1 000 000, shown as `"042 917"`.
   That hash covers both static keys **and both ephemeral keys**, so it
@@ -77,7 +77,7 @@ crosses, with no terminal and no restart.
   code is only compared while both screens show it, never written down.
   The leftover bias of `% 1_000_000` on 32 bits is under 0.03 %.
 - **Discovery sends the full 32-byte public key**, not a fingerprint
-  (`crates/mickey/src/discovery.rs`, packet
+  (`crates/mickey/src/net/discovery.rs`, packet
   `"MKY1" | port: u16 | public key: 32 bytes | name length: u8 | name`).
   The table of PCs heard and the trusted peers file are both keyed by the
   full key, so a PC heard on the LAN is matched against them directly,

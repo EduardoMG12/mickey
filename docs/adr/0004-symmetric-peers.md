@@ -21,9 +21,9 @@ and the one in use should be whichever one the owner touches.
 `mickey run` plays both roles in one process
 ([architecture.md](../architecture.md#one-process-two-sides)):
 
-- the **source side** (`source::run` in `source.rs`) captures this PC's
+- the **source side** (`source::run` in `source/mod.rs`) captures this PC's
   keyboard and mouse and keeps a link to every peer;
-- the **target side** (`target` in `main.rs`) listens and turns what peers
+- the **target side** (`target` in `target/mod.rs`) listens and turns what peers
   send into real input here.
 
 The two sides share the trusted keys (`trust::Shared`), the clipboard
@@ -87,6 +87,6 @@ Bad, and known limits:
 - [PRD 0008, Windows drives Linux](../prds/0008-windows-drives-linux.md).
 - [architecture.md](../architecture.md#one-process-two-sides).
 - PRs #75 (PRD), #77 (hooks and reverse keymap), #78 (both ways).
-- Code: `crates/mickey/src/main.rs` (`run_from_config`, `target`,
-  `serve_source`), `crates/mickey/src/source.rs`, `crates/mickey/src/input.rs`,
-  `crates/mickey/src/emit.rs`, `crates/mickey/src/keymap.rs`.
+- Code: `crates/mickey/src/run.rs` (`run_from_config`),
+  `crates/mickey/src/target/` (`target`, `serve_source`), `crates/mickey/src/source/`, `crates/mickey/src/input/mod.rs`,
+  `crates/mickey/src/input/emit.rs`, `crates/mickey/src/input/keymap.rs`.

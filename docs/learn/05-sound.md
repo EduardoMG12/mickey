@@ -9,25 +9,25 @@ Read [0012-shared-audio.md](../prds/0012-shared-audio.md) *Goals* first
 (five minutes): one PC **listens**, chosen by the owner; every other PC
 sends its sound there, each at its own volume.
 
-## Who sends where (`source.rs`)
+## Who sends where (`source/sound.rs`)
 
 - *Who listens* is a shared setting (`[audio] listener`), sent to every
   peer over the data link as kind 21. It carries `since`, and a PC takes
   it only if it is newer than its own: a PC restarted with an old
   `config.toml` must not undo a newer choice (PRD 0012, *Discoveries*).
-- [`source.rs:302`](../../crates/mickey/src/source.rs#L302)
+- [`source/sound.rs:41`](../../crates/mickey/src/source/sound.rs#L41)
   `audio_target`: send only if another PC listens, it is online, and this
   PC's mode is not `Here` (the modes: `Listener` = send only, `Both` =
   send and keep, `Here` = keep only).
-- [`source.rs:931`](../../crates/mickey/src/source.rs#L931): when the
+- [`source/mod.rs:606`](../../crates/mickey/src/source/mod.rs#L606): when the
   target changes, the old `Sending` is dropped (which gives the speakers
   back) and a new one starts.
 
-## Step 1: a key for this stream (`audio.rs`, `audio_wire.rs`)
+## Step 1: a key for this stream (`audio.rs`, `audio/wire.rs`)
 
-[`audio.rs:200`](../../crates/mickey/src/audio.rs#L200) `Sending::start`
+[`audio/mod.rs:209`](../../crates/mickey/src/audio/mod.rs#L209) `Sending::start`
 picks a random stream id and ChaCha20-Poly1305 key
-([`audio_wire.rs:44`](../../crates/mickey/src/audio_wire.rs#L44)) and
+([`audio/wire.rs:44`](../../crates/mickey/src/audio/wire.rs#L44)) and
 hands them to the listener as kind 22 over the **data link**, which is
 already encrypted and authenticated. It repeats every 2 s, in case the
 data link was not open yet.
@@ -36,12 +36,12 @@ data link was not open yet.
 
 Before recording, *Send only* takes the sound off this PC's speakers:
 
-- **Linux** ([`speakers/linux.rs:144`](../../crates/mickey/src/speakers/linux.rs#L144)
+- **Linux** ([`audio/speakers/linux.rs:144`](../../crates/mickey/src/audio/speakers/linux.rs#L144)
   `divert`): load a PulseAudio *null sink* named `mickey`, noting the
   real output in its description, and make it the default. Every app now
   plays into a silent sink. (Muting would not do: on PipeWire a sink's
   monitor follows its mute.)
-- **Windows** ([`speakers/windows.rs:18`](../../crates/mickey/src/speakers/windows.rs#L18)):
+- **Windows** ([`audio/speakers/windows.rs:18`](../../crates/mickey/src/audio/speakers/windows.rs#L18)):
   WASAPI loopback ignores the output's mute (the spike measured the same
   RMS muted and unmuted), so Mickey just mutes the default output. A
   marker file is written **first**, so a Mickey that dies right after
@@ -49,22 +49,22 @@ Before recording, *Send only* takes the sound off this PC's speakers:
 
 Both return a `Diverted` guard whose `Drop` gives the sound back.
 
-## Step 3: record, seal, send (`audio.rs`, `audio_wire.rs`)
+## Step 3: record, seal, send (`audio.rs`, `audio/wire.rs`)
 
-[`audio.rs:231`](../../crates/mickey/src/audio.rs#L231) `send`, in a
+[`audio/mod.rs:240`](../../crates/mickey/src/audio/mod.rs#L240) `send`, in a
 loop:
 
 1. `Recorder::read` gives 5 ms: 240 frames of 48 kHz stereo 16-bit PCM,
    960 bytes. On Linux it records `mickey.monitor` **by name**
-   ([`sound/linux.rs:49`](../../crates/mickey/src/sound/linux.rs#L49));
+   ([`audio/sound/linux.rs:68`](../../crates/mickey/src/audio/sound/linux.rs#L68));
    asking for "the default monitor" right after switching still gave the
    speakers' one, and the two-PC test recorded silence.
-2. All zeros? Skip it ([`audio.rs:259`](../../crates/mickey/src/audio.rs#L259)):
+2. All zeros? Skip it ([`audio/mod.rs:268`](../../crates/mickey/src/audio/mod.rs#L268)):
    silence is never sent.
-3. [`audio_wire.rs:97`](../../crates/mickey/src/audio_wire.rs#L97) `seal`:
+3. [`audio/wire.rs:97`](../../crates/mickey/src/audio/wire.rs#L97) `seal`:
    `[version | stream id | counter]` in the clear but authenticated, then
    the PCM sealed with the **counter as the nonce**. 989 bytes, asserted to
-   fit under any MTU ([`:29`](../../crates/mickey/src/audio_wire.rs#L29)).
+   fit under any MTU ([`:29`](../../crates/mickey/src/audio/wire.rs#L29)).
 4. `send_to` over UDP to the listener's port 4244.
 
 **Why UDP, and why not Noise's own stream?** TCP retransmits a lost
@@ -73,19 +73,19 @@ useless packet. Noise's transport counts messages, so one lost datagram
 would break every later one. Each datagram here opens on its own: a lost
 one costs 5 ms, never a stall.
 
-## Step 4: the listener checks (`audio.rs`, `audio_wire.rs`)
+## Step 4: the listener checks (`audio.rs`, `audio/wire.rs`)
 
-- [`audio.rs:48`](../../crates/mickey/src/audio.rs#L48) `listen`: one UDP
+- [`audio/mod.rs:57`](../../crates/mickey/src/audio/mod.rs#L57) `listen`: one UDP
   socket, always ready.
-- [`audio.rs:59`](../../crates/mickey/src/audio.rs#L59) `heard_key`: only
+- [`audio/mod.rs:68`](../../crates/mickey/src/audio/mod.rs#L68) `heard_key`: only
   called from a trusted data link (`serve_clipboard`, kind 22).
-- [`audio.rs:81`](../../crates/mickey/src/audio.rs#L81) `receive` drops a
+- [`audio/mod.rs:79`](../../crates/mickey/src/audio/mod.rs#L79) `receive` drops a
   datagram unless its stream id has a key **and** it comes from the
   address that sent the key.
-- [`audio_wire.rs:138`](../../crates/mickey/src/audio_wire.rs#L138)
+- [`audio/wire.rs:138`](../../crates/mickey/src/audio/wire.rs#L138)
   `open`: checks the counter is fresh, decrypts, and only then marks it
-  seen ([`fresh`](../../crates/mickey/src/audio_wire.rs#L158),
-  [`mark`](../../crates/mickey/src/audio_wire.rs#L169)): a 64-bit mask of
+  seen ([`fresh`](../../crates/mickey/src/audio/wire.rs#L158),
+  [`mark`](../../crates/mickey/src/audio/wire.rs#L169)): a 64-bit mask of
   the last 64 counters. A replay, or anything more than 64 behind, is
   dropped. Forged counters cannot push real ones out, since only an
   authentic datagram moves the window.
@@ -95,12 +95,12 @@ one costs 5 ms, never a stall.
 The network delivers datagrams early, late or out of order; the sound card
 wants exactly one every 5 ms.
 
-- [`audio.rs:148`](../../crates/mickey/src/audio.rs#L148) `play`: one
+- [`audio/mod.rs:157`](../../crates/mickey/src/audio/mod.rs#L157) `play`: one
   thread per sending PC, its own playback stream, so the system mixer
   shows each PC with its own slider. It ends after 250 ms of nothing.
-- [`jitter.rs:53`](../../crates/mickey/src/jitter.rs#L53) `push` puts a
+- [`audio/jitter.rs:53`](../../crates/mickey/src/audio/jitter.rs#L53) `push` puts a
   datagram in slot `counter % 64`.
-- [`jitter.rs:69`](../../crates/mickey/src/jitter.rs#L69) `pull`: starts
+- [`audio/jitter.rs:69`](../../crates/mickey/src/audio/jitter.rs#L69) `pull`: starts
   once 2 are in hand (10 ms). A missing one plays as 5 ms of silence and
   the target grows by one (up to 16, 80 ms); after 2000 calm turns (10 s)
   it gives one back by skipping ahead.
@@ -128,8 +128,8 @@ cargo test -p mickey jitter
 cargo test -p mickey a_replay_is_refused_and_late_ones_still_play
 ```
 
-Read [`jitter.rs:185`](../../crates/mickey/src/jitter.rs#L185)
-(a lost datagram) and [`:223`](../../crates/mickey/src/jitter.rs#L223)
+Read [`audio/jitter.rs:185`](../../crates/mickey/src/audio/jitter.rs#L185)
+(a lost datagram) and [`:223`](../../crates/mickey/src/audio/jitter.rs#L223)
 (a calm network gives the delay back): each is a little timeline you can
 follow on paper.
 

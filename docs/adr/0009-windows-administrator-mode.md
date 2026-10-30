@@ -100,6 +100,6 @@ Bad, and known limits:
   after PRD 0010" (last two bullets).
 - [flows.md](../flows.md#pairing) (where the trust list lives).
 - Issues #172, #183; PRs #247, #248, #249; commits `d2f6229`, `53198eb`.
-- Code: `crates/mickey/src/autostart.rs`, `crates/mickey/src/trust.rs`
+- Code: `crates/mickey/src/autostart.rs`, `crates/mickey/src/net/trust.rs`
   (`dir`), `crates/mickey/src/platform/acl.rs`,
-  `crates/mickey/src/main.rs`, `packaging/windows/mickey.nsi`.
+  `crates/mickey/src/main.rs`, `crates/mickey/src/run.rs`, `packaging/windows/mickey.nsi`.

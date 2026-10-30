@@ -18,7 +18,7 @@ the glossary in [CONTEXT.md](../../CONTEXT.md).
 1. **The question.** Read it and guess the answer before going on. A wrong
    guess is the point: it shows you what you did not know yet.
 2. **The path.** Pointers look like
-   [`capture.rs:181`](../../crates/mickey/src/capture.rs#L181). Open the
+   [`input/capture.rs:180`](../../crates/mickey/src/input/capture.rs#L180). Open the
    file at that line (in VS Code: Ctrl+P, type `capture.rs:181`) and read
    a screenful around it. Line numbers match commit `5676d2c` (version
    0.2.1); if the code moved, search for the function name next to the

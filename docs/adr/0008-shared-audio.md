@@ -36,7 +36,7 @@ them, and can Linux always give the real output back?
   uncompressed, sealed per datagram ([ADR 0003](0003-tcp-links-udp-audio.md)).
   The key is a random per-stream key the sender hands to the listener over
   the data link (kind 22), resent every 2 s. (PRD 0012's *Approach* still
-  says "the peers' Noise session keys"; the code, `audio_wire.rs`, and
+  says "the peers' Noise session keys"; the code, `audio/wire.rs`, and
   protocol.md use the stream key.)
 - **An adaptive jitter buffer per sending PC** (`jitter.rs`): a ring of 64
   slots (320 ms); it starts holding 2 datagrams (10 ms), grows by one each
@@ -91,6 +91,6 @@ Bad, and known limits:
 - [protocol.md](../protocol.md#audio-datagrams), *Audio datagrams*;
   [architecture.md](../architecture.md#threads) (audio threads).
 - Issues #265 (spike), #272; PRs #263, #273-#283.
-- Code: `crates/mickey/src/audio.rs`, `audio_wire.rs`, `jitter.rs`,
+- Code: `crates/mickey/src/audio/mod.rs`, `audio/wire.rs`, `jitter.rs`,
   `speakers/linux.rs`, `speakers/windows.rs`, `sound/`, `platform/output.rs`,
   `platform/signals.rs`; `crates/mickey-config/src/lib.rs` (`Audio`).

@@ -77,7 +77,7 @@ where.
    each at its own volume ([0012-shared-audio.md](../prds/0012-shared-audio.md)).
    Chapter 5.
 5. **A way home no setting can remove.** Hold Right Shift for 3 seconds
-   ([`hotkey.rs:66`](../../crates/mickey/src/hotkey.rs#L66)). Chapter 6.
+   ([`input/hotkey.rs:66`](../../crates/mickey/src/input/hotkey.rs#L66)). Chapter 6.
 6. **Open source and readable.** GPL-3.0-or-later, no async runtime,
    hand-written OS bindings, and every `unsafe` block confined to
    `crates/mickey/src/platform/` with a `// SAFETY:` comment
