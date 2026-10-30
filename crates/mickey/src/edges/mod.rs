@@ -2,6 +2,11 @@
 //! one: its point `p` is this desktop's `p + position`. The cursor crosses
 //! where it would step off one desktop onto the other.
 
+#[cfg(target_os = "linux")]
+pub mod portal;
+#[cfg(target_os = "linux")]
+pub mod sway;
+
 use crate::monitors::Monitor;
 
 pub fn on_screen(monitors: &[Monitor], (x, y): (i32, i32)) -> bool {
@@ -234,7 +239,7 @@ mod tests {
             width: 1920,
             height: 1080,
         }];
-        let cursor = || crate::monitors::hyprland::cursor().ok();
+        let cursor = || crate::desktop::hyprland::cursor().ok();
         let watch = EdgeWatch::start(screen.to_vec(), cursor);
         let mut throttle = Throttle::new();
         let mut waits = Vec::new();

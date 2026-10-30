@@ -381,7 +381,7 @@ pub fn run(
     // GNOME and KDE: the InputCapture portal's barriers instead (PRD 0004,
     // phase 2), started once a peer is placed beside this PC.
     #[cfg(target_os = "linux")]
-    let mut edge_capture: Option<crate::edge_capture::EdgeCapture> = None;
+    let mut edge_capture: Option<crate::edges::portal::EdgeCapture> = None;
     let mut online: Vec<bool> = Vec::with_capacity(peers.len());
     // PCs that were off when the owner saved a layout: told when they
     // connect (#288).
@@ -561,7 +561,7 @@ pub fn run(
             match &edge_capture {
                 Some(capture) => capture.set(lines),
                 None if !lines.is_empty() => {
-                    edge_capture = Some(crate::edge_capture::EdgeCapture::start(
+                    edge_capture = Some(crate::edges::portal::EdgeCapture::start(
                         this_pc.clone(),
                         lines,
                     ));
@@ -993,7 +993,7 @@ pub fn run(
         #[cfg(target_os = "linux")]
         let hit = edge_capture
             .as_ref()
-            .and_then(crate::edge_capture::EdgeCapture::hit);
+            .and_then(crate::edges::portal::EdgeCapture::hit);
         #[cfg(not(target_os = "linux"))]
         let hit = None;
         let crossed = edge
