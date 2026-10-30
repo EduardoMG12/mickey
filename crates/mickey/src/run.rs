@@ -208,6 +208,11 @@ pub fn run(command: Command) -> Result<(), String> {
                     config.interface.clone()
                 });
             let config_hotkeys = config.as_ref().map(config::Config::hotkeys).transpose()?;
+            // `--to` has no config: the defaults, for one peer.
+            let next = match (&config, to) {
+                (Some(config), None) => config.hotkeys.next_or_default().to_string(),
+                _ => config::DEFAULT_NEXT.to_string(),
+            };
             let peers = match (to, config) {
                 (Some(to), _) => vec![config::Peer {
                     name: to.to_string(),
@@ -225,7 +230,6 @@ pub fn run(command: Command) -> Result<(), String> {
                     ));
                 }
             };
-            // `--to` has no config: the defaults, for one peer.
             let set = match &config_hotkeys {
                 Some(set) if to.is_none() => set.clone(),
                 // Same defaults as an empty config.toml, for these peers.
@@ -236,6 +240,7 @@ pub fn run(command: Command) -> Result<(), String> {
                         .expect("the defaults are valid")
                 },
             };
+            println!("mickey: {next} switches focus");
             // Alone, no target tells this source it is controlled.
             let (_, controlled) = std::sync::mpsc::channel();
             source::run(
@@ -300,6 +305,14 @@ fn run_from_config() -> Result<(), String> {
     if let Err(err) = speakers::clean_up() {
         eprintln!("mickey: {err}");
     }
+    // Before any thread starts: a thread started earlier would not block
+    // the stop signals, and one sent to it would end Mickey at once,
+    // leaving the sound off the speakers.
+    #[cfg(target_os = "linux")]
+    platform::signals::on_stop(|| {
+        let _ = speakers::clean_up();
+    })
+    .map_err(|err| format!("cannot wait for stop signals: {err}"))?;
     // Outside Hyprland, the RemoteDesktop portal's session (PRD 0004),
     // opened now: its one question comes at login, not mid-switch.
     #[cfg(target_os = "linux")]
@@ -314,11 +327,6 @@ fn run_from_config() -> Result<(), String> {
             }
         });
     }
-    #[cfg(target_os = "linux")]
-    platform::signals::on_stop(|| {
-        let _ = speakers::clean_up();
-    })
-    .map_err(|err| format!("cannot wait for stop signals: {err}"))?;
     // As administrator only where nobody else can change this Mickey: else
     // a program could have changed what it runs or trusts (#247).
     #[cfg(windows)]
@@ -378,6 +386,10 @@ fn run_from_config() -> Result<(), String> {
     });
     if source_wanted {
         let hotkeys = hotkey::Hotkey::from_config(&config.hotkeys()?);
+        println!(
+            "mickey: {} switches focus",
+            config.hotkeys.next_or_default()
+        );
         // A newer Mickey: checked once a day, and heard from peers (PRD 0013).
         let updates = update::Updates::default();
         update::start(updates.clone());
