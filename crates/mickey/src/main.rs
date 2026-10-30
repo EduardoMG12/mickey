@@ -351,15 +351,9 @@ fn run(command: Command) -> Result<(), String> {
             Ok(())
         }
         Command::Settings => {
-            // The window lives in mickey-ui, next to this program, so the
-            // long-running mickey never links the GUI (PRD 0003).
-            let ui = std::env::current_exe()
-                .map(|exe| exe.with_file_name(format!("mickey-ui{}", std::env::consts::EXE_SUFFIX)))
-                .map_err(|err| err.to_string())?;
-            std::process::Command::new(&ui)
-                .arg("settings")
-                .status()
-                .map_err(|err| format!("cannot start {}: {err}", ui.display()))?;
+            window::ui_command(&["settings"])
+                .and_then(|mut ui| ui.status())
+                .map_err(|err| format!("cannot start mickey-ui: {err}"))?;
             Ok(())
         }
     }
@@ -810,17 +804,13 @@ fn show_switcher_here(
         .ok()
         .flatten()
         .map_or_else(config::Interface::default, |config| config.interface);
-    let mut args = vec!["switcher".to_string()];
-    if mirror {
-        args.push("--mirror".to_string());
-    }
-    // This PC's own corner and direction; the order is the source's.
-    args.extend(["--at".to_string(), interface.switcher_position]);
-    if interface.switcher_vertical {
-        args.push("--vertical".to_string());
-    }
-    args.push(focused.to_string());
-    args.extend(lines.map(str::to_string));
+    // This PC's own corner and direction; the order of the cards is the
+    // source's.
+    let cards: Vec<String> = std::iter::once(focused)
+        .chain(lines)
+        .map(str::to_string)
+        .collect();
+    let args = window::switcher_args(&cards, &interface, mirror);
     if mirror {
         // A copy only shows: nobody waits for an answer.
         let slot = shown.clone();

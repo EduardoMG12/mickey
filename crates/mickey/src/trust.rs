@@ -298,12 +298,8 @@ fn ask(peer_key: &[u8; 32], address: SocketAddr, code: &str, who: &str) -> Resul
 /// Asks with `mickey-ui pair` (PRD 0010), installed next to this program;
 /// `None` when it cannot show a window, so the terminal is asked instead.
 fn ask_in_window(who: &str, code: &str) -> Option<bool> {
-    let ui = std::env::current_exe()
-        .ok()?
-        .with_file_name(format!("mickey-ui{}", std::env::consts::EXE_SUFFIX));
-    let status = std::process::Command::new(ui)
-        .args(["pair", who, code])
-        .status()
+    let status = crate::window::ui_command(&["pair", who, code])
+        .and_then(|mut ui| ui.status())
         .ok()?;
     match status.code() {
         Some(0) => Some(true),
