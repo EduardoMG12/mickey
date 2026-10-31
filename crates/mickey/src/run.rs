@@ -298,14 +298,30 @@ fn keep_history(setting: Option<bool>) -> bool {
     })
 }
 
+/// Gives the sound back to the speakers when `mickey run` returns, however
+/// it returns (Quit in the tray, an error). The thread sending the sound
+/// holds its `Diverted`, but the process ends with `main` and never drops
+/// it: without this, quitting left the sound on Mickey's silent sink.
+struct SoundBack;
+
+impl Drop for SoundBack {
+    fn drop(&mut self) {
+        if let Err(err) = speakers::clean_up() {
+            eprintln!("mickey: cannot give the sound back to the speakers: {err}");
+        }
+    }
+}
+
 /// `mickey run`: the roles `[this_pc]` asks for, in one process. The target
 /// waits for peers on its own thread; the source runs here.
 fn run_from_config() -> Result<(), String> {
     // The sound back on the speakers first, if a Mickey before this one
-    // ended while sending it (PRD 0012); on Linux, on a stop signal too.
+    // ended while sending it (PRD 0012); on Linux, on a stop signal too;
+    // and when this one returns.
     if let Err(err) = speakers::clean_up() {
         eprintln!("mickey: {err}");
     }
+    let _sound_back = SoundBack;
     // Before any thread starts: a thread started earlier would not block
     // the stop signals, and one sent to it would end Mickey at once,
     // leaving the sound off the speakers.
