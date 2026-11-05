@@ -38,7 +38,7 @@ mod switcher;
 
 use hotkeys::{offer_hotkeys, take_hotkeys};
 use joining::{add_peer, join, take_map};
-use layout::{arrange, edge_crossed, edges_matter, save_position};
+use layout::{Landing, arrange, edge_crossed, edges_matter, landing, save_position};
 use orders::{found_text, obey, peers_text};
 use switcher::{Switchers, switcher_cards};
 
@@ -436,6 +436,8 @@ pub fn run(
         }
         // Where to put the cursor here, coming back from a peer's edge.
         let mut home_at = None;
+        // Or onto another peer placed next to the focused one.
+        let mut hop = None;
         // A peer refused the input: bring the focus home.
         let mut refused = false;
         // A card picked in the switcher shown on the focused peer.
@@ -462,10 +464,12 @@ pub fn run(
                     }
                 }
                 News::Leave(x, y) => {
-                    if focus_machine.focus() == Focus::Remote(index)
-                        && let Some(position) = positions[index]
-                    {
-                        home_at = edges::back(&this_pc, position, (x, y));
+                    if focus_machine.focus() == Focus::Remote(index) {
+                        match landing(&this_pc, &positions, &peers, index, (x, y), &input) {
+                            Some(Landing::Home(here)) => home_at = Some(here),
+                            Some(Landing::Peer(next, there)) => hop = Some((next, there)),
+                            None => {}
+                        }
                     }
                 }
                 News::RoundTrip(micros) => peers[index].latency.add_round_trip(micros),
@@ -644,7 +648,9 @@ pub fn run(
                 }
             }
         };
-        if home_at.is_some() || refused {
+        // A hop goes home first, as a pick in the switcher does, so the
+        // focus machine moves from one peer to the other the usual way.
+        if home_at.is_some() || hop.is_some() || refused {
             focus_machine.go_home(&mut act);
         }
         // 0 is this PC; `i + 1` is peer `i`; anything else is "none".
@@ -1015,7 +1021,8 @@ pub fn run(
             .answer()
             .flatten()
             .or(hit)
-            .and_then(|off| edge_crossed(&positions, &peers, off, &input));
+            .and_then(|off| edge_crossed(&positions, &peers, off, &input))
+            .or(hop);
         if let Some((index, (x, y))) = crossed {
             focus_machine.go_to(Some(index), &online);
             if let Some(link) = &mut peers[index].link

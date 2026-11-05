@@ -133,10 +133,16 @@ pub fn onto(peer: &[Monitor], [x, y]: [i32; 2], point: (i32, i32)) -> Option<(i3
     on_screen(peer, there).then_some(there)
 }
 
+/// `point` of the peer at `[x, y]` as a point of this desktop's layout,
+/// whether or not a monitor of this PC is there: it may be another peer's.
+pub fn in_layout([x, y]: [i32; 2], point: (i32, i32)) -> (i32, i32) {
+    (point.0 + x, point.1 + y)
+}
+
 /// `point` of the peer at `position` as a point of this desktop, if one of
 /// this PC's monitors is there.
-pub fn back(home: &[Monitor], [x, y]: [i32; 2], point: (i32, i32)) -> Option<(i32, i32)> {
-    let here = (point.0 + x, point.1 + y);
+pub fn back(home: &[Monitor], position: [i32; 2], point: (i32, i32)) -> Option<(i32, i32)> {
+    let here = in_layout(position, point);
     on_screen(home, here).then_some(here)
 }
 
@@ -339,6 +345,20 @@ mod tests {
         // Pushing right from there comes back to the same place.
         let off = beyond(&LAPTOP, there, (2, 0)).unwrap();
         assert_eq!(back(&WINDOWS, LAPTOP_AT, off), Some((0, 500)));
+    }
+
+    #[test]
+    fn from_one_peer_onto_the_peer_next_to_it() {
+        // Two laptops side by side below Windows' main monitor.
+        let left_at = [0, 1080];
+        let right_at = [1536, 1080];
+        // Pushing right off the left laptop, 400 px down its edge.
+        let off = beyond(&LAPTOP, (1535, 400), (3, 0)).unwrap();
+        // Not on Windows: the cursor does not go home.
+        assert_eq!(back(&WINDOWS, left_at, off), None);
+        // On the right laptop's left edge, at the same height.
+        let here = in_layout(left_at, off);
+        assert_eq!(onto(&LAPTOP, right_at, here), Some((0, 400)));
     }
 
     #[test]

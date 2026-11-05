@@ -4,6 +4,7 @@
 use super::Peer;
 use crate::edges;
 use crate::input::Input;
+use crate::monitors::Monitor;
 use crate::net::protocol::Message;
 use mickey_config as config;
 
@@ -27,6 +28,35 @@ pub(super) fn edge_crossed(
         Some((index, there))
     })?;
     (!input.button_down()).then_some((index, there))
+}
+
+/// Where the cursor goes after it pushed off a peer's desktop.
+pub(super) enum Landing {
+    /// Onto this PC's desktop, at this point.
+    Home((i32, i32)),
+    /// Onto another placed peer, at this point of its desktop.
+    Peer(usize, (i32, i32)),
+}
+
+/// Where the cursor lands after pushing off peer `from` at `off` (a pixel
+/// just off its desktop, in its coordinates, from its `Leave`): this PC
+/// first, then any other placed peer whose desktop touches there. Without
+/// the second, two peers side by side were reached only through this PC.
+pub(super) fn landing(
+    this_pc: &[Monitor],
+    positions: &[Option<[i32; 2]>],
+    peers: &[Peer],
+    from: usize,
+    off: (i32, i32),
+    input: &Input,
+) -> Option<Landing> {
+    let position = positions[from]?;
+    if let Some(here) = edges::back(this_pc, position, off) {
+        return Some(Landing::Home(here));
+    }
+    let here = edges::in_layout(position, off);
+    let (index, there) = edge_crossed(positions, peers, here, input)?;
+    Some(Landing::Peer(index, there))
 }
 
 /// After the owner placed PCs in the settings window: takes the positions

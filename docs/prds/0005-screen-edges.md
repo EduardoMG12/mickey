@@ -122,3 +122,14 @@ The position is read only while the mouse moves.
   against a peer's edge brought the focus home with the button still held
   there. Fixed in PR #208: the target sends `Leave` only when no button is
   held.
+
+### From one peer straight onto the next (2026-11-05)
+
+- **The cursor only ever went home from a peer.** With two laptops placed
+  side by side below the Windows PC, pushing off one laptop toward the
+  other did nothing: the source checked a peer's `Leave` against its own
+  monitors only (`edges::back`). Now `layout::landing` tries this PC
+  first, then every other placed peer at the same point of the layout,
+  and the focus hops there the way a pick in the switcher does (home,
+  then the peer). The peers need no change: a target already sends
+  `Leave` off any of its edges.
