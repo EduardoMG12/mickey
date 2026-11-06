@@ -133,3 +133,9 @@ The position is read only while the mouse moves.
   and the focus hops there the way a pick in the switcher does (home,
   then the peer). The peers need no change: a target already sends
   `Leave` off any of its edges.
+- **Fast moves bounced between the two peers.** Two stale edge answers
+  undid a hop: on the source, an answer about its own parked cursor
+  arriving after the hop (now dropped unless the focus is here, and a hop
+  wins over it); on the target, the last push off an edge before the
+  cursor left, read on the first motion back (now dropped on `Enter`).
+  Slow moves never showed it: little motion falls in that window.
