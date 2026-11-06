@@ -134,3 +134,12 @@ the reverse of `keymap.rs`.
   and skips only its own moves. Skipping every move with no device
   (`hDevice` 0) would also have skipped a touchpad, a pen or remote
   desktop, which arrive that way too.
+- **Below normal priority lagged behind a game.** The logon task starts
+  Mickey at Task Scheduler's default priority (7, `BelowNormal`). With
+  Counter-Strike in front, the desktop's peers stopped answering for the
+  4 s `SILENT_LIMIT` and dropped together, and the cursor lagged.
+  `mickey run` now raises itself to `AboveNormal`, however it was
+  started. Measured from the logs, desktop to the Arch laptop over Wi-Fi:
+  one-way p99 39–50 ms before (p50 about 1.9 ms), 12 ms after (p50
+  1.3 ms), and no drops in the minutes watched. The Arch laptop's view
+  of the desktop showed p99 326 ms during the game.

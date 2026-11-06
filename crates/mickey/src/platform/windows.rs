@@ -70,6 +70,27 @@ unsafe extern "system" {
     fn GetClipboardSequenceNumber() -> u32;
 }
 
+#[link(name = "kernel32")]
+unsafe extern "system" {
+    fn GetCurrentProcess() -> *mut std::ffi::c_void;
+    fn SetPriorityClass(process: *mut std::ffi::c_void, class: u32) -> i32;
+}
+
+const ABOVE_NORMAL_PRIORITY_CLASS: u32 = 0x0000_8000;
+
+/// Runs this Mickey above normal priority. The logon task starts it below
+/// normal (Task Scheduler's default, priority 7), and with a game in front
+/// its threads waited for the CPU: peers went quiet for 4 s and dropped,
+/// and the input lagged (PRD 0008, *Discoveries*).
+pub fn raise_priority() -> io::Result<()> {
+    // SAFETY: GetCurrentProcess returns a pseudo-handle for this process,
+    // valid without closing; SetPriorityClass only reads its arguments.
+    if unsafe { SetPriorityClass(GetCurrentProcess(), ABOVE_NORMAL_PRIORITY_CLASS) } == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
+}
+
 #[link(name = "advapi32")]
 unsafe extern "system" {
     fn RegGetValueW(
