@@ -122,3 +122,24 @@ The position is read only while the mouse moves.
   against a peer's edge brought the focus home with the button still held
   there. Fixed in PR #208: the target sends `Leave` only when no button is
   held.
+
+### From one peer straight onto the next (2026-11-05)
+
+- **The cursor only ever went home from a peer.** With two laptops placed
+  side by side below the Windows PC, pushing off one laptop toward the
+  other did nothing: the source checked a peer's `Leave` against its own
+  monitors only (`edges::back`). Now `layout::landing` tries this PC
+  first, then every other placed peer at the same point of the layout,
+  and the focus hops there the way a pick in the switcher does (home,
+  then the peer). The peers need no change: a target already sends
+  `Leave` off any of its edges.
+- **Fast moves bounced between the two peers.** Two stale edge answers
+  undid a hop: on the source, an answer about its own parked cursor
+  arriving after the hop (now dropped unless the focus is here, and a hop
+  wins over it); on the target, the last push off an edge before the
+  cursor left, read on the first motion back (now dropped on `Enter`).
+  Motion summed by the 8 ms throttle but not yet checked did the same on
+  both sides, so the throttle starts again when the focus moves. An
+  answer still being worked out by the edge thread at that moment is not
+  caught; it takes a few milliseconds, against a hop that takes longer.
+  Slow moves never showed it: little motion falls in that window.
