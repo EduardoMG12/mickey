@@ -221,10 +221,12 @@ pub fn serve(
             }
             Message::Enter { x, y } => {
                 left = None;
-                // Answers about the motion before the cursor left are
-                // stale now: read on the first motion back here, the last
-                // push off an edge sent the focus straight back.
+                // Motion from before the cursor left is stale now: an
+                // answer about it, or quick pushes summed but not yet
+                // checked, read on the first motion back here, sent the
+                // focus straight back through the edge it left by.
                 let _ = edge.answer();
+                edge_check = edges::Throttle::new();
                 act(Effect::Place { x, y });
             }
             Message::Focus { here } => {
@@ -469,14 +471,22 @@ mod tests {
             link.send(&right).unwrap();
         }
         assert_eq!(link.recv().unwrap(), Message::Leave { x: 1536, y: 284 });
-        // Still pushing as the focus goes: this answer is never read here.
+        // Still pushing as the focus goes: an answer never read here, and
+        // quick pushes summed but not yet checked.
         wait();
         link.send(&right).unwrap();
+        for _ in 0..3 {
+            link.send(&right).unwrap();
+        }
         thread::sleep(std::time::Duration::from_millis(20));
         // Back on the same edge, moving away from it: no Leave.
         link.send(&Message::Enter { x: 1535, y: 284 }).unwrap();
-        wait();
-        link.send(&left).unwrap();
+        for _ in 0..2 {
+            wait();
+            link.send(&left).unwrap();
+            // The edge thread answers; the next motion reads the answer.
+            thread::sleep(std::time::Duration::from_millis(20));
+        }
         link.send(&Message::Ping { id: 9 }).unwrap();
         assert_eq!(link.recv().unwrap(), Message::Pong { id: 9 });
         drop(link);

@@ -138,4 +138,8 @@ The position is read only while the mouse moves.
   arriving after the hop (now dropped unless the focus is here, and a hop
   wins over it); on the target, the last push off an edge before the
   cursor left, read on the first motion back (now dropped on `Enter`).
+  Motion summed by the 8 ms throttle but not yet checked did the same on
+  both sides, so the throttle starts again when the focus moves. An
+  answer still being worked out by the edge thread at that moment is not
+  caught; it takes a few milliseconds, against a hop that takes longer.
   Slow moves never showed it: little motion falls in that window.

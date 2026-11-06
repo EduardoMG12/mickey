@@ -503,6 +503,10 @@ pub fn run(
             Focus::Local | Focus::WaitingForKeysUp(_) => None,
         };
         if let Some(was) = in_control.focus_is(focus) {
+            // Motion summed here before the focus moved is about the last
+            // stay: kept, it pushed the cursor back through the edge it
+            // came home by.
+            edge_check = edges::Throttle::new();
             if let Some(data_links) = &data_links {
                 data_links.moved(was, focus);
             }
