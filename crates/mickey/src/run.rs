@@ -353,6 +353,10 @@ fn run_from_config() -> Result<(), String> {
         autostart::step_down()?;
         return Err("Mickey ran as administrator from a folder other users can change, or on a Windows too old to refuse their junctions; it starts again without administrator rights".into());
     }
+    #[cfg(windows)]
+    if let Err(err) = platform::windows::raise_priority() {
+        eprintln!("mickey: cannot raise this process's priority: {err}");
+    }
     // Right after installing there is no config yet: with no peers, this PC
     // just waits to be controlled until some are added.
     let config = match config::Config::load()? {
