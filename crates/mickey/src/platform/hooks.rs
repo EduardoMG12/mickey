@@ -457,11 +457,12 @@ pub fn raw_mouse_active() -> bool {
         .is_some_and(|shared| shared.raw_mouse.load(Ordering::SeqCst))
 }
 
+/// RAWINPUTHEADER (24 bytes on 64-bit), then RAWMOUSE (24 bytes).
+const RAW_HEADER: usize = 24;
+
 /// The relative movement in a WM_INPUT message, if it is a mouse move.
 fn raw_mouse_delta(lparam: isize) -> Option<(i32, i32)> {
-    // RAWINPUTHEADER (24 bytes on 64-bit) then RAWMOUSE (24 bytes).
-    const HEADER: usize = 24;
-    let mut data = [0u8; HEADER + 24];
+    let mut data = [0u8; RAW_HEADER + 24];
     let mut size = data.len() as u32;
     // SAFETY: `data` is `size` bytes long; Windows writes at most that many
     // for the handle WM_INPUT gave us, and returns the count written.
@@ -471,19 +472,29 @@ fn raw_mouse_delta(lparam: isize) -> Option<(i32, i32)> {
             RID_INPUT,
             data.as_mut_ptr().cast(),
             &mut size,
-            HEADER as u32,
+            RAW_HEADER as u32,
         )
     };
-    if written == u32::MAX || (written as usize) < HEADER + 20 {
+    if written == u32::MAX || (written as usize) < RAW_HEADER + 20 {
         return None;
     }
-    let kind = u32::from_ne_bytes([data[0], data[1], data[2], data[3]]);
-    let flags = u16::from_ne_bytes([data[HEADER], data[HEADER + 1]]);
-    if kind != RIM_TYPEMOUSE || flags & MOUSE_MOVE_ABSOLUTE != 0 {
-        return None;
-    }
+    mouse_delta(&data)
+}
+
+/// The movement in a raw input record, if it is a real mouse moving.
+/// Injected moves come from no device (`hDevice` is 0) and are skipped, as
+/// the hooks skip injected events: on a PC another one drives, Mickey moves
+/// the cursor with SendInput, and counting that as the owner's motion made
+/// this PC cross its own edges too, against the PC driving it.
+fn mouse_delta(data: &[u8; RAW_HEADER + 24]) -> Option<(i32, i32)> {
     let at = |i: usize| i32::from_ne_bytes([data[i], data[i + 1], data[i + 2], data[i + 3]]);
-    Some((at(HEADER + 12), at(HEADER + 16)))
+    let kind = at(0) as u32;
+    let device = u64::from_ne_bytes(data[8..16].try_into().ok()?);
+    let flags = u16::from_ne_bytes([data[RAW_HEADER], data[RAW_HEADER + 1]]);
+    if kind != RIM_TYPEMOUSE || device == 0 || flags & MOUSE_MOVE_ABSOLUTE != 0 {
+        return None;
+    }
+    Some((at(RAW_HEADER + 12), at(RAW_HEADER + 16)))
 }
 
 /// `SetForegroundWindow` is refused unless the caller is in on the current
@@ -665,7 +676,7 @@ fn mouse_event(message: usize, info: &MouseInfo) -> Option<HookEvent> {
 
 #[cfg(test)]
 mod tests {
-    use super::counted_keys;
+    use super::{RAW_HEADER, counted_keys, mouse_delta};
 
     #[test]
     fn a_game_controller_never_holds_the_focus() {
@@ -678,5 +689,20 @@ mod tests {
         for key in [0x01, 0x41, 0xA1, 0xC2, 0xDB] {
             assert!(counted.contains(&key));
         }
+    }
+
+    /// A raw mouse record from `device`, moving by `dx, dy`.
+    fn record(device: u64, dx: i32, dy: i32) -> [u8; RAW_HEADER + 24] {
+        let mut data = [0u8; RAW_HEADER + 24];
+        data[8..16].copy_from_slice(&device.to_ne_bytes());
+        data[RAW_HEADER + 12..RAW_HEADER + 16].copy_from_slice(&dx.to_ne_bytes());
+        data[RAW_HEADER + 16..RAW_HEADER + 20].copy_from_slice(&dy.to_ne_bytes());
+        data
+    }
+
+    #[test]
+    fn a_real_mouse_moves_and_an_injected_move_does_not() {
+        assert_eq!(mouse_delta(&record(0x1234, 5, -3)), Some((5, -3)));
+        assert_eq!(mouse_delta(&record(0, 5, -3)), None);
     }
 }
