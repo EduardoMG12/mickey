@@ -549,11 +549,23 @@ pub fn button_down() -> bool {
         .any(|vk| unsafe { GetAsyncKeyState(vk) } < 0)
 }
 
+/// A game controller's buttons, triggers and sticks (`VK_GAMEPAD_A` to
+/// `VK_GAMEPAD_RIGHT_THUMBSTICK_LEFT`). Windows reports them as keys, but
+/// they never pass through the hooks and Mickey never sends them, so they
+/// must not hold the focus here: a trigger resting half pressed did, and
+/// neither the edges nor the hotkey could move the focus.
+const GAMEPAD: std::ops::RangeInclusive<i32> = 0xC3..=0xDA;
+
+/// The virtual keys `any_key_down` looks at: every one but the gamepad's.
+fn counted_keys() -> impl Iterator<Item = i32> {
+    (1..=0xFE).filter(|vk| !GAMEPAD.contains(vk))
+}
+
 /// Whether any key or mouse button is down right now.
 pub fn any_key_down() -> bool {
     // SAFETY: GetAsyncKeyState takes any virtual-key code and only reads
     // the global key state; the top bit is set while the key is down.
-    (1..=0xFE).any(|vk| unsafe { GetAsyncKeyState(vk) } < 0)
+    counted_keys().any(|vk| unsafe { GetAsyncKeyState(vk) } < 0)
 }
 
 fn swallowing() -> bool {
@@ -648,5 +660,23 @@ fn mouse_event(message: usize, info: &MouseInfo) -> Option<HookEvent> {
             horizontal: i32::from(high as i16),
         }),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::counted_keys;
+
+    #[test]
+    fn a_game_controller_never_holds_the_focus() {
+        let counted: Vec<i32> = counted_keys().collect();
+        // VK_GAMEPAD_LEFT_TRIGGER, the one found held; and both ends.
+        for gamepad in [0xC9, 0xC3, 0xDA] {
+            assert!(!counted.contains(&gamepad));
+        }
+        // The left mouse button, A, Right Shift and the keys around the pad.
+        for key in [0x01, 0x41, 0xA1, 0xC2, 0xDB] {
+            assert!(counted.contains(&key));
+        }
     }
 }
