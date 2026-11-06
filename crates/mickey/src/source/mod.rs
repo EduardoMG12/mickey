@@ -1017,12 +1017,17 @@ pub fn run(
             .and_then(crate::edges::portal::PortalEdges::hit);
         #[cfg(not(target_os = "linux"))]
         let hit = None;
-        let crossed = edge
-            .answer()
-            .flatten()
-            .or(hit)
-            .and_then(|off| edge_crossed(&positions, &peers, off, &input))
-            .or(hop);
+        // Taken every turn, so an answer is never kept for later.
+        let off = edge.answer().flatten().or(hit);
+        // An edge answer is about this PC's cursor, and only counts while
+        // the focus is here: one arriving after a hop, about motion meant
+        // for the peers, sent the cursor onto the wrong peer (moving fast
+        // from one laptop to the other landed on the first one's edge).
+        // So a hop wins, and a late answer is dropped.
+        let crossed = hop.or_else(|| {
+            off.filter(|_| focus_machine.focus() == Focus::Local)
+                .and_then(|off| edge_crossed(&positions, &peers, off, &input))
+        });
         if let Some((index, (x, y))) = crossed {
             focus_machine.go_to(Some(index), &online);
             if let Some(link) = &mut peers[index].link
