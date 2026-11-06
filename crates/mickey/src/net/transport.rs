@@ -221,6 +221,10 @@ pub fn serve(
             }
             Message::Enter { x, y } => {
                 left = None;
+                // Answers about the motion before the cursor left are
+                // stale now: read on the first motion back here, the last
+                // push off an edge sent the focus straight back.
+                let _ = edge.answer();
                 act(Effect::Place { x, y });
             }
             Message::Focus { here } => {
@@ -431,6 +435,52 @@ mod tests {
         let (result, placed) = target.join().unwrap();
         assert!(result.is_ok());
         assert_eq!(placed, [(1535, 284)]);
+    }
+
+    #[test]
+    fn coming_back_does_not_leave_on_an_old_push() {
+        let (listener, addr) = listener();
+        let target = thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            let mut link = accept(stream, &Identity::generate().unwrap()).unwrap();
+            let laptop = [Monitor {
+                x: 0,
+                y: 0,
+                width: 1536,
+                height: 864,
+            }];
+            // The cursor sits on the laptop's right edge.
+            serve(
+                &mut link,
+                &laptop,
+                || None,
+                |_| true,
+                || Some((1535, 284)),
+                || true,
+            )
+        });
+        let mut link = source(addr);
+        let wait = || thread::sleep(edges::EDGE_CHECK + std::time::Duration::from_millis(2));
+        let right = Message::Input(InputEvent::Motion { dx: 4, dy: 0 });
+        let left = Message::Input(InputEvent::Motion { dx: -4, dy: 0 });
+        link.send(&Message::Enter { x: 1535, y: 284 }).unwrap();
+        for _ in 0..3 {
+            wait();
+            link.send(&right).unwrap();
+        }
+        assert_eq!(link.recv().unwrap(), Message::Leave { x: 1536, y: 284 });
+        // Still pushing as the focus goes: this answer is never read here.
+        wait();
+        link.send(&right).unwrap();
+        thread::sleep(std::time::Duration::from_millis(20));
+        // Back on the same edge, moving away from it: no Leave.
+        link.send(&Message::Enter { x: 1535, y: 284 }).unwrap();
+        wait();
+        link.send(&left).unwrap();
+        link.send(&Message::Ping { id: 9 }).unwrap();
+        assert_eq!(link.recv().unwrap(), Message::Pong { id: 9 });
+        drop(link);
+        assert!(target.join().unwrap().is_ok());
     }
 
     #[test]
