@@ -8,6 +8,7 @@
 //! removes them when the process ends, however it ends.
 
 use crate::input::keymap::ScanCode;
+use crate::platform::windows::MICKEY_INPUT;
 use std::io;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::mpsc::{self, Sender};
@@ -481,17 +482,18 @@ fn raw_mouse_delta(lparam: isize) -> Option<(i32, i32)> {
     mouse_delta(&data)
 }
 
-/// The movement in a raw input record, if it is a real mouse moving.
-/// Injected moves come from no device (`hDevice` is 0) and are skipped, as
-/// the hooks skip injected events: on a PC another one drives, Mickey moves
-/// the cursor with SendInput, and counting that as the owner's motion made
-/// this PC cross its own edges too, against the PC driving it.
+/// The movement in a raw input record, unless Mickey injected it. On a PC
+/// another one drives, Mickey moves the cursor with SendInput, and raw input
+/// sees those moves too: counted as the owner's motion, they made this PC
+/// cross its own edges, against the PC driving it. Only Mickey's own moves
+/// are skipped (tagged with `MICKEY_INPUT`): a touchpad, a pen or remote
+/// desktop may also come with no device, and must still count.
 fn mouse_delta(data: &[u8; RAW_HEADER + 24]) -> Option<(i32, i32)> {
     let at = |i: usize| i32::from_ne_bytes([data[i], data[i + 1], data[i + 2], data[i + 3]]);
     let kind = at(0) as u32;
-    let device = u64::from_ne_bytes(data[8..16].try_into().ok()?);
     let flags = u16::from_ne_bytes([data[RAW_HEADER], data[RAW_HEADER + 1]]);
-    if kind != RIM_TYPEMOUSE || device == 0 || flags & MOUSE_MOVE_ABSOLUTE != 0 {
+    let extra = at(RAW_HEADER + 20) as u32;
+    if kind != RIM_TYPEMOUSE || extra == MICKEY_INPUT || flags & MOUSE_MOVE_ABSOLUTE != 0 {
         return None;
     }
     Some((at(RAW_HEADER + 12), at(RAW_HEADER + 16)))
@@ -676,7 +678,7 @@ fn mouse_event(message: usize, info: &MouseInfo) -> Option<HookEvent> {
 
 #[cfg(test)]
 mod tests {
-    use super::{RAW_HEADER, counted_keys, mouse_delta};
+    use super::{MICKEY_INPUT, RAW_HEADER, counted_keys, mouse_delta};
 
     #[test]
     fn a_game_controller_never_holds_the_focus() {
@@ -691,18 +693,22 @@ mod tests {
         }
     }
 
-    /// A raw mouse record from `device`, moving by `dx, dy`.
-    fn record(device: u64, dx: i32, dy: i32) -> [u8; RAW_HEADER + 24] {
+    /// A raw mouse record moving by `dx, dy`, with `extra` as its
+    /// `ulExtraInformation`.
+    fn record(extra: u32, dx: i32, dy: i32) -> [u8; RAW_HEADER + 24] {
         let mut data = [0u8; RAW_HEADER + 24];
-        data[8..16].copy_from_slice(&device.to_ne_bytes());
         data[RAW_HEADER + 12..RAW_HEADER + 16].copy_from_slice(&dx.to_ne_bytes());
         data[RAW_HEADER + 16..RAW_HEADER + 20].copy_from_slice(&dy.to_ne_bytes());
+        data[RAW_HEADER + 20..RAW_HEADER + 24].copy_from_slice(&extra.to_ne_bytes());
         data
     }
 
     #[test]
-    fn a_real_mouse_moves_and_an_injected_move_does_not() {
-        assert_eq!(mouse_delta(&record(0x1234, 5, -3)), Some((5, -3)));
-        assert_eq!(mouse_delta(&record(0, 5, -3)), None);
+    fn the_owners_moves_count_and_mickeys_own_do_not() {
+        // A mouse, or a touchpad that comes with no device: both count.
+        assert_eq!(mouse_delta(&record(0, 5, -3)), Some((5, -3)));
+        // Another program's tag is not Mickey's.
+        assert_eq!(mouse_delta(&record(7, 5, -3)), Some((5, -3)));
+        assert_eq!(mouse_delta(&record(MICKEY_INPUT, 5, -3)), None);
     }
 }

@@ -129,6 +129,8 @@ the reverse of `keymap.rs`.
   `SendInput` makes, so a Windows laptop driven by the desktop saw its
   own injected motion as the owner's, and once paired with a third PC
   sent the focus there itself, racing the desktop: moving fast from one
-  laptop to the other bounced between them. Raw moves with no device
-  (`hDevice` 0, how injected input arrives) are skipped, as the hooks
-  already skipped injected keys and buttons.
+  laptop to the other bounced between them. Mickey now tags what it
+  injects (`dwExtraInfo`, which raw input keeps as `ulExtraInformation`)
+  and skips only its own moves. Skipping every move with no device
+  (`hDevice` 0) would also have skipped a touchpad, a pen or remote
+  desktop, which arrive that way too.

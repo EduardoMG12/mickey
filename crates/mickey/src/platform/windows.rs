@@ -127,6 +127,11 @@ pub fn set_cursor_pos(x: i32, y: i32) -> io::Result<()> {
 
 /// Sends a scan code, so the target's keyboard layout decides the character.
 /// `extended` keys (arrows, AltGr, ...) carry the E0 prefix.
+/// Marks every event Mickey injects (`dwExtraInfo`), so this PC's own
+/// raw input can tell them from the owner's (see `hooks::mouse_delta`).
+/// Raw input keeps only 32 bits of it. "MICK" in ASCII.
+pub const MICKEY_INPUT: u32 = 0x4D49_434B;
+
 pub fn send_key(scan_code: u16, extended: bool, pressed: bool) -> io::Result<()> {
     let mut flags = KEYEVENTF_SCANCODE;
     if extended {
@@ -143,7 +148,7 @@ pub fn send_key(scan_code: u16, extended: bool, pressed: bool) -> io::Result<()>
                 scan_code,
                 flags,
                 time: 0,
-                extra_info: 0,
+                extra_info: MICKEY_INPUT as usize,
             },
         },
     }])
@@ -187,7 +192,7 @@ fn send_mouse(dx: i32, dy: i32, mouse_data: u32, flags: u32) -> io::Result<()> {
                 mouse_data,
                 flags,
                 time: 0,
-                extra_info: 0,
+                extra_info: MICKEY_INPUT as usize,
             },
         },
     }])
