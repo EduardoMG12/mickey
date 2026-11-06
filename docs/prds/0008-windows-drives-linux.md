@@ -115,3 +115,13 @@ the reverse of `keymap.rs`.
   task that the installer also creates; on Linux a systemd user service.
   It is still not a Windows service: it runs in the user's session, where
   the hooks and `SendInput` work.
+
+### Found on the owner's PCs (2026-11-05)
+
+- **A game controller held the focus home.** Before the focus leaves,
+  Mickey waits until no key is down, and it asked Windows about every
+  virtual key. An Xbox controller's left trigger, resting half pressed,
+  read as `VK_GAMEPAD_LEFT_TRIGGER` (0xC9) held for hours, so neither an
+  edge nor the hotkey could move the focus. The gamepad keys
+  (0xC3–0xDA) never pass through the hooks and Mickey never sends them:
+  they are no longer counted.
