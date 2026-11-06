@@ -125,3 +125,12 @@ the reverse of `keymap.rs`.
   edge nor the hotkey could move the focus. The gamepad keys
   (0xC3–0xDA) never pass through the hooks and Mickey never sends them:
   they are no longer counted.
+- **A driven PC crossed its own edges.** Raw input counts the moves
+  `SendInput` makes, so a Windows laptop driven by the desktop saw its
+  own injected motion as the owner's, and once paired with a third PC
+  sent the focus there itself, racing the desktop: moving fast from one
+  laptop to the other bounced between them. Mickey now tags what it
+  injects (`dwExtraInfo`, which raw input keeps as `ulExtraInformation`)
+  and skips only its own moves. Skipping every move with no device
+  (`hDevice` 0) would also have skipped a touchpad, a pen or remote
+  desktop, which arrive that way too.

@@ -8,6 +8,7 @@
 //! removes them when the process ends, however it ends.
 
 use crate::input::keymap::ScanCode;
+use crate::platform::windows::MICKEY_INPUT;
 use std::io;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::mpsc::{self, Sender};
@@ -457,11 +458,12 @@ pub fn raw_mouse_active() -> bool {
         .is_some_and(|shared| shared.raw_mouse.load(Ordering::SeqCst))
 }
 
+/// RAWINPUTHEADER (24 bytes on 64-bit), then RAWMOUSE (24 bytes).
+const RAW_HEADER: usize = 24;
+
 /// The relative movement in a WM_INPUT message, if it is a mouse move.
 fn raw_mouse_delta(lparam: isize) -> Option<(i32, i32)> {
-    // RAWINPUTHEADER (24 bytes on 64-bit) then RAWMOUSE (24 bytes).
-    const HEADER: usize = 24;
-    let mut data = [0u8; HEADER + 24];
+    let mut data = [0u8; RAW_HEADER + 24];
     let mut size = data.len() as u32;
     // SAFETY: `data` is `size` bytes long; Windows writes at most that many
     // for the handle WM_INPUT gave us, and returns the count written.
@@ -471,19 +473,30 @@ fn raw_mouse_delta(lparam: isize) -> Option<(i32, i32)> {
             RID_INPUT,
             data.as_mut_ptr().cast(),
             &mut size,
-            HEADER as u32,
+            RAW_HEADER as u32,
         )
     };
-    if written == u32::MAX || (written as usize) < HEADER + 20 {
+    if written == u32::MAX || (written as usize) < RAW_HEADER + 20 {
         return None;
     }
-    let kind = u32::from_ne_bytes([data[0], data[1], data[2], data[3]]);
-    let flags = u16::from_ne_bytes([data[HEADER], data[HEADER + 1]]);
-    if kind != RIM_TYPEMOUSE || flags & MOUSE_MOVE_ABSOLUTE != 0 {
-        return None;
-    }
+    mouse_delta(&data)
+}
+
+/// The movement in a raw input record, unless Mickey injected it. On a PC
+/// another one drives, Mickey moves the cursor with SendInput, and raw input
+/// sees those moves too: counted as the owner's motion, they made this PC
+/// cross its own edges, against the PC driving it. Only Mickey's own moves
+/// are skipped (tagged with `MICKEY_INPUT`): a touchpad, a pen or remote
+/// desktop may also come with no device, and must still count.
+fn mouse_delta(data: &[u8; RAW_HEADER + 24]) -> Option<(i32, i32)> {
     let at = |i: usize| i32::from_ne_bytes([data[i], data[i + 1], data[i + 2], data[i + 3]]);
-    Some((at(HEADER + 12), at(HEADER + 16)))
+    let kind = at(0) as u32;
+    let flags = u16::from_ne_bytes([data[RAW_HEADER], data[RAW_HEADER + 1]]);
+    let extra = at(RAW_HEADER + 20) as u32;
+    if kind != RIM_TYPEMOUSE || extra == MICKEY_INPUT || flags & MOUSE_MOVE_ABSOLUTE != 0 {
+        return None;
+    }
+    Some((at(RAW_HEADER + 12), at(RAW_HEADER + 16)))
 }
 
 /// `SetForegroundWindow` is refused unless the caller is in on the current
@@ -665,7 +678,7 @@ fn mouse_event(message: usize, info: &MouseInfo) -> Option<HookEvent> {
 
 #[cfg(test)]
 mod tests {
-    use super::counted_keys;
+    use super::{MICKEY_INPUT, RAW_HEADER, counted_keys, mouse_delta};
 
     #[test]
     fn a_game_controller_never_holds_the_focus() {
@@ -678,5 +691,24 @@ mod tests {
         for key in [0x01, 0x41, 0xA1, 0xC2, 0xDB] {
             assert!(counted.contains(&key));
         }
+    }
+
+    /// A raw mouse record moving by `dx, dy`, with `extra` as its
+    /// `ulExtraInformation`.
+    fn record(extra: u32, dx: i32, dy: i32) -> [u8; RAW_HEADER + 24] {
+        let mut data = [0u8; RAW_HEADER + 24];
+        data[RAW_HEADER + 12..RAW_HEADER + 16].copy_from_slice(&dx.to_ne_bytes());
+        data[RAW_HEADER + 16..RAW_HEADER + 20].copy_from_slice(&dy.to_ne_bytes());
+        data[RAW_HEADER + 20..RAW_HEADER + 24].copy_from_slice(&extra.to_ne_bytes());
+        data
+    }
+
+    #[test]
+    fn the_owners_moves_count_and_mickeys_own_do_not() {
+        // A mouse, or a touchpad that comes with no device: both count.
+        assert_eq!(mouse_delta(&record(0, 5, -3)), Some((5, -3)));
+        // Another program's tag is not Mickey's.
+        assert_eq!(mouse_delta(&record(7, 5, -3)), Some((5, -3)));
+        assert_eq!(mouse_delta(&record(MICKEY_INPUT, 5, -3)), None);
     }
 }
