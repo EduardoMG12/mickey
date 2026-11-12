@@ -38,6 +38,12 @@ and [PRD 0011](docs/prds/0011-shared-clipboard.md) (the clipboard).
 - A paired PC is trusted, and so are the PCs it introduces to the group.
   Pair only PCs you control.
 
+## Changing security-sensitive code
+
+The parts of the code that keep these promises, and the rules for
+changing them, are listed in
+[CONTRIBUTING.md](CONTRIBUTING.md#security-sensitive-areas).
+
 ## Supported versions
 
 Only the latest release gets security fixes.
