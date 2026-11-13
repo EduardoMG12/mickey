@@ -145,6 +145,7 @@ description which of these it touches and why that is safe.
 | Pairing and trust | `net/secure.rs` (the six-digit code), `net/trust.rs`, `net/group.rs`, `net/identity.rs` | The code comes from the handshake; trust is by key, never by IP address or hostname; a PC joins the group only after the user says yes. |
 | The way home | `input/hotkey.rs`, `source/mod.rs`, `platform/hooks.rs` | Holding Right Shift (see [SECURITY.md](SECURITY.md)) always brings the keyboard and mouse back, whatever the configuration. No setting may turn it off. |
 | Grabs and held keys | `input/`, `platform/` | See [Input safety](#input-safety). |
+| The clipboard | `crates/mickey/src/clipboard/` | It carries passwords and private files. Content goes only to and from the PC the keyboard is on, never to the log (its kind and size at most), and received files stay in Mickey's cache folder. |
 | Updates and releases | `crates/mickey/src/update.rs`, `packaging/release-key.pub`, `tools/release-key/`, `.github/workflows/` | An update installs only after both checks pass (the `SHA256SUMS` signature and the file's hash). Only the maintainer changes the release key. |
 | What gets installed | `packaging/` (udev rule, service, installer, firewall rule) | Grant no permission beyond what is needed: no world-writable device, no wider group, no firewall rule beyond Mickey's program on private networks. |
 
