@@ -7,6 +7,17 @@ Mickey is a learning project. The rules below exist so that **every line
 in `main` has been read, understood and, when it matters, debugged by a human**.
 They apply equally to code written by people and by AI assistants.
 
+## Getting started
+
+1. Build and test: see [Build from source](README.md#build-from-source) in
+   the README. `cargo test` must pass before you open a PR.
+2. Pick an issue labelled `good first issue` or `help wanted`, and say in it
+   that you are taking it, so two people do not do the same work.
+3. Something new, not in an issue yet? Open one first (bug or feature
+   template) and wait for a reply before writing code. A change the
+   maintainer did not agree to is likely to be declined, however good.
+4. Read the PRD the issue links (see [PRDs](#prds)).
+
 ## The review contract
 
 1. **Small PRs.** Aim for ≤ 300 changed lines (excluding lockfiles and
@@ -120,3 +131,49 @@ interesting → answer the challenge → approve → merge.*
   vision before starting an issue.
 - When implementation reveals something the PRD got wrong or did not know,
   add it to that PRD's **Discoveries** section in the same PR.
+
+## Security-sensitive areas
+
+A mistake in these parts lets someone read what you type, control your PC,
+or lock you out of it. A PR that touches them needs, **before any code**,
+an issue where the maintainer agreed to the change, and it says in its
+description which of these it touches and why that is safe.
+
+| Area | Where | What must hold |
+|---|---|---|
+| The encrypted link | `crates/mickey/src/net/secure.rs`, `transport.rs`, `protocol.rs` | Noise `XX` with the same parameters; nothing but the handshake is sent before it completes; every byte from a peer is untrusted. |
+| Pairing and trust | `net/secure.rs` (the six-digit code), `net/trust.rs`, `net/group.rs`, `net/identity.rs` | The code comes from the handshake; trust is by key, never by IP address or hostname; a PC joins the group only after the user says yes. |
+| The way home | `input/hotkey.rs`, `source/mod.rs`, `platform/hooks.rs` | Holding Right Shift (see [SECURITY.md](SECURITY.md)) always brings the keyboard and mouse back, whatever the configuration. No setting may turn it off. |
+| Grabs and held keys | `input/`, `platform/` | See [Input safety](#input-safety). |
+| Updates and releases | `crates/mickey/src/update.rs`, `packaging/release-key.pub`, `tools/release-key/`, `.github/workflows/` | An update installs only after both checks pass (the `SHA256SUMS` signature and the file's hash). Only the maintainer changes the release key. |
+| What gets installed | `packaging/` (udev rule, service, installer, firewall rule) | Grant no permission beyond what is needed: no world-writable device, no wider group, no firewall rule beyond Mickey's program on private networks. |
+
+Also, anywhere in the code:
+
+- No new network listener, port or outgoing connection without an issue
+  that agreed to it. Input and clipboard go only to paired PCs (see the
+  [vision PRD](docs/prds/0000-vision.md)). The only other connection is
+  the daily update check to GitHub, which the user can turn off. No
+  telemetry, no analytics, no crash reports sent anywhere.
+- No secrets in the repository: keys, tokens, real IP addresses or
+  usernames. Examples use `192.0.2.0/24`.
+- Workflows (`.github/workflows/`) pin every action to a full commit SHA,
+  never run on `pull_request_target`, and never print secrets.
+- A new dependency in these areas gets more scrutiny than elsewhere: say
+  who maintains it and whether it has had a security audit.
+
+Found a weakness instead of changing one? Report it privately, as
+[SECURITY.md](SECURITY.md) says.
+
+## AI-assisted contributions
+
+Welcome, under the same rules as any other code. You are the author: you
+must understand and be able to explain every line, and answer the review
+challenge yourself. Say in the PR description which tool you used.
+
+## License of contributions
+
+Mickey is under [GPL-3.0-or-later](LICENSE). By opening a PR you agree that
+your contribution is published under the same license. There is no CLA.
+Do not paste code from elsewhere unless its license is compatible with
+GPL-3.0-or-later; when you do, say where it came from in the PR.
