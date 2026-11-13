@@ -168,6 +168,22 @@ pub struct Clipboard {
     /// manager runs (#257).
     #[serde(default)]
     pub history: Option<bool>,
+    /// Whether the clipboard follows the keyboard to the other PCs (#437).
+    /// This PC's own choice, never shared with the group: it holds while
+    /// this PC's keyboard is the one moving.
+    #[serde(default)]
+    pub share: Share,
+}
+
+/// `[clipboard] share`: when the clipboard crosses with the keyboard.
+#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum Share {
+    /// Every time the keyboard moves to another PC.
+    #[default]
+    Auto,
+    /// Never: nothing copied here leaves, nothing there comes back.
+    Off,
 }
 
 #[derive(Debug, Deserialize, PartialEq)]
@@ -577,6 +593,17 @@ mod tests {
         assert!(
             parse("[clipboard]\nhistroy = false\n").is_err(),
             "a typo is an error"
+        );
+    }
+
+    #[test]
+    fn the_clipboard_is_shared_unless_this_pc_says_off() {
+        assert_eq!(Config::empty().clipboard.share, Share::Auto);
+        let config = parse("[clipboard]\nshare = \"off\"\n").unwrap();
+        assert_eq!(config.clipboard.share, Share::Off);
+        assert!(
+            parse("[clipboard]\nshare = \"never\"\n").is_err(),
+            "an unknown mode is an error, not auto"
         );
     }
 

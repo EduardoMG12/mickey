@@ -147,6 +147,19 @@ fn open_window(window: &str) {
     }
 }
 
+/// Forgets what other PCs' clipboards brought here: the received files
+/// and the history, which holds them among this PC's own copies and cannot
+/// tell them apart, so all of it goes.
+fn forget_received(history: Option<&history::Shared>) {
+    if let Err(err) = crate::clipboard::received::clear() {
+        eprintln!("mickey: {err}");
+    }
+    if let Some(history) = history {
+        history.lock_anyway().clear();
+    }
+    println!("mickey: clipboard sharing is off; received copies forgotten");
+}
+
 /// Uses `config`'s hotkeys at once, if they are valid.
 fn use_hotkeys(config: &config::Config, focus_machine: &mut FocusMachine, window: &mut Duration) {
     match config.hotkeys() {
@@ -286,12 +299,17 @@ pub fn run(
     }
     // The clipboard follows the keyboard (PRD 0011), over data links.
     let data_links = keeper.clone().map(DataLinks::start);
+    let loaded = config::Config::load().ok().flatten();
+    // Whether the clipboard follows this keyboard (#437); off, what other
+    // PCs sent before is not kept either.
+    let mut share = loaded
+        .as_ref()
+        .map_or_else(Default::default, |config| config.clipboard.share);
+    if share == config::Share::Off {
+        forget_received(history.as_ref());
+    }
     // Who listens, to every peer as its data link opens (PRD 0012).
-    let mut audio = config::Config::load()
-        .ok()
-        .flatten()
-        .map(|config| config.audio)
-        .unwrap_or_default();
+    let mut audio = loaded.map(|config| config.audio).unwrap_or_default();
     if let Some(data_links) = &data_links {
         data_links.share_audio(&audio.shared_lines());
     }
@@ -507,7 +525,9 @@ pub fn run(
             // stay: kept, it pushed the cursor back through the edge it
             // came home by.
             edge_check = edges::Throttle::new();
-            if let Some(data_links) = &data_links {
+            if let Some(data_links) = &data_links
+                && share == config::Share::Auto
+            {
                 data_links.moved(was, focus);
             }
             // Tell the peers the keyboard left and where it went.
@@ -888,6 +908,10 @@ pub fn run(
                     data_links.share_audio(&config.audio.shared_lines());
                 }
                 audio = config.audio.clone();
+                if share != config.clipboard.share && config.clipboard.share == config::Share::Off {
+                    forget_received(history.as_ref());
+                }
+                share = config.clipboard.share;
             }
             // Everyone gets the new places, not only the PCs moved.
             shared_with.clear();
