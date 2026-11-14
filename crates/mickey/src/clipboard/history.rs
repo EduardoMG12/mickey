@@ -119,13 +119,6 @@ impl History {
     pub fn get(&self, id: u64) -> Option<&Entry> {
         self.entries.iter().find(|entry| entry.id == id)
     }
-
-    /// Forgets every entry. Ids keep counting, so a window still showing
-    /// an old entry never picks a new one by mistake.
-    pub fn clear(&mut self) {
-        self.entries.clear();
-        self.bytes = 0;
-    }
 }
 
 /// The history shared by the recorder and whoever asks.
@@ -317,14 +310,6 @@ mod tests {
         assert_eq!(order, [text("a"), text("b")]);
         let newest = history.entries().next().unwrap().id;
         assert_eq!(history.get(newest).unwrap().content(), Some(text("a")));
-        history.clear();
-        assert_eq!(history.entries().count(), 0);
-        assert!(history.get(newest).is_none(), "the old id is gone");
-        history.add(text("c"), now);
-        assert!(
-            history.entries().all(|entry| entry.id > newest),
-            "ids go on"
-        );
     }
 
     #[test]

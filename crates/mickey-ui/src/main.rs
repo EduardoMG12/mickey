@@ -8,6 +8,7 @@
 
 mod choice;
 mod history;
+mod i18n;
 mod layout;
 mod mickey;
 mod pair;
@@ -233,6 +234,14 @@ fn cards(ui: &mut egui::Ui, choice: &Choice, width: f32) -> (Option<usize>, egui
 }
 
 fn main() -> ExitCode {
+    // The language the owner picked in config.toml, or the system's. Each
+    // window reads it through `i18n::t` and `i18n::tf` from here on.
+    let language = mickey_config::Config::load()
+        .ok()
+        .flatten()
+        .map(|config| config.interface.language.clone())
+        .unwrap_or_else(|| "auto".into());
+    i18n::apply(&language);
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.first().map(String::as_str) == Some("settings") {
         return settings_window();
@@ -269,7 +278,7 @@ fn main() -> ExitCode {
     let (size, card_width) = measure(&choice);
     let options = eframe::NativeOptions {
         viewport: crate::theme::viewport()
-            .with_title("Mickey")
+            .with_title(i18n::t("switcher.window_title"))
             .with_app_id(APP_ID)
             .with_inner_size(size)
             .with_always_on_top()
@@ -324,7 +333,11 @@ fn settings_window() -> ExitCode {
     }
     let options = eframe::NativeOptions {
         viewport: crate::theme::viewport()
-            .with_title("Mickey settings")
+            .with_title(format!(
+                "{} · {}",
+                i18n::t("app.name"),
+                i18n::t("tabs.general")
+            ))
             .with_app_id("mickey-settings")
             .with_inner_size([720.0, 500.0]),
         ..Default::default()

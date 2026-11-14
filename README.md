@@ -207,10 +207,6 @@ Win+V history)? Mickey notices when it starts and leaves the history to
 it: the clipboard is still shared, and the manager sees everything Mickey
 writes. To choose yourself, pick *Always* or *Never* in the settings
 (**General**), or set `[clipboard] history = true` or `false`.
-Rather keep the clipboard to each PC? Pick *Never* under **Share the
-clipboard** (or set `[clipboard] share = "off"`): this PC's keyboard then
-moves without it, and what other PCs sent here before (received files,
-the history) is deleted. Each PC chooses for its own keyboard.
 
 ### Shared sound
 

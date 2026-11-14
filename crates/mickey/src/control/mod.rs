@@ -138,14 +138,28 @@ impl Status {
     /// For people: `mickey status`.
     pub fn describe(&self) -> String {
         let focus = match self.focus {
-            None => "this PC",
+            None => mickey_config::i18n::t("status.this_pc"),
             Some(peer) => &self.peers[peer].0,
         };
-        let mut text = format!("focus: {focus}\n");
-        let control = if self.here { "this PC" } else { "another PC" };
-        text.push_str(&format!("in control: {control}\n"));
+        let mut text = format!(
+            "{}: {focus}\n",
+            mickey_config::i18n::t("status.focus_label")
+        );
+        let control = if self.here {
+            mickey_config::i18n::t("status.this_pc")
+        } else {
+            mickey_config::i18n::t("status.another_pc")
+        };
+        text.push_str(&format!(
+            "{}: {control}\n",
+            mickey_config::i18n::t("status.in_control_label")
+        ));
         for (name, online) in &self.peers {
-            let state = if *online { "online" } else { "offline" };
+            let state = if *online {
+                mickey_config::i18n::t("status.online")
+            } else {
+                mickey_config::i18n::t("status.offline")
+            };
             text.push_str(&format!("{name}: {state}\n"));
         }
         text
@@ -157,12 +171,15 @@ impl Status {
 /// source is running (`status` is `None`).
 pub fn waybar_line(status: Option<&Status>) -> String {
     let Some(status) = status else {
-        return r#"{"text":"Mickey off","tooltip":"mickey source is not running","class":"off"}"#
-            .to_string();
+        return format!(
+            r#"{{"text":"{}","tooltip":"{}","class":"off"}}"#,
+            mickey_config::i18n::t("waybar.off_text"),
+            mickey_config::i18n::t("waybar.off_tooltip"),
+        );
     };
     let online = status.peers.iter().filter(|(_, online)| *online).count();
     let (focus, class) = match status.focus {
-        None => ("This PC", "local"),
+        None => (mickey_config::i18n::t("waybar.this_pc"), "local"),
         Some(peer) => (status.peers[peer].0.as_str(), "remote"),
     };
     let text = format!("{focus} · {online}/{}", status.peers.len());

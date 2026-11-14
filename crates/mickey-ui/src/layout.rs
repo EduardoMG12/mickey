@@ -3,6 +3,7 @@
 //! nearest monitor of this PC, touching without overlapping, like Windows'
 //! display settings. Peers without a position wait in the top strip.
 
+use crate::i18n;
 use crate::settings::PcRow;
 use crate::snap::{shifted, snap};
 use eframe::egui::{self, Align2, Color32, FontId, Pos2, Rect, Sense, Stroke, StrokeKind, Vec2};
@@ -90,8 +91,11 @@ pub fn show(ui: &mut egui::Ui, size: Vec2, peers: &Peers, pcs: &mut [PcRow], dra
             if !beside {
                 // The number only tells monitors of the same PC apart.
                 let label = match rects.len() {
-                    1 => name.to_string(),
-                    _ => format!("{name} {}", number + 1),
+                    1 => i18n::tf("layout.monitor_label_one", &[("name", name)]),
+                    _ => i18n::tf(
+                        "layout.monitor_label_n",
+                        &[("name", name), ("n", &(number + 1).to_string())],
+                    ),
                 };
                 // As large as fits the monitor, never under 9 points.
                 let size = (rect.width() / (label.chars().count() as f32 * 0.62))
@@ -125,11 +129,16 @@ pub fn show(ui: &mut egui::Ui, size: Vec2, peers: &Peers, pcs: &mut [PcRow], dra
         .iter()
         .map(|m| Rect::from_min_max(to_screen(to_rect(m).min), to_screen(to_rect(m).max)))
         .collect();
-    draw(&home_rects, "This PC", crate::theme::palette::BRUISE, false);
+    draw(
+        &home_rects,
+        i18n::t("layout.this_pc_label"),
+        crate::theme::palette::BRUISE,
+        false,
+    );
     painter.text(
         strip.left_center() + Vec2::new(6.0, 0.0),
         Align2::LEFT_CENTER,
-        "Not placed (drag next to This PC):",
+        i18n::t("layout.not_placed"),
         FontId::proportional(12.0),
         ui.visuals().weak_text_color(),
     );
@@ -206,7 +215,7 @@ pub fn show(ui: &mut egui::Ui, size: Vec2, peers: &Peers, pcs: &mut [PcRow], dra
         let name = if online {
             pc.name.clone()
         } else {
-            format!("{} (offline)", pc.name)
+            i18n::tf("layout.offline_suffix", &[("name", &pc.name)])
         };
         draw(
             &rects,

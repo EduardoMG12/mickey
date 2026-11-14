@@ -212,3 +212,57 @@ A grab that is never released locks the owner out of their own desktop
 - **The tray menu** (*This PC*) and `mickey home`.
 - **On the target**, whatever the source still held down is released when
   the link ends, cleanly or not (`transport::serve`).
+
+## Touchpad: multitouch, scroll and taps
+
+A touchpad is not a mouse: it reports where its fingers are, not what they
+mean. While Mickey controls another PC it *grabs* the device, so libinput
+gets nothing — Mickey has to do the reading itself. `input/touchpad.rs`
+turns the raw multitouch events into the same `InputEvent`s a mouse sends:
+
+- **One finger** moves the cursor (motion, scaled from device units to
+  mouse counts per millimetre).
+- **Two fingers** scroll (wheel units, vertical and horizontal, with the
+  owner's natural-scroll direction).
+- **A tap** (a touch under 180 ms that moves under 3 mm) clicks: one
+  finger left, two right, three middle. **Tap-and-drag** holds the button
+  after a tap until the finger lifts.
+- **`disable while typing`** silences taps for a moment after a key press,
+  so palms resting on the pad do not click.
+
+The owner's choices come from the desktop's own settings where available
+(`input/touchpad_prefs.rs`: GNOME's GSettings, KDE's `kcminputrc`), else
+from `[touchpad]` in `config.toml`. Mickey reads these settings; it never
+changes them. `Auto` (the default) follows the desktop; `On` and `Off` win
+over it.
+
+The reader thread (`input/capture.rs`) waits on `poll(2)` between reports,
+so a tap's timer fires even when the touchpad sends nothing more
+(`Device::wait` in `platform/linux.rs`). Each `SYN_REPORT` calls
+`Touchpad::report`, which produces motion, scroll and tap buttons at once;
+`Touchpad::tick` is called after every `wait`, so a tap whose time is up
+lets go of its button.
+
+A touchpad the owner kept local (`forward = false` in `config.toml`) is
+not grabbed when Mickey controls another PC: it keeps moving this PC's
+own cursor while the keyboard and mouse go elsewhere.
+
+## Internationalisation
+
+Every text the owner reads lives in a TOML catalogue under
+`mickey-config/locales/`: `en.toml` (the reference, with every key) and
+`pt-PT.toml` (Português de Portugal). A language that lacks a key falls
+back to English; a typo shows up as the key itself. `i18n::t("key")`
+fetches one; `i18n::tf("key", &[("name", value)])` fills `{name}`
+placeholders.
+
+The language is set once at start-up, from `[interface] language` in
+`config.toml` (`auto` follows the system). The settings window's General
+tab changes it at once, without a restart: the next frame reads the new
+language.
+
+What is translated: every label, button, message and tooltip in the
+switcher, the settings, the pairing question, the clipboard history, the
+tray menu, and the messages `mickey` prints. What is not: command names,
+`config.toml` keys, the network protocol, and the control socket's
+`ok:`/`error:` answers (other programs parse those).

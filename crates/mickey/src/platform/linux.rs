@@ -28,7 +28,18 @@ const EVENT_SIZE: usize = 24;
 unsafe extern "C" {
     /// Shared with `uinput.rs`.
     pub(super) fn ioctl(fd: i32, request: u64, ...) -> i32;
+    fn poll(fds: *mut PollFd, count: std::ffi::c_ulong, timeout_ms: i32) -> i32;
 }
+
+/// `struct pollfd` from <poll.h>.
+#[repr(C)]
+struct PollFd {
+    fd: i32,
+    events: i16,
+    revents: i16,
+}
+
+const POLLIN: i16 = 0x001;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RawEvent {
@@ -66,6 +77,36 @@ impl Device {
             value: i32::from_ne_bytes([e[20], e[21], e[22], e[23]]),
         }));
         Ok(())
+    }
+
+    /// Waits until the device has events to read, for at most `timeout`.
+    /// `true` when `read_events` will not block (also when the device is
+    /// gone, so that it reports the error); `false` on a timeout. A touchpad
+    /// that stops sending is how a tap's timer gets to run (#18).
+    pub fn wait(&self, timeout: std::time::Duration) -> io::Result<bool> {
+        let mut fd = PollFd {
+            fd: self.file.as_raw_fd(),
+            events: POLLIN,
+            revents: 0,
+        };
+        let millis = i32::try_from(timeout.as_millis().max(1)).unwrap_or(i32::MAX);
+        // SAFETY: `fd` is one valid `struct pollfd` and the count says 1; it
+        // lives for the whole call, and the fd it names is open as long as
+        // `self`.
+        let ready = unsafe { poll(&mut fd, 1, millis) };
+        match ready {
+            0 => Ok(false),
+            1.. => Ok(true),
+            _ => {
+                let err = io::Error::last_os_error();
+                // A signal arrived: the caller looks at the clock and asks again.
+                if err.kind() == io::ErrorKind::Interrupted {
+                    Ok(false)
+                } else {
+                    Err(err)
+                }
+            }
+        }
     }
 
     pub fn any_key_down(&self) -> io::Result<bool> {

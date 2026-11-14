@@ -16,6 +16,10 @@ pub struct Interface {
     /// as the layout places them. Empty: all as the layout places them.
     #[serde(default)]
     pub switcher_order: Vec<String>,
+    /// The language of Mickey's windows and tray menu: `auto` (the
+    /// system's), or a code from `i18n::Lang::ALL` such as `en`, `pt-PT`.
+    #[serde(default = "default_language")]
+    pub language: String,
 }
 
 impl Default for Interface {
@@ -24,11 +28,23 @@ impl Default for Interface {
             switcher_position: default_switcher_position(),
             switcher_vertical: false,
             switcher_order: Vec::new(),
+            language: default_language(),
         }
     }
 }
 
 impl Interface {
+    /// The language to show: the chosen one, or the system's for `auto`
+    /// (English when that is none Mickey is translated into). `Err` for a
+    /// code Mickey does not know.
+    pub fn language(&self) -> Result<crate::i18n::Lang, String> {
+        if self.language == "auto" {
+            return Ok(crate::i18n::Lang::system());
+        }
+        crate::i18n::Lang::from_code(&self.language)
+            .ok_or_else(|| format!("unknown language {:?}", self.language))
+    }
+
     /// The switcher's cards in the order to show them: each card's name and
     /// its place in the layout (`None` if not placed). The custom order goes
     /// first; then left to right as the layout places them (top to bottom
@@ -61,4 +77,8 @@ pub const SWITCHER_POSITIONS: [&str; 5] = [
 
 fn default_switcher_position() -> String {
     "bottom-right".into()
+}
+
+fn default_language() -> String {
+    "auto".into()
 }

@@ -2,6 +2,7 @@
 //! with a bone-white belly, ink outlines and purple shadows under its
 //! eyes), rounded corners, stitch-like dashed borders, and line icons.
 
+use crate::i18n;
 use eframe::egui::{
     self, Color32, CornerRadius, FontData, FontDefinitions, FontFamily, Stroke, Vec2,
 };
@@ -215,7 +216,11 @@ pub fn keycaps(ui: &mut egui::Ui, text: &str, double: bool, faded: bool) {
             .filter(|key| !key.is_empty())
             .collect();
         if keys.is_empty() {
-            ui.label(egui::RichText::new("off").color(palette::FUR).italics());
+            ui.label(
+                egui::RichText::new(i18n::t("hotkeys.off"))
+                    .color(palette::FUR)
+                    .italics(),
+            );
             return;
         }
         for (i, key) in keys.iter().enumerate() {

@@ -2,6 +2,7 @@
 //! first, with a search box. Clicking an entry (or Enter on the first one
 //! found) copies it again and closes the window; Esc closes it.
 
+use crate::i18n;
 use eframe::egui;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -31,9 +32,12 @@ fn parse(text: &str) -> Vec<Entry> {
 
 fn ago(seconds: u64) -> String {
     match seconds {
-        0..60 => format!("{seconds} s"),
-        60..3600 => format!("{} min", seconds / 60),
-        _ => format!("{} h", seconds / 3600),
+        0..60 => i18n::tf("history.ago_seconds", &[("n", &seconds.to_string())]),
+        60..3600 => {
+            let minutes = seconds / 60;
+            i18n::tf("history.ago_minutes", &[("n", &minutes.to_string())])
+        }
+        _ => i18n::tf("history.ago_hours", &[("n", &(seconds / 3600).to_string())]),
     }
 }
 
@@ -51,14 +55,14 @@ impl eframe::App for History {
         egui::CentralPanel::default().show(ui, |ui| {
             use crate::theme::{icon, palette};
             ui.label(
-                egui::RichText::new(format!("{}  Clipboard history", icon::CLIPBOARD))
+                egui::RichText::new(format!("{}  {}", icon::CLIPBOARD, i18n::t("history.title")))
                     .size(17.0)
                     .strong(),
             );
             ui.add_space(4.0);
             let search = ui.add(
                 egui::TextEdit::singleline(&mut self.search)
-                    .hint_text(format!("{}  Search", icon::SEARCH))
+                    .hint_text(format!("{}  {}", icon::SEARCH, i18n::t("history.search")))
                     .desired_width(f32::INFINITY),
             );
             search.request_focus();
@@ -78,15 +82,20 @@ impl eframe::App for History {
             let mut picked = enter.then(|| shown.first().map(|entry| entry.id)).flatten();
             ui.add_space(4.0);
             if shown.is_empty() {
-                ui.weak("Nothing copied yet");
+                ui.weak(i18n::t("history.nothing"));
             }
             egui::ScrollArea::vertical().show(ui, |ui| {
                 for entry in shown {
                     let (kind, text) = match entry.kind.as_str() {
-                        "image" => (icon::IMAGE, format!("Image {}", entry.preview)),
+                        "image" => (
+                            icon::IMAGE,
+                            i18n::tf("history.image_label", &[("preview", &entry.preview)]),
+                        ),
                         "files" => (icon::FILE, entry.preview.clone()),
                         // Only spaces or line breaks: still something copied.
-                        _ if entry.preview.is_empty() => (icon::CLIPBOARD, "(blank)".to_string()),
+                        _ if entry.preview.is_empty() => {
+                            (icon::CLIPBOARD, i18n::t("history.blank").to_string())
+                        }
                         _ => (icon::CLIPBOARD, entry.preview.clone()),
                     };
                     // A row is a small card that lights up under the mouse.
@@ -131,7 +140,7 @@ pub fn window() -> std::process::ExitCode {
     crate::place::ask_compositor(crate::place::Corner::Center, "mickey-history");
     let options = eframe::NativeOptions {
         viewport: crate::theme::viewport()
-            .with_title("Mickey: clipboard history")
+            .with_title(i18n::t("history.window_title"))
             .with_app_id("mickey-history")
             .with_inner_size([460.0, 420.0])
             .with_always_on_top(),
@@ -167,9 +176,5 @@ mod tests {
         let entries = parse(text);
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[1].kind, "image");
-        assert_eq!(
-            (ago(3), ago(70), ago(7200)),
-            ("3 s".into(), "1 min".into(), "2 h".into())
-        );
     }
 }

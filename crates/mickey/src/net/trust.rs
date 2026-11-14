@@ -40,8 +40,9 @@ pub fn dir() -> Result<PathBuf, String> {
 /// Mickey does (`forget` through the control channel).
 pub fn can_change() -> bool {
     #[cfg(windows)]
-    return admin_state_dir().is_none() || crate::platform::acl::elevated();
-    #[cfg(not(windows))]
+    if admin_state_dir().is_some() && !crate::platform::acl::elevated() {
+        return false;
+    }
     true
 }
 

@@ -26,6 +26,19 @@ mod update;
 mod window;
 
 fn main() {
+    // The language the owner picked in config.toml, or the system's, set
+    // once before anything else: every message this program writes goes
+    // through `i18n::t` and `i18n::tf` from here on.
+    let language = mickey_config::Config::load()
+        .ok()
+        .flatten()
+        .map(|config| config.interface.language.clone())
+        .unwrap_or_else(|| "auto".into());
+    if language == "auto" {
+        mickey_config::i18n::set_language(mickey_config::i18n::Lang::system());
+    } else if let Some(lang) = mickey_config::i18n::Lang::from_code(&language) {
+        mickey_config::i18n::set_language(lang);
+    }
     // Before anything is written: as administrator, never through a
     // junction a user made (see `refuse_user_junctions`).
     #[cfg(windows)]

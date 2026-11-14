@@ -97,21 +97,6 @@ fn save_in(base: &Path, files: Vec<(String, Vec<u8>)>) -> Result<Vec<PathBuf>, S
     Ok(paths)
 }
 
-/// Removes every file received from another PC (`[clipboard] share =
-/// "off"`, #437). Nothing received yet is not an error.
-pub fn clear() -> Result<(), String> {
-    clear_in(&base()?)
-}
-
-fn clear_in(base: &Path) -> Result<(), String> {
-    match std::fs::remove_dir_all(base) {
-        Err(err) if err.kind() != std::io::ErrorKind::NotFound => {
-            Err(format!("cannot remove {}: {err}", base.display()))
-        }
-        _ => Ok(()),
-    }
-}
-
 /// Removes all but the newest `KEEP` transfer folders.
 fn prune(base: &Path) {
     let Ok(read) = std::fs::read_dir(base) else {
@@ -176,8 +161,6 @@ mod tests {
             save_in(&base, vec![("b".into(), vec![])]).unwrap();
         }
         assert_eq!(std::fs::read_dir(&base).unwrap().count(), KEEP);
-        clear_in(&base).unwrap();
-        assert!(!base.exists(), "every received file is gone");
-        clear_in(&base).expect("clearing nothing is fine");
+        std::fs::remove_dir_all(&base).unwrap();
     }
 }

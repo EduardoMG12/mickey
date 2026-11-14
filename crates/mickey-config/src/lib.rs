@@ -14,6 +14,7 @@ pub mod audio;
 pub mod chord;
 mod edit;
 mod hotkeys;
+pub mod i18n;
 mod interface;
 pub mod peers;
 pub mod version;
@@ -34,6 +35,10 @@ const FILE_NAME: &str = "config.toml";
 /// What the M0 touchpad used, in mouse counts per millimetre.
 const DEFAULT_TOUCHPAD_SPEED: i32 = 16;
 const TOUCHPAD_SPEEDS: std::ops::RangeInclusive<i32> = 1..=200;
+/// Wheel units (120 per notch) per millimetre of two-finger travel: one
+/// notch every 5 mm, close to what libinput feels like.
+const DEFAULT_SCROLL_SPEED: i32 = 24;
+const SCROLL_SPEEDS: std::ops::RangeInclusive<i32> = 1..=400;
 
 pub const EXAMPLE: &str = r#"[[peer]]
 name = "Desktop"
@@ -41,9 +46,14 @@ address = "192.0.2.10:4242"
 
 [touchpad]
 speed = 16
+scroll_speed = 24          # two-finger scroll: wheel units (120 = one notch) per mm
+forward = true             # false: this PC's touchpad stays local
+tap = "auto"               # tap to click: auto (ask the desktop), on or off
+natural_scroll = "auto"    # auto (ask the desktop), on or off
 
 [interface]
 switcher_position = "bottom-right"   # or center, top-left, top-right, bottom-left
+language = "auto"                    # or en, pt-PT
 
 [this_pc]
 controls_others = true     # send this PC's keyboard and mouse to the peers
@@ -168,22 +178,6 @@ pub struct Clipboard {
     /// manager runs (#257).
     #[serde(default)]
     pub history: Option<bool>,
-    /// Whether the clipboard follows the keyboard to the other PCs (#437).
-    /// This PC's own choice, never shared with the group: it holds while
-    /// this PC's keyboard is the one moving.
-    #[serde(default)]
-    pub share: Share,
-}
-
-/// `[clipboard] share`: when the clipboard crosses with the keyboard.
-#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum Share {
-    /// Every time the keyboard moves to another PC.
-    #[default]
-    Auto,
-    /// Never: nothing copied here leaves, nothing there comes back.
-    Off,
 }
 
 #[derive(Debug, Deserialize, PartialEq)]
@@ -208,23 +202,80 @@ pub struct Peer {
     pub key: Option<String>,
 }
 
-#[derive(Debug, Deserialize, PartialEq)]
+/// A setting that follows the desktop's own choice unless the owner says
+/// otherwise. Mickey reads the desktop's setting; it never changes it.
+#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum Auto {
+    #[default]
+    Auto,
+    On,
+    Off,
+}
+
+impl Auto {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Auto::Auto => "auto",
+            Auto::On => "on",
+            Auto::Off => "off",
+        }
+    }
+
+    /// The value to use: the owner's when set, else what the desktop
+    /// reported (`detected`), else `None` (nobody knows).
+    pub fn resolve(self, detected: Option<bool>) -> Option<bool> {
+        match self {
+            Auto::On => Some(true),
+            Auto::Off => Some(false),
+            Auto::Auto => detected,
+        }
+    }
+}
+
+/// `[touchpad]`: how this PC's touchpad is read when it controls others.
+#[derive(Debug, Clone, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Touchpad {
+    /// One-finger motion, in mouse counts per millimetre.
     #[serde(default = "default_speed")]
     pub speed: i32,
+    /// Two-finger scroll, in wheel units (120 per notch) per millimetre.
+    #[serde(default = "default_scroll_speed")]
+    pub scroll_speed: i32,
+    /// Send the touchpad to the PC in use. `false` keeps it local: it is
+    /// neither read nor taken from this desktop, so it keeps moving this
+    /// PC's own cursor while the keyboard and mouse control another PC.
+    #[serde(default = "yes")]
+    pub forward: bool,
+    /// Tap to click. `auto` follows the desktop's setting; when that
+    /// cannot be read, taps are off.
+    #[serde(default)]
+    pub tap: Auto,
+    /// Natural scrolling. `auto` follows the desktop's setting; when that
+    /// cannot be read, the traditional direction is used.
+    #[serde(default)]
+    pub natural_scroll: Auto,
 }
 
 impl Default for Touchpad {
     fn default() -> Touchpad {
         Touchpad {
             speed: DEFAULT_TOUCHPAD_SPEED,
+            scroll_speed: DEFAULT_SCROLL_SPEED,
+            forward: true,
+            tap: Auto::Auto,
+            natural_scroll: Auto::Auto,
         }
     }
 }
 
 fn default_speed() -> i32 {
     DEFAULT_TOUCHPAD_SPEED
+}
+
+fn default_scroll_speed() -> i32 {
+    DEFAULT_SCROLL_SPEED
 }
 
 impl Config {
@@ -306,6 +357,21 @@ pub fn parse(text: &str) -> Result<Config, String> {
             config.touchpad.speed,
             TOUCHPAD_SPEEDS.start(),
             TOUCHPAD_SPEEDS.end()
+        ));
+    }
+    if !SCROLL_SPEEDS.contains(&config.touchpad.scroll_speed) {
+        return Err(format!(
+            "touchpad scroll_speed {} is not between {} and {}",
+            config.touchpad.scroll_speed,
+            SCROLL_SPEEDS.start(),
+            SCROLL_SPEEDS.end()
+        ));
+    }
+    if config.interface.language().is_err() {
+        return Err(format!(
+            "language {:?} is not one of auto, {}",
+            config.interface.language,
+            i18n::Lang::ALL.map(i18n::Lang::code).join(", ")
         ));
     }
     Ok(config)
@@ -593,17 +659,6 @@ mod tests {
         assert!(
             parse("[clipboard]\nhistroy = false\n").is_err(),
             "a typo is an error"
-        );
-    }
-
-    #[test]
-    fn the_clipboard_is_shared_unless_this_pc_says_off() {
-        assert_eq!(Config::empty().clipboard.share, Share::Auto);
-        let config = parse("[clipboard]\nshare = \"off\"\n").unwrap();
-        assert_eq!(config.clipboard.share, Share::Off);
-        assert!(
-            parse("[clipboard]\nshare = \"never\"\n").is_err(),
-            "an unknown mode is an error, not auto"
         );
     }
 
