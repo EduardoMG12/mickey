@@ -27,7 +27,7 @@ png = "0.18"
 # crypto is how such checks go wrong; curve25519-dalek, which Ed25519
 # builds on, is already in the tree through snow.
 ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
-sha2 = { version = "0.10", default-features = false }
+sha2 = { version = "0.11", default-features = false }
 
 # The MCP server (PRD 0014) reads and writes JSON-RPC messages. A hand-
 # written JSON parser for untrusted input is where bugs hide; serde is
@@ -41,14 +41,14 @@ serde_json = "1"
 # brings Microsoft's `windows` crate; that one only for the output's mute.
 # Their COM interfaces by hand would be long and easy to get wrong.
 [target.'cfg(windows)'.dependencies]
-wasapi = "0.19"
-windows = { version = "0.61", features = ["Win32_Media_Audio", "Win32_Media_Audio_Endpoints", "Win32_System_Com"] }
+wasapi = "0.27"
+windows = { version = "0.62", features = ["Win32_Media_Audio", "Win32_Media_Audio_Endpoints", "Win32_System_Com"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 # Desktops other than Hyprland (PRD 0004): the RemoteDesktop portal
 # (ashpd) and libei (reis, pure Rust). Both over async-io, already in the
 # tree through ksni, so no tokio; ashpd's zbus 5 is ksni's too.
-ashpd = { version = "0.13", default-features = false, features = ["async-io", "remote_desktop", "screencast", "input_capture"] }
+ashpd = { version = "0.14", default-features = false, features = ["async-io", "remote_desktop", "screencast", "input_capture"] }
 reis = { version = "0.7", features = ["async-io"] }
 async-io = "2"
 futures-util = { version = "0.3", default-features = false }
@@ -61,7 +61,7 @@ wayland-protocols-wlr = { version = "0.3", features = ["client"] }
 # X11 sessions (#178): the monitors (RandR), the pointer and warping it,
 # from the X server. Already in the tree through arboard; pure Rust, so
 # no libX11 or libxcb at run time.
-x11rb = { version = "0.13", default-features = false, features = ["randr"] }
+x11rb = { version = "0.14", default-features = false, features = ["randr"] }
 # Shared audio on Linux (PRD 0012): the sound server's own client library,
 # libpulse, which PulseAudio and PipeWire both answer and every desktop
 # has. Talking its protocol by hand would be far longer.
