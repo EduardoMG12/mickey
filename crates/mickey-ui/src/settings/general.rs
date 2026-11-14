@@ -1,10 +1,10 @@
-//! The General tab: the switcher's corner and order, the clipboard
-//! history, updates.
+//! The General tab: the switcher's corner and order, clipboard sharing
+//! and history, updates.
 
 use super::{Form, Settings};
 use eframe::egui;
 use mickey_config as config;
-use mickey_config::SWITCHER_POSITIONS;
+use mickey_config::{SWITCHER_POSITIONS, Share};
 
 /// The switcher's order: every PC with buttons to move it. Moving one saves
 /// the whole list as the custom order; "Like the layout" empties it.
@@ -119,6 +119,18 @@ impl Settings {
         ui.checkbox(&mut form.vertical, "Show the PCs in a column");
         ui.add_space(8.0);
         switcher_order(ui, form);
+        ui.add_space(12.0);
+        ui.label("Share the clipboard");
+        for (choice, text) in [
+            (
+                Share::Auto,
+                "Automatically, when the keyboard moves to another PC",
+            ),
+            (Share::Off, "Never"),
+        ] {
+            ui.radio_value(&mut form.share, choice, text);
+        }
+        ui.weak("Only for this PC's keyboard; each PC chooses its own. Never also deletes what other PCs sent here: the received files and the history. Applies at once.");
         ui.add_space(12.0);
         ui.label("History of copies on this PC");
         for (choice, text) in [

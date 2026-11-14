@@ -1,7 +1,7 @@
 //! The settings form: config.toml's values as the window edits them, and
 //! the config.toml text they make when saved.
 
-use mickey_config::{self as config, Audio, Config, SoundMode};
+use mickey_config::{self as config, Audio, Config, Share, SoundMode};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PcRow {
@@ -40,6 +40,8 @@ pub struct Form {
     /// Keep a clipboard history here: always, never (another manager keeps
     /// it), or `None`, only when no other manager runs.
     pub history: Option<bool>,
+    /// Whether the clipboard follows this PC's keyboard (#437).
+    pub share: Share,
     /// Ask GitHub once a day for a newer Mickey (PRD 0013).
     pub check_updates: bool,
     /// Who listens (PRD 0012): a PC's public key; `None`, nobody.
@@ -93,6 +95,7 @@ impl Form {
             position: config.interface.switcher_position.clone(),
             vertical: config.interface.switcher_vertical,
             history: config.clipboard.history,
+            share: config.clipboard.share,
             check_updates: config.updates.check,
             listener: config.audio.listener.clone(),
             mode: config.audio.mode,
@@ -203,14 +206,18 @@ impl Form {
             out += "\n[audio]\n";
             out += &audio.to_lines();
         }
+        if self.history.is_some() || self.share != Share::Auto {
+            out += "\n[clipboard]\n";
+        }
         match self.history {
             None => {}
-            Some(true) => {
-                out += "\n[clipboard]\nhistory = true    # even with another clipboard manager\n"
-            }
+            Some(true) => out += "history = true    # even with another clipboard manager\n",
             Some(false) => {
-                out += "\n[clipboard]\nhistory = false    # another clipboard manager keeps the history\n"
+                out += "history = false    # another clipboard manager keeps the history\n"
             }
+        }
+        if self.share == Share::Off {
+            out += "share = \"off\"    # the clipboard never follows this PC's keyboard\n";
         }
         if !self.check_updates {
             out += "\n[updates]\ncheck = false    # never ask GitHub for a newer Mickey\n";
@@ -228,7 +235,7 @@ mod tests {
     #[test]
     fn what_the_form_writes_parses_back_to_the_same_form() {
         let original = config::parse(
-            "[[peer]]\nname = \"Windows \\\"main\\\"\"\naddress = \"192.0.2.10:4242\"\nhotkey = \"AltGr+RightShift+1\"\nposition = [-1920, 0]\nkey = \"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"\n\n[hotkeys]\nhome = \"AltGr+RightShift+H\"\n\n[interface]\nswitcher_position = \"top-left\"\n\n[clipboard]\nhistory = false\n\n[updates]\ncheck = false\n\n[audio]\nlistener = \"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"\nmode = \"both\"\n\n[this_pc]\ncontrolled = false\nshare_hotkeys = false\nname = \"Desk\"\n",
+            "[[peer]]\nname = \"Windows \\\"main\\\"\"\naddress = \"192.0.2.10:4242\"\nhotkey = \"AltGr+RightShift+1\"\nposition = [-1920, 0]\nkey = \"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"\n\n[hotkeys]\nhome = \"AltGr+RightShift+H\"\n\n[interface]\nswitcher_position = \"top-left\"\n\n[clipboard]\nhistory = false\nshare = \"off\"\n\n[updates]\ncheck = false\n\n[audio]\nlistener = \"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"\nmode = \"both\"\n\n[this_pc]\ncontrolled = false\nshare_hotkeys = false\nname = \"Desk\"\n",
         )
         .unwrap();
         let form = Form::from_config(&original);
@@ -237,6 +244,11 @@ mod tests {
         assert!(
             reread.clipboard.history == Some(false),
             "the history setting survives a save"
+        );
+        assert_eq!(
+            reread.clipboard.share,
+            Share::Off,
+            "turning sharing off survives a save"
         );
         assert!(
             !reread.updates.check,

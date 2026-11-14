@@ -60,6 +60,8 @@ recent copies.
 - [x] History window (this PC's copies, including what arrived from others).
 - [x] Files (up to 60 MB per crossing, no folders yet).
 - [x] Option to leave the history to an existing manager (`[clipboard] history = false`, #134).
+- [x] Option to turn sharing off (`[clipboard] share = "off"`, #437).
+- [ ] Option to share only on a hotkey (#437, a later PR).
 
 ## Non-Goals
 
@@ -97,3 +99,10 @@ recent copies.
   General tab, starts no history recorder; the clipboard is still shared,
   and what Mickey writes reaches cliphist, CopyQ or Klipper, which watch
   the clipboard themselves. `mickey history` then says the history is off.
+- **Turning sharing off** (2026-11-13, #437): `[clipboard] share = "off"`
+  is each PC's own setting, never sent to the group. The PC whose keyboard
+  moves decides every crossing (it reads one side and writes the other),
+  so its setting alone is checked there; a PC set to off can still receive
+  from another PC's keyboard. Turning it off deletes the received-files
+  folder and the whole in-memory history, which cannot tell received
+  copies from local ones. It applies when the settings window saves.

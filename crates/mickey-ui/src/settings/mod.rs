@@ -213,10 +213,11 @@ impl Settings {
                 // Our own write is not news.
                 self.config_changed = config_time();
                 // The layout is used at once and the other PCs follow it;
-                // other settings still wait for a restart.
+                // clipboard sharing is used at once here; other settings
+                // still wait for a restart.
                 match crate::mickey::ask(&["arranged"]) {
                     Ok(_) => {
-                        "Saved. Layout and hotkeys apply on every PC now; the rest after a restart."
+                        "Saved. Layout and hotkeys apply on every PC now, clipboard sharing on this one; the rest after a restart."
                             .into()
                     }
                     Err(_) => "Saved. Restart Mickey for it to take effect.".into(),
