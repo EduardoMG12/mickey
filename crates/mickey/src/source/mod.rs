@@ -147,19 +147,6 @@ fn open_window(window: &str) {
     }
 }
 
-/// Forgets what other PCs' clipboards brought here: the received files
-/// and the history, which holds them among this PC's own copies and cannot
-/// tell them apart, so all of it goes.
-fn forget_received(history: Option<&history::Shared>) {
-    if let Err(err) = crate::clipboard::received::clear() {
-        eprintln!("mickey: {err}");
-    }
-    if let Some(history) = history {
-        history.lock_anyway().clear();
-    }
-    println!("mickey: clipboard sharing is off; received copies forgotten");
-}
-
 /// Uses `config`'s hotkeys at once, if they are valid.
 fn use_hotkeys(config: &config::Config, focus_machine: &mut FocusMachine, window: &mut Duration) {
     match config.hotkeys() {
@@ -241,7 +228,7 @@ pub struct Services {
 pub fn run(
     configured: Vec<config::Peer>,
     hotkeys: Hotkey,
-    touchpad_speed: i32,
+    touchpad_config: config::Touchpad,
     mut interface: config::Interface,
     services: Services,
 ) -> Result<(), String> {
@@ -259,7 +246,7 @@ pub fn run(
     if control::source_running() {
         return Err("another mickey source is already running".into());
     }
-    let input = Input::open()?;
+    let input = Input::open(&touchpad_config)?;
     let data_dir = identity::data_dir()?;
     let identity = Identity::load_or_create(&data_dir)?;
     let start = Instant::now();
@@ -299,17 +286,12 @@ pub fn run(
     }
     // The clipboard follows the keyboard (PRD 0011), over data links.
     let data_links = keeper.clone().map(DataLinks::start);
-    let loaded = config::Config::load().ok().flatten();
-    // Whether the clipboard follows this keyboard (#437); off, what other
-    // PCs sent before is not kept either.
-    let mut share = loaded
-        .as_ref()
-        .map_or_else(Default::default, |config| config.clipboard.share);
-    if share == config::Share::Off {
-        forget_received(history.as_ref());
-    }
     // Who listens, to every peer as its data link opens (PRD 0012).
-    let mut audio = loaded.map(|config| config.audio).unwrap_or_default();
+    let mut audio = config::Config::load()
+        .ok()
+        .flatten()
+        .map(|config| config.audio)
+        .unwrap_or_default();
     if let Some(data_links) = &data_links {
         data_links.share_audio(&audio.shared_lines());
     }
@@ -319,7 +301,7 @@ pub fn run(
     // One channel wakes the loop for input, a switcher pick or an order
     // from the control socket, so each is handled the moment it happens.
     let (wake, wakes) = mpsc::channel();
-    input.start(wake.clone(), touchpad_speed)?;
+    input.start(wake.clone(), &touchpad_config)?;
     let mut switchers = Switchers::default();
     // Local motion between two questions about where the cursor is.
     let mut edge_check = edges::Throttle::new();
@@ -440,7 +422,10 @@ pub fn run(
             peers[index].new_key = false;
             peers[index].link = Some(link);
             peers[index].heard = Instant::now();
-            println!("mickey: {} is online", peers[index].name);
+            println!(
+                "{}",
+                mickey_config::i18n::tf("messages.peer_online", &[("name", &peers[index].name)])
+            );
             // A layout saved while it was off reaches it now (#288).
             if arrange_unsent.remove(&peers[index].name)
                 && let (Some([x, y]), Some(link)) = (positions[index], &mut peers[index].link)
@@ -474,9 +459,12 @@ pub fn run(
                 }
                 News::Refused => {
                     if focus_machine.focus() == Focus::Remote(index) {
-                        println!(
-                            "mickey: {} refused the keyboard and mouse (a window running as administrator in front?); they are back here",
-                            peers[index].name
+                        eprintln!(
+                            "{}",
+                            mickey_config::i18n::tf(
+                                "messages.peer_refused",
+                                &[("name", &peers[index].name)]
+                            )
                         );
                         refused = true;
                     }
@@ -511,7 +499,10 @@ pub fn run(
         {
             grabbed = Some(input.grab()?);
             focus_machine.grabbed();
-            println!("mickey: focus is on {}", peers[index].name);
+            println!(
+                "{}",
+                mickey_config::i18n::tf("messages.focus_on", &[("name", &peers[index].name)])
+            );
         }
 
         // Publish only when the focus or a peer's state changed; comparing
@@ -525,9 +516,7 @@ pub fn run(
             // stay: kept, it pushed the cursor back through the edge it
             // came home by.
             edge_check = edges::Throttle::new();
-            if let Some(data_links) = &data_links
-                && share == config::Share::Auto
-            {
+            if let Some(data_links) = &data_links {
                 data_links.moved(was, focus);
             }
             // Tell the peers the keyboard left and where it went.
@@ -612,7 +601,10 @@ pub fn run(
                     continue;
                 };
                 if peer.heard.elapsed() > SILENT_LIMIT {
-                    println!("mickey: {} stopped answering", peer.name);
+                    println!(
+                        "{}",
+                        mickey_config::i18n::tf("messages.peer_offline", &[("name", &peer.name)])
+                    );
                     lost.push(index);
                 } else if link.send(&ping).is_err() {
                     lost.push(index);
@@ -776,7 +768,13 @@ pub fn run(
                 if let Some(version) = updates.as_ref().and_then(update::Updates::waiting) {
                     crate::threads::spawn("update", move || {
                         if let Err(err) = update::apply(&version) {
-                            eprintln!("mickey: the update failed: {err}");
+                            eprintln!(
+                                "{}",
+                                mickey_config::i18n::tf(
+                                    "messages.update_failed",
+                                    &[("err", &err.to_string())]
+                                )
+                            );
                             open_window("settings");
                         }
                     });
@@ -792,7 +790,13 @@ pub fn run(
                         audio = taken;
                     }
                     Err(err) => {
-                        eprintln!("mickey: cannot make this PC the one that listens: {err}")
+                        eprintln!(
+                            "{}",
+                            mickey_config::i18n::tf(
+                                "messages.cannot_listen",
+                                &[("err", &err.to_string())]
+                            )
+                        )
                     }
                 }
             }
@@ -810,7 +814,13 @@ pub fn run(
                     Ok(peer) => focus_machine.go_to(peer, &online),
                     Err(err) => {
                         // Without the window, behave like the M0 hotkey.
-                        eprintln!("mickey: cannot show the switcher: {err}");
+                        eprintln!(
+                            "{}",
+                            mickey_config::i18n::tf(
+                                "messages.cannot_show_switcher",
+                                &[("err", &err.to_string())]
+                            )
+                        );
                         focus_machine.go_to(online.iter().position(|&up| up), &online);
                     }
                 }
@@ -878,7 +888,10 @@ pub fn run(
             .is_some_and(|(_, _, since)| since.elapsed() > control::RECORD_TIMEOUT)
             && let Some((_, reply, _)) = recording.take()
         {
-            let _ = reply.send("error: no keys were pressed".into());
+            let _ = reply.send(format!(
+                "error: {}",
+                mickey_config::i18n::t("messages.pairing_timeout")
+            ));
         }
         if let Some((from, version)) = heard_version {
             // A peer on a newer Mickey: there is an update for this PC.
@@ -908,10 +921,6 @@ pub fn run(
                     data_links.share_audio(&config.audio.shared_lines());
                 }
                 audio = config.audio.clone();
-                if share != config.clipboard.share && config.clipboard.share == config::Share::Off {
-                    forget_received(history.as_ref());
-                }
-                share = config.clipboard.share;
             }
             // Everyone gets the new places, not only the PCs moved.
             shared_with.clear();
@@ -923,17 +932,32 @@ pub fn run(
             let paired = known.is_some_and(|i| peers[i].key.is_some());
             let answer = if let (false, Some(left)) = (paired, trust::refused_for(address.ip())) {
                 format!(
-                    "error: {address} was refused a moment ago; try again in {} s",
-                    left.as_secs() + 1
+                    "error: {}",
+                    mickey_config::i18n::tf(
+                        "messages.refused_recently",
+                        &[
+                            ("address", &address.to_string()),
+                            ("n", &(left.as_secs() + 1).to_string()),
+                        ]
+                    )
                 )
             } else if let Some(index) = known.filter(|&i| peers[i].key.is_none()) {
                 // Listed but never paired (its code was refused, or it
                 // never answered): pair again, under the name it has.
                 let name = peers[index].name.clone();
                 connect_first(index, name.clone(), address, &shared, &back_sender);
-                format!("ok: pairing with {name}: check that both PCs show the same code")
+                format!(
+                    "ok: {}",
+                    mickey_config::i18n::tf("messages.pairing_with", &[("name", &name)])
+                )
             } else if known.is_some() {
-                format!("error: {address} is already one of this PC's PCs")
+                format!(
+                    "error: {}",
+                    mickey_config::i18n::tf(
+                        "messages.already_paired",
+                        &[("address", &address.to_string())]
+                    )
+                )
             } else {
                 match add_peer(&mut peers, &mut positions, &name, address, None) {
                     Ok(index) => {
@@ -941,7 +965,10 @@ pub fn run(
                         names.push(name.clone());
                         // Pairs: the code shows on both PCs.
                         connect_first(index, name.clone(), address, &shared, &back_sender);
-                        format!("ok: pairing with {name}: check that both PCs show the same code")
+                        format!(
+                            "ok: {}",
+                            mickey_config::i18n::tf("messages.pairing_with", &[("name", &name)])
+                        )
                     }
                     Err(err) => format!("error: {err}"),
                 }
@@ -958,7 +985,13 @@ pub fn run(
         if let Some(lines) = heard_audio {
             match take_audio(&lines) {
                 Ok(taken) => audio = taken,
-                Err(err) => eprintln!("mickey: cannot take who listens from another PC: {err}"),
+                Err(err) => eprintln!(
+                    "{}",
+                    mickey_config::i18n::tf(
+                        "messages.cannot_take_audio",
+                        &[("err", &err.to_string())]
+                    )
+                ),
             }
         }
         // Never while the keyboard is on another PC: new hotkeys could leave
@@ -969,9 +1002,15 @@ pub fn run(
             match take_hotkeys(&lines) {
                 Ok(config) => {
                     use_hotkeys(&config, &mut focus_machine, &mut double_tap_window);
-                    println!("mickey: took the hotkeys saved on another PC");
+                    println!("{}", mickey_config::i18n::t("messages.took_hotkeys"));
                 }
-                Err(err) => eprintln!("mickey: cannot take another PC's hotkeys: {err}"),
+                Err(err) => eprintln!(
+                    "{}",
+                    mickey_config::i18n::tf(
+                        "messages.cannot_take_hotkeys",
+                        &[("err", &err.to_string())]
+                    )
+                ),
             }
         }
         if let Some((member, by)) = accepted
@@ -1024,13 +1063,19 @@ pub fn run(
         }
         if quit {
             // Returning drops the grab: the devices go back to this PC.
-            println!("mickey: quitting, as asked");
+            println!("{}", mickey_config::i18n::t("messages.quitting"));
             return Ok(());
         }
         if let Some((x, y)) = home_at
             && let Err(err) = emit::place(x, y)
         {
-            eprintln!("mickey: cannot place the cursor: {err}");
+            eprintln!(
+                "{}",
+                mickey_config::i18n::tf(
+                    "messages.cannot_place_cursor",
+                    &[("err", &err.to_string())]
+                )
+            );
         }
         if let Some(delta) = pushed
             && edges_matter(&positions, &peers)
@@ -1068,7 +1113,7 @@ pub fn run(
             let _ = reply.send(peers_text(&this_pc, &peers, &online));
         }
         if focus_machine.focus() == Focus::Local && left != Focus::Local {
-            println!("mickey: focus is back here");
+            println!("{}", mickey_config::i18n::t("messages.focus_back"));
         }
         // The switcher shows on the PC in use, and a copy on every other
         // online PC, so it is seen wherever the owner looks (PRD 0007).
@@ -1107,15 +1152,18 @@ pub fn run(
         lost.dedup();
         for index in lost {
             peers[index].link = None;
-            println!("mickey: lost {}; retrying every 5 s", peers[index].name);
+            println!(
+                "{}",
+                mickey_config::i18n::tf("messages.peer_lost", &[("name", &peers[index].name)])
+            );
             focus_machine.peer_lost(index, |_ungrab| {
                 grabbed = None;
-                println!("mickey: focus is back here");
+                println!("{}", mickey_config::i18n::t("messages.focus_back"));
             });
             reconnect(index, peers[index].address, &shared, &back_sender);
         }
     }
-    Err("every input device is gone".into())
+    Err(mickey_config::i18n::t("messages.every_device_gone").into())
 }
 
 #[cfg(test)]

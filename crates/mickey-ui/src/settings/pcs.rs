@@ -3,6 +3,7 @@
 
 use super::sound::volume;
 use super::{PcRow, Settings};
+use crate::i18n;
 use eframe::egui;
 use mickey_config as config;
 use mickey_config::peers::Peers;
@@ -63,92 +64,132 @@ impl Settings {
                 .and_then(|peers| peers.peers.iter().find(|peer| peer.name == name))
         };
         ui.label(
-            egui::RichText::new(format!("{}  Your PCs", icon::DESKTOP))
+            egui::RichText::new(format!("{}  {}", icon::DESKTOP, i18n::t("pcs.your_pcs")))
                 .size(16.0)
                 .strong(),
         );
         if form.pcs.is_empty() {
-            ui.weak("None yet: connect one from the list below.");
+            ui.weak(i18n::t("pcs.none_yet"));
         }
         let mut remove = None;
         let confirm = &mut self.confirm_remove;
-        egui::Grid::new("pcs").num_columns(6).spacing([10.0, 8.0]).show(ui, |ui| {
-            for (i, pc) in form.pcs.iter_mut().enumerate() {
-                let info = online(&pc.name);
-                let up = info.is_some_and(|info| info.online);
-                ui.horizontal(|ui| {
-                    let (spot, _) = ui.allocate_exact_size(egui::vec2(10.0, 10.0), egui::Sense::hover());
-                    let colour = if up { theme::palette::HERE } else { theme::palette::FUR };
-                    ui.painter().circle_filled(spot.center(), 4.0, colour);
-                    ui.add_sized([140.0, 24.0], egui::TextEdit::singleline(&mut pc.name));
-                });
-                if info.is_some_and(|info| info.reinstalled) {
-                    // It answered with a new identity: refused until
-                    // removed and connected again (#289).
-                    ui.colored_label(theme::palette::AWAY, "New identity: reinstalled? Remove it, Save, then Connect it below.")
-                        .on_hover_text(format!("{} answered with another identity than the one this PC paired with, so it is refused, in case it is not the same PC.", pc.address));
-                } else {
-                    ui.weak(format!("{}  {}", icon::LINK, pc.address));
-                }
-                ui.horizontal(|ui| {
-                    ui.weak(match info.map(|info| info.monitors.len()) {
-                        Some(0) | None => "monitors unknown".to_string(),
-                        Some(1) => format!("{}  1 monitor", icon::MONITOR),
-                        Some(n) => format!("{}  {n} monitors", icon::MONITOR),
-                    });
-                    // Its Mickey version (PRD 0013): one behind this PC
-                    // stands out, since releases fix security and speed.
-                    if let Some(version) = info.and_then(|info| info.version.as_deref()) {
-                        if mickey_config::version::is_newer(mickey_config::version::THIS, version) {
-                            ui.colored_label(theme::palette::AWAY, format!("{version}, update it"))
-                                .on_hover_text(format!("This PC runs {}. Update Mickey on {} too.", mickey_config::version::THIS, pc.name));
-                        } else {
-                            ui.weak(version);
-                        }
-                    }
-                });
-                ui.add_sized([170.0, 24.0], egui::TextEdit::singleline(&mut pc.hotkey).hint_text("own hotkey"));
-                match &pc.key {
-                    Some(key) => volume(ui, key, &mut form.volumes, &mut form.muted),
-                    None => {
-                        ui.weak("volume: once connected");
-                    }
-                }
-                // Removing stops trusting it too (on Save): asked twice.
-                if confirm.as_deref() == Some(pc.name.as_str()) {
+        egui::Grid::new("pcs")
+            .num_columns(6)
+            .spacing([10.0, 8.0])
+            .show(ui, |ui| {
+                for (i, pc) in form.pcs.iter_mut().enumerate() {
+                    let info = online(&pc.name);
+                    let up = info.is_some_and(|info| info.online);
                     ui.horizontal(|ui| {
-                        if ui.button(format!("{}  Remove: it can no longer control this PC", icon::TRASH)).clicked() {
-                            remove = Some(i);
-                            *confirm = None;
-                        }
-                        if ui.button("Cancel").clicked() {
-                            *confirm = None;
+                        let (spot, _) =
+                            ui.allocate_exact_size(egui::vec2(10.0, 10.0), egui::Sense::hover());
+                        let colour = if up {
+                            theme::palette::HERE
+                        } else {
+                            theme::palette::FUR
+                        };
+                        ui.painter().circle_filled(spot.center(), 4.0, colour);
+                        ui.add_sized([140.0, 24.0], egui::TextEdit::singleline(&mut pc.name));
+                    });
+                    if info.is_some_and(|info| info.reinstalled) {
+                        ui.colored_label(theme::palette::AWAY, i18n::t("pcs.new_identity"))
+                            .on_hover_text(i18n::tf(
+                                "pcs.new_identity_hover",
+                                &[("name", &pc.address)],
+                            ));
+                    } else {
+                        ui.weak(format!("{}  {}", icon::LINK, pc.address));
+                    }
+                    ui.horizontal(|ui| {
+                        let monitors_text = match info.map(|info| info.monitors.len()) {
+                            Some(0) | None => i18n::t("pcs.monitors_unknown").to_string(),
+                            Some(1) => format!("{}  {}", icon::MONITOR, i18n::t("pcs.one_monitor")),
+                            Some(n) => i18n::tf("pcs.n_monitors", &[("n", &n.to_string())]),
+                        };
+                        ui.weak(monitors_text);
+                        // Its Mickey version (PRD 0013): one behind this PC
+                        // stands out, since releases fix security and speed.
+                        if let Some(version) = info.and_then(|info| info.version.as_deref()) {
+                            if mickey_config::version::is_newer(
+                                mickey_config::version::THIS,
+                                version,
+                            ) {
+                                ui.colored_label(
+                                    theme::palette::AWAY,
+                                    i18n::tf("pcs.version_update", &[("version", version)]),
+                                )
+                                .on_hover_text(i18n::tf(
+                                    "pcs.version_update_hover",
+                                    &[("this", mickey_config::version::THIS), ("name", &pc.name)],
+                                ));
+                            } else {
+                                ui.weak(version);
+                            }
                         }
                     });
-                } else if ui.button(format!("{}  Remove", icon::TRASH)).clicked() {
-                    *confirm = Some(pc.name.clone());
+                    ui.add_sized(
+                        [170.0, 24.0],
+                        egui::TextEdit::singleline(&mut pc.hotkey)
+                            .hint_text(i18n::t("pcs.own_hotkey")),
+                    );
+                    match &pc.key {
+                        Some(key) => volume(ui, key, &mut form.volumes, &mut form.muted),
+                        None => {
+                            ui.weak(i18n::t("pcs.volume_once_connected"));
+                        }
+                    }
+                    // Removing stops trusting it too (on Save): asked twice.
+                    if confirm.as_deref() == Some(pc.name.as_str()) {
+                        ui.horizontal(|ui| {
+                            if ui
+                                .button(format!(
+                                    "{}  {}",
+                                    icon::TRASH,
+                                    i18n::t("pcs.remove_confirm")
+                                ))
+                                .clicked()
+                            {
+                                remove = Some(i);
+                                *confirm = None;
+                            }
+                            if ui.button(i18n::t("pcs.cancel")).clicked() {
+                                *confirm = None;
+                            }
+                        });
+                    } else if ui
+                        .button(format!("{}  {}", icon::TRASH, i18n::t("pcs.remove")))
+                        .clicked()
+                    {
+                        *confirm = Some(pc.name.clone());
+                    }
+                    ui.end_row();
                 }
-                ui.end_row();
-            }
-        });
+            });
         if let Some(i) = remove {
             form.pcs.remove(i);
         }
 
         ui.add_space(12.0);
         ui.label(
-            egui::RichText::new(format!("{}  On this network", icon::SEARCH))
-                .size(16.0)
-                .strong(),
+            egui::RichText::new(format!(
+                "{}  {}",
+                icon::SEARCH,
+                i18n::t("pcs.on_this_network")
+            ))
+            .size(16.0)
+            .strong(),
         );
         ui.horizontal(|ui| {
-            if ui.button(format!("{}  Let a new PC pair (2 min)", icon::LINK)).clicked() {
+            if ui
+                .button(format!("{}  {}", icon::LINK, i18n::t("pcs.let_pair")))
+                .clicked()
+            {
                 self.message = match crate::mickey::ask(&["pairing"]) {
-                    Ok(_) => "For 2 minutes, a new PC may ask to pair with this one. Check the code on both.".into(),
-                    Err(err) => format!("Could not open pairing: {err}"),
+                    Ok(_) => i18n::t("pcs.pairing_open").into(),
+                    Err(err) => i18n::tf("pcs.pairing_failed", &[("err", &err)]),
                 };
             }
-            ui.weak("Needed on this PC when the new PC is the one that connects.");
+            ui.weak(i18n::t("pcs.needed_here"));
         });
         let known: Vec<&str> = form.pcs.iter().map(|pc| pc.address.as_str()).collect();
         let nearby: Vec<&Nearby> = self
@@ -157,7 +198,7 @@ impl Settings {
             .filter(|pc| !known.contains(&pc.address.as_str()))
             .collect();
         if nearby.is_empty() {
-            ui.weak("No other PC running Mickey heard yet. Start Mickey on it; it shows up here within seconds.");
+            ui.weak(i18n::t("pcs.none_nearby"));
         }
         let mut connect = None;
         egui::Grid::new("nearby")
@@ -170,7 +211,10 @@ impl Settings {
                     );
                     ui.weak(&pc.address);
                     ui.weak(pc.fingerprint.get(..9).unwrap_or(&pc.fingerprint));
-                    if ui.add(theme::primary(icon::LINK, "Connect")).clicked() {
+                    if ui
+                        .add(theme::primary(icon::LINK, i18n::t("pcs.connect")))
+                        .clicked()
+                    {
                         connect = Some((pc.address.clone(), pc.name.clone()));
                     }
                     ui.end_row();
@@ -180,28 +224,29 @@ impl Settings {
             self.message = match crate::mickey::ask(&["connect", &address, &name]) {
                 Ok(answer) => {
                     let answer = answer.trim().trim_start_matches("mickey: ").to_string();
-                    // "pairing with <name>: check …": Mickey may have
-                    // named it differently from the list.
                     self.pairing = pairing_with(&answer).map(|name| (name, Instant::now()));
                     answer
                 }
-                Err(err) => format!("Could not connect: {err}"),
+                Err(err) => i18n::tf("pcs.pairing_failed", &[("err", &err)]),
             };
         }
 
         ui.add_space(12.0);
-        egui::CollapsingHeader::new("Add by address…").show(ui, |ui| {
-            ui.weak("Only if the PC does not show up above (another network, say).");
-            if ui.button(format!("{}  Add a PC", icon::PLUS)).clicked() {
+        egui::CollapsingHeader::new(i18n::t("pcs.add_by_address")).show(ui, |ui| {
+            ui.weak(i18n::t("pcs.add_by_address_hint"));
+            if ui
+                .button(format!("{}  {}", icon::PLUS, i18n::t("pcs.add_a_pc")))
+                .clicked()
+            {
                 form.pcs.push(PcRow {
-                    name: "New PC".into(),
+                    name: i18n::t("pcs.new_pc").into(),
                     address: format!("192.168.0.2:{}", config::DEFAULT_PORT),
                     hotkey: String::new(),
                     position: None,
                     key: None,
                 });
             }
-            ui.weak("Then edit its address in Your PCs, and Save.");
+            ui.weak(i18n::t("pcs.then_edit"));
         });
     }
 }

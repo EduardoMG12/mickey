@@ -26,11 +26,10 @@ recent copies.
    copied there and offers it to the PC the keyboard goes to (as Synergy
    does). Nothing is sent on every copy: what is copied and never needed
    elsewhere never leaves the PC.
-2. **Everything goes at once** when the keyboard crosses: text, images
-   and files up to 60 MB. The plan was "small at once, big when pasted"
-   (delayed rendering on Windows, a data source on Wayland and X11), but
-   `arboard` cannot do delayed rendering; see *Discoveries*. Big content
-   on paste is not built and not decided: it needs a spike first (#425).
+2. **Small things go at once** with the offer (text, small images).
+   **Big things go when pasted**: the offer says "an image, 4 MB", and the
+   bytes cross only if an application on the other PC asks for them
+   (delayed rendering on Windows, a data source on Wayland and X11).
 3. **On a second connection**, not the input link: a 5 MB image on the
    same TCP stream would hold every key press behind it. The second link
    uses the same Noise handshake and the same trusted keys.
@@ -42,11 +41,11 @@ recent copies.
 2. **Reading and writing the system clipboard** on Wayland (the
    data-control protocol: Hyprland, Sway, KDE), X11 and Windows. GNOME on
    Wayland has no data-control; it is noted, not solved, in this PRD.
-3. **Sync on crossing**: text and images, sent whole (not on paste, see point 2 above).
+3. **Sync on crossing**: text and images, small at once, big on paste.
 4. **History**: Mickey watches the clipboard on every PC, keeps the
    recent entries in memory (not on disk unless the owner turns it on),
    and a `mickey-ui` window lists them with search; picking one copies it.
-5. **Files**: sent whole on crossing, up to 60 MB. Sending big files and folders on purpose is #431.
+5. **Files**: offered by name and size, sent when pasted.
 6. **Other managers**: when the owner prefers cliphist or another
    manager, Mickey only syncs and leaves the history to it (what Mickey
    writes into the clipboard already reaches those managers).
@@ -55,13 +54,10 @@ recent copies.
 
 - [x] Data link with large frames, separate from the input link.
 - [x] Clipboard read/write on Wayland (data-control), X11 and Windows.
-- [x] Text and images synced when the keyboard crosses, sent whole.
-- [ ] Big content only when pasted (needs a spike first, #425; see *Discoveries*).
+- [x] Text and images synced when the keyboard crosses (big ones on paste: not yet, see *Discoveries*).
 - [x] History window (this PC's copies, including what arrived from others).
 - [x] Files (up to 60 MB per crossing, no folders yet).
 - [x] Option to leave the history to an existing manager (`[clipboard] history = false`, #134).
-- [x] Option to turn sharing off (`[clipboard] share = "off"`, #437).
-- [ ] Option to share only on a hotkey (#437, a later PR).
 
 ## Non-Goals
 
@@ -99,10 +95,3 @@ recent copies.
   General tab, starts no history recorder; the clipboard is still shared,
   and what Mickey writes reaches cliphist, CopyQ or Klipper, which watch
   the clipboard themselves. `mickey history` then says the history is off.
-- **Turning sharing off** (2026-11-13, #437): `[clipboard] share = "off"`
-  is each PC's own setting, never sent to the group. The PC whose keyboard
-  moves decides every crossing (it reads one side and writes the other),
-  so its setting alone is checked there; a PC set to off can still receive
-  from another PC's keyboard. Turning it off deletes the received-files
-  folder and the whole in-memory history, which cannot tell received
-  copies from local ones. It applies when the settings window saves.

@@ -11,10 +11,16 @@ pub mod hotkey;
 #[cfg_attr(not(windows), allow(dead_code))]
 pub mod keymap;
 pub mod record;
+#[cfg(target_os = "linux")]
+pub mod touchpad;
+#[cfg(target_os = "linux")]
+pub mod touchpad_prefs;
 
 use crate::input::event::InputEvent;
 #[cfg(windows)]
 use crate::threads::LockAnyway;
+use mickey_config as config;
+use std::sync::Arc;
 use std::sync::mpsc::Sender;
 
 #[cfg(target_os = "linux")]
@@ -30,13 +36,16 @@ pub use windows::cursor_now;
 mod linux {
     use super::*;
     use crate::input::capture;
-    use crate::platform::linux::Grab;
+    use crate::platform::linux::{Device, Grab};
+    use mickey_config::i18n;
 
     pub struct Input {
         devices: Vec<capture::Found>,
     }
 
-    /// While this lives, the devices are taken from the desktop.
+    /// While this lives, the devices are taken from the desktop. A touchpad
+    /// the owner kept local (`forward = false` in `config.toml`) is not in
+    /// the list: it keeps moving this PC's own cursor.
     pub struct Grabbed<'a> {
         _grabs: Vec<Grab<'a>>,
     }
@@ -52,26 +61,30 @@ mod linux {
 
     impl Input {
         /// Every keyboard, mouse and touchpad, with a clear message when we
-        /// may not read them.
-        pub fn open() -> Result<Input, String> {
-            let devices = capture::find_devices().map_err(|err| match err.kind() {
-                std::io::ErrorKind::PermissionDenied => {
-                    "cannot read /dev/input: permission denied; run \
-                     `sudo usermod -aG input $USER`, then log in again (or use `newgrp input`)"
-                        .to_string()
-                }
-                _ => format!("cannot list input devices: {err}"),
+        /// may not read them. `touchpad` is the `[touchpad]` block of
+        /// `config.toml`: its `forward = false` keeps a touchpad on this PC.
+        pub fn open(touchpad: &config::Touchpad) -> Result<Input, String> {
+            let mut devices = capture::find_devices().map_err(|err| match err.kind() {
+                std::io::ErrorKind::PermissionDenied => i18n::t("capture.permission_denied").into(),
+                _ => i18n::tf("capture.cannot_list", &[("err", &err.to_string())]),
             })?;
             if devices.is_empty() {
-                return Err("no keyboard or mouse found under /dev/input".into());
+                return Err(i18n::t("capture.no_keyboard").into());
             }
+            capture::set_forward(&mut devices, touchpad);
             for found in &devices {
-                let kind = match found.kind {
-                    capture::Kind::Keyboard => "keyboard",
-                    capture::Kind::Mouse => "mouse",
-                    capture::Kind::Touchpad => "touchpad",
+                let line = match found.kind {
+                    capture::Kind::Keyboard => {
+                        i18n::tf("messages.found_keyboard", &[("name", &found.name)])
+                    }
+                    capture::Kind::Mouse => {
+                        i18n::tf("messages.found_mouse", &[("name", &found.name)])
+                    }
+                    capture::Kind::Touchpad => {
+                        i18n::tf("messages.found_touchpad", &[("name", &found.name)])
+                    }
                 };
-                println!("mickey: found {kind}: {}", found.name);
+                println!("{line}");
             }
             Ok(Input { devices })
         }
@@ -79,9 +92,17 @@ mod linux {
         pub fn start<T: From<InputEvent> + Send + 'static>(
             &self,
             events: Sender<T>,
-            touchpad_speed: i32,
+            touchpad: &config::Touchpad,
         ) -> Result<(), String> {
-            capture::spawn_readers(&self.devices, events, touchpad_speed);
+            // A keyboard the touchpad's `disable while typing` can ask
+            // about: the first keyboard among the devices. None when this
+            // PC has no keyboard (a tablet with a touchpad, say).
+            let keyboard: Option<Arc<Device>> = self
+                .devices
+                .iter()
+                .find(|found| found.kind == capture::Kind::Keyboard)
+                .map(|found| Arc::clone(&found.device));
+            capture::spawn_readers(&self.devices, events, touchpad, keyboard);
             Ok(())
         }
 
@@ -98,10 +119,17 @@ mod linux {
         }
 
         /// Where the cursor is on this desktop, if the compositor says.
+        /// A touchpad kept local (`forward = false`) is not grabbed: its
+        /// events keep reaching this PC's own cursor while the keyboard
+        /// and mouse go to another PC.
         pub fn grab(&self) -> Result<Grabbed<'_>, String> {
             let grabs = self
                 .devices
                 .iter()
+                .filter(|found| match found.kind {
+                    capture::Kind::Touchpad => found.forward,
+                    _ => true,
+                })
                 .map(|found| found.device.grab())
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(|err| format!("cannot grab the input devices: {err}"))?;
@@ -147,8 +175,8 @@ mod windows {
     }
 
     impl Input {
-        pub fn open() -> Result<Input, String> {
-            println!("mickey: capturing the keyboard and mouse with low-level hooks");
+        pub fn open(_touchpad: &config::Touchpad) -> Result<Input, String> {
+            println!("{}", mickey_config::i18n::t("capture.capturing_hooks"));
             Ok(Input {
                 anchor: Arc::new(Mutex::new(None)),
             })
@@ -159,7 +187,7 @@ mod windows {
         pub fn start<T: From<InputEvent> + Send + 'static>(
             &self,
             events: Sender<T>,
-            _touchpad_speed: i32,
+            _touchpad: &config::Touchpad,
         ) -> Result<(), String> {
             let (raw_sender, raw) = std::sync::mpsc::channel();
             hooks::start(raw_sender).map_err(|err| format!("cannot install the hooks: {err}"))?;

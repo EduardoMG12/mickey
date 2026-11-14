@@ -12,6 +12,7 @@
 //!
 //! Exit code 0 means yes, 1 anything else.
 
+use crate::i18n;
 use eframe::egui;
 use std::cell::Cell;
 use std::process::ExitCode;
@@ -39,17 +40,25 @@ impl eframe::App for Pair {
             ui.vertical_centered(|ui| {
                 use crate::theme::{self, icon};
                 ui.add_space(6.0);
-                let (title, yes, no) = match &self.ask {
-                    Ask::Pair { .. } => (format!("Connect with {}?", self.who), "Pair", "Refuse"),
-                    Ask::Join { .. } => (format!("Let {} in?", self.who), "Let in", "Refuse"),
+                let (title_key, yes, no) = match &self.ask {
+                    Ask::Pair { .. } => (
+                        i18n::tf("pair.connect_with", &[("name", &self.who)]),
+                        i18n::t("pair.pair"),
+                        i18n::t("pair.refuse"),
+                    ),
+                    Ask::Join { .. } => (
+                        i18n::tf("pair.let_in_with", &[("name", &self.who)]),
+                        i18n::t("pair.let_in"),
+                        i18n::t("pair.refuse"),
+                    ),
                     Ask::Hotkeys { .. } => (
-                        format!("Use {}'s hotkeys?", self.who),
-                        "Use them",
-                        "Keep mine",
+                        i18n::tf("pair.use_hotkeys", &[("name", &self.who)]),
+                        i18n::t("pair.use_them"),
+                        i18n::t("pair.keep_mine"),
                     ),
                 };
                 ui.label(
-                    egui::RichText::new(format!("{}  {title}", icon::LINK))
+                    egui::RichText::new(format!("{}  {title_key}", icon::LINK))
                         .size(16.0)
                         .strong(),
                 );
@@ -60,20 +69,17 @@ impl eframe::App for Pair {
                             ui.label(egui::RichText::new(code).size(36.0).monospace().strong());
                         });
                         ui.add_space(6.0);
-                        ui.weak(format!(
-                            "{}  Pair only if the other PC shows this same code.",
-                            icon::SHIELD
-                        ));
+                        ui.weak(i18n::tf("pair.pair_check", &[("icon", icon::SHIELD)]));
                     }
                     Ask::Join { by } => {
                         theme::card(ui, |ui| {
-                            ui.label(format!("{by} says {} is one of your PCs.", self.who));
+                            ui.label(i18n::tf(
+                                "pair.join_says",
+                                &[("by", by), ("name", &self.who)],
+                            ));
                         });
                         ui.add_space(6.0);
-                        ui.weak(format!(
-                            "{}  Once in, it can use this PC's keyboard and mouse.",
-                            icon::SHIELD
-                        ));
+                        ui.weak(i18n::tf("pair.join_can_use", &[("icon", icon::SHIELD)]));
                     }
                     Ask::Hotkeys { changes } => {
                         theme::card(ui, |ui| {
@@ -82,7 +88,7 @@ impl eframe::App for Pair {
                             }
                         });
                         ui.add_space(6.0);
-                        ui.weak("Settings, Hotkeys tab: keep this PC's own for good.");
+                        ui.weak(i18n::t("pair.hotkeys_keep_own"));
                     }
                 }
                 ui.add_space(10.0);
@@ -116,7 +122,7 @@ impl eframe::App for Pair {
 pub fn window(who: &str, ask: Ask) -> ExitCode {
     let options = eframe::NativeOptions {
         viewport: crate::theme::viewport()
-            .with_title("Mickey: pair with another PC")
+            .with_title(i18n::t("pair.window_title"))
             .with_app_id("mickey-pair")
             .with_inner_size([400.0, 260.0])
             .with_resizable(false)

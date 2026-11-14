@@ -198,10 +198,10 @@ pub fn run(command: Command) -> Result<(), String> {
         }
         Command::Source { to } => {
             let config = config::Config::load()?;
-            let touchpad_speed = config
+            let touchpad = config
                 .as_ref()
-                .map_or(config::Touchpad::default().speed, |config| {
-                    config.touchpad.speed
+                .map_or(config::Touchpad::default(), |config| {
+                    config.touchpad.clone()
                 });
             let interface = config
                 .as_ref()
@@ -247,7 +247,7 @@ pub fn run(command: Command) -> Result<(), String> {
             source::run(
                 peers,
                 hotkey::Hotkey::from_config(&set),
-                touchpad_speed,
+                touchpad,
                 interface,
                 source::Services {
                     trusted: trust::shared(&trust::dir()?)?,
@@ -418,7 +418,7 @@ fn run_from_config() -> Result<(), String> {
         let result = source::run(
             config.peers,
             hotkeys,
-            config.touchpad.speed,
+            config.touchpad.clone(),
             config.interface,
             source::Services {
                 trusted,

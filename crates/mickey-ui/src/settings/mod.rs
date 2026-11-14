@@ -13,6 +13,7 @@ use form::Form;
 pub use form::PcRow;
 use pcs::{Nearby, load_nearby, load_peers};
 
+use crate::i18n;
 use crate::layout;
 use eframe::egui;
 use mickey_config::peers::Peers;
@@ -78,20 +79,18 @@ impl Settings {
     pub fn load() -> Settings {
         let (config, message) = match Config::load() {
             Ok(Some(config)) => (config, String::new()),
-            Ok(None) => (
-                Config::empty(),
-                "No config.toml yet; Save creates one.".into(),
-            ),
+            Ok(None) => (Config::empty(), i18n::t("settings.no_config").into()),
             Err(err) => (
                 Config::empty(),
-                format!("config.toml has an error ({err}); Save replaces it."),
+                i18n::tf("settings.config_error", &[("err", &err.to_string())]),
             ),
         };
         let form = Form::from_config(&config);
         Settings {
             saved: form.clone(),
             form,
-            fingerprint: crate::mickey::ask(&["id"]).unwrap_or_else(|_| "(run `mickey id`)".into()),
+            fingerprint: crate::mickey::ask(&["id"])
+                .unwrap_or_else(|_| i18n::t("this_pc.fingerprint_missing").into()),
             own_key: crate::mickey::ask(&["id", "--key"])
                 .ok()
                 .map(|key| key.trim().to_string()),
@@ -134,10 +133,10 @@ impl Settings {
                 if let Ok(Some(config)) = Config::load() {
                     self.form = Form::from_config(&config);
                     self.saved = self.form.clone();
-                    self.message = "Updated: config.toml changed (another PC moved).".into();
+                    self.message = i18n::t("settings.updated").into();
                 }
             } else {
-                self.message = "config.toml changed elsewhere; Save would replace it.".into();
+                self.message = i18n::t("settings.changed_elsewhere").into();
             }
         }
         // Every second while a pairing is on, so the Layout tab opens soon
@@ -164,7 +163,7 @@ impl Settings {
                 .any(|peer| peer.name == *name && peer.online)
         });
         if online {
-            self.message = format!("Paired with {name}. Place it next to this PC's screens.");
+            self.message = i18n::tf("settings.paired_with", &[("name", name)]);
             self.tab = Tab::Layout;
             self.pairing = None;
         } else if since.elapsed() > Duration::from_secs(120) {
@@ -198,7 +197,7 @@ impl Settings {
         let text = self.form.to_toml();
         // The same check `mickey` makes when it reads the file.
         if let Err(err) = config::parse(&text) {
-            self.message = format!("Not saved: {err}");
+            self.message = i18n::tf("settings.not_saved", &[("err", &err)]);
             return;
         }
         let written = config::path().and_then(|path| config::write(&path, &text));
@@ -213,17 +212,13 @@ impl Settings {
                 // Our own write is not news.
                 self.config_changed = config_time();
                 // The layout is used at once and the other PCs follow it;
-                // clipboard sharing is used at once here; other settings
-                // still wait for a restart.
+                // other settings still wait for a restart.
                 match crate::mickey::ask(&["arranged"]) {
-                    Ok(_) => {
-                        "Saved. Layout and hotkeys apply on every PC now, clipboard sharing on this one; the rest after a restart."
-                            .into()
-                    }
-                    Err(_) => "Saved. Restart Mickey for it to take effect.".into(),
+                    Ok(_) => i18n::t("settings.saved_arranged").into(),
+                    Err(_) => i18n::t("settings.saved_restart").into(),
                 }
             }
-            Err(err) => format!("Not saved: {err}"),
+            Err(err) => i18n::tf("settings.not_saved", &[("err", &err)]),
         };
     }
 }
@@ -242,17 +237,47 @@ impl eframe::App for Settings {
                 }
                 ui.vertical(|ui| {
                     ui.add_space(4.0);
-                    ui.label(egui::RichText::new("Mickey").size(24.0).strong());
-                    ui.weak("One keyboard and mouse for all your PCs");
+                    ui.label(egui::RichText::new(i18n::t("app.name")).size(24.0).strong());
+                    ui.weak(i18n::t("app.tagline"));
                 });
             });
             ui.add_space(6.0);
             ui.horizontal(|ui| {
-                theme::tab(ui, &mut self.tab, Tab::ThisPc, icon::LAPTOP, "This PC");
-                theme::tab(ui, &mut self.tab, Tab::Pcs, icon::DESKTOP, "PCs");
-                theme::tab(ui, &mut self.tab, Tab::Layout, icon::MONITOR, "Layout");
-                theme::tab(ui, &mut self.tab, Tab::Hotkeys, icon::KEYBOARD, "Hotkeys");
-                theme::tab(ui, &mut self.tab, Tab::Look, icon::PALETTE, "General");
+                theme::tab(
+                    ui,
+                    &mut self.tab,
+                    Tab::ThisPc,
+                    icon::LAPTOP,
+                    i18n::t("tabs.this_pc"),
+                );
+                theme::tab(
+                    ui,
+                    &mut self.tab,
+                    Tab::Pcs,
+                    icon::DESKTOP,
+                    i18n::t("tabs.pcs"),
+                );
+                theme::tab(
+                    ui,
+                    &mut self.tab,
+                    Tab::Layout,
+                    icon::MONITOR,
+                    i18n::t("tabs.layout"),
+                );
+                theme::tab(
+                    ui,
+                    &mut self.tab,
+                    Tab::Hotkeys,
+                    icon::KEYBOARD,
+                    i18n::t("tabs.hotkeys"),
+                );
+                theme::tab(
+                    ui,
+                    &mut self.tab,
+                    Tab::Look,
+                    icon::PALETTE,
+                    i18n::t("tabs.general"),
+                );
             });
             ui.add_space(4.0);
             // Hard to miss (PRD 0013): most releases fix security or speed.
@@ -260,15 +285,15 @@ impl eframe::App for Settings {
                 ui.horizontal(|ui| {
                     ui.colored_label(
                         theme::palette::AWAY,
-                        format!(
-                            "Mickey {version} is out; this PC runs {}.",
-                            mickey_config::version::THIS
+                        i18n::tf(
+                            "settings.update_out",
+                            &[("version", version), ("this", mickey_config::version::THIS)],
                         ),
                     );
                     if self.updating.is_some() {
                         ui.spinner();
-                        ui.weak("Downloading and checking it…");
-                    } else if ui.button("Update now").clicked() {
+                        ui.weak(i18n::t("settings.downloading"));
+                    } else if ui.button(i18n::t("settings.update_now")).clicked() {
                         // Minutes, maybe, and Windows' administrator
                         // prompt: on a thread.
                         let (send, answer) = std::sync::mpsc::channel();
@@ -278,7 +303,7 @@ impl eframe::App for Settings {
                         self.updating = Some(answer);
                     }
                     ui.hyperlink_to(
-                        "What's new",
+                        i18n::t("settings.whats_new"),
                         "https://github.com/EduardoMG12/mickey/releases/latest",
                     );
                 });
@@ -287,7 +312,9 @@ impl eframe::App for Settings {
                     .as_ref()
                     .and_then(|answer| answer.try_recv().ok())
                 {
-                    self.message = answer.unwrap_or_else(|err| format!("The update failed: {err}"));
+                    self.message = answer.unwrap_or_else(|err| {
+                        i18n::tf("settings.update_failed", &[("err", &err.to_string())])
+                    });
                     self.updating = None;
                 }
                 ui.ctx()
@@ -314,13 +341,19 @@ impl eframe::App for Settings {
             ui.horizontal(|ui| {
                 let changed = self.form != self.saved;
                 if ui
-                    .add_enabled(changed, theme::primary(icon::SAVE, "Save"))
+                    .add_enabled(
+                        changed,
+                        theme::primary(icon::SAVE, i18n::t("settings.save")),
+                    )
                     .clicked()
                 {
                     self.save();
                 }
                 if ui
-                    .add_enabled(changed, egui::Button::new(format!("{}  Undo", icon::UNDO)))
+                    .add_enabled(
+                        changed,
+                        egui::Button::new(format!("{}  {}", icon::UNDO, i18n::t("settings.undo"))),
+                    )
                     .clicked()
                 {
                     self.form = self.saved.clone();
@@ -345,12 +378,10 @@ impl Settings {
             ui.ctx().request_repaint_after(Duration::from_secs(2));
         }
         match &self.peers {
-            Ok(_) => ui.weak(
-                "Drag a PC to where it sits; it snaps against the nearest monitor. Then Save.",
-            ),
+            Ok(_) => ui.weak(i18n::t("layout.drag_hint")),
             Err(err) => ui.colored_label(
                 ui.visuals().warn_fg_color,
-                format!("Waiting for Mickey to list the monitors ({err})"),
+                i18n::tf("layout.waiting_monitors", &[("err", err)]),
             ),
         };
         let empty = Peers::default();

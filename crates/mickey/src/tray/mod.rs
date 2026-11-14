@@ -9,6 +9,7 @@ pub mod picture;
 use crate::control::Status;
 #[cfg(windows)]
 use crate::threads::LockAnyway;
+use mickey_config::i18n;
 use picture::Dot;
 use std::sync::mpsc::Sender;
 
@@ -34,7 +35,10 @@ pub enum Click {
 pub fn looks(status: &Status) -> (Dot, String) {
     let (dot, tip) = keyboard_looks(status);
     match &status.update {
-        Some(version) => (dot, format!("Update to Mickey {version} · {tip}")),
+        Some(version) => (
+            dot,
+            i18n::tf("update.banner", &[("version", version)]) + " · " + &tip,
+        ),
         None => (dot, tip),
     }
 }
@@ -42,20 +46,22 @@ pub fn looks(status: &Status) -> (Dot, String) {
 /// The menu's first item, while an update waits.
 fn update_label(status: &Status) -> Option<String> {
     let version = status.update.as_ref()?;
-    Some(format!("Update to Mickey {version}"))
+    Some(i18n::tf("update.banner", &[("version", version)]))
 }
 
 fn keyboard_looks(status: &Status) -> (Dot, String) {
     if !status.peers.iter().any(|(_, online)| *online) {
-        return (Dot::Alone, "No other PC connected".into());
+        return (Dot::Alone, i18n::t("tray.tooltip_no_peers").into());
     }
     if status.here {
-        return (Dot::Here, "In control: this PC".into());
+        return (Dot::Here, i18n::t("tray.tooltip_here").into());
     }
     let there = status
         .focus
-        .map_or("another PC", |peer| status.peers[peer].0.as_str());
-    (Dot::Elsewhere, format!("In control: {there}"))
+        .map_or(i18n::t("tray.tooltip_another").to_string(), |peer| {
+            i18n::tf("tray.tooltip_elsewhere", &[("name", &status.peers[peer].0)])
+        });
+    (Dot::Elsewhere, there)
 }
 
 #[cfg(target_os = "linux")]
@@ -118,30 +124,34 @@ impl ksni::Tray for Icon {
             menu.push(item(label, true, Click::Update));
             menu.push(ksni::MenuItem::Separator);
         }
-        menu.push(item("This PC".into(), true, Click::Home));
+        menu.push(item(i18n::t("tray.this_pc").into(), true, Click::Home));
         for (index, (name, online)) in self.status.peers.iter().enumerate() {
             menu.push(item(name.clone(), *online, Click::Go(index)));
         }
         menu.push(ksni::MenuItem::Separator);
         menu.push(item(
-            "Listen here (every PC's sound)".into(),
+            i18n::t("tray.listen_here").into(),
             true,
             Click::ListenHere,
         ));
-        menu.push(item("Clipboard history".into(), true, Click::History));
-        menu.push(item("Settings".into(), true, Click::Settings));
-        menu.push(item("Quit Mickey".into(), true, Click::Quit));
+        menu.push(item(
+            i18n::t("tray.clipboard_history").into(),
+            true,
+            Click::History,
+        ));
+        menu.push(item(i18n::t("tray.settings").into(), true, Click::Settings));
+        menu.push(item(i18n::t("tray.quit").into(), true, Click::Quit));
         menu
     }
 
     // No tray (yet): Mickey went on waiting for one (`assume_sni_available`).
     fn watcher_offline(&self, _reason: ksni::OfflineReason) -> bool {
-        eprintln!("mickey: no tray yet; the icon shows when the desktop's tray starts");
+        eprintln!("{}", i18n::t("tray.no_tray_yet"));
         true
     }
 
     fn watcher_online(&self) {
-        eprintln!("mickey: a tray started; the icon is in it");
+        eprintln!("{}", i18n::t("tray.tray_started"));
     }
 }
 
@@ -257,18 +267,18 @@ fn look(status: &Status) -> crate::platform::tray::Look {
         menu.push(item(&label, true, UPDATE));
         menu.push(item("", true, 0));
     }
-    menu.push(item("This PC", true, 1));
+    menu.push(item(i18n::t("tray.this_pc"), true, 1));
     for (index, (name, online)) in status.peers.iter().enumerate() {
         menu.push(item(name, *online, index as u32 + 2));
     }
     menu.push(item("", true, 0));
-    menu.push(item("Listen here (every PC's sound)", true, LISTEN));
-    menu.push(item("Clipboard history", true, HISTORY));
-    menu.push(item("Settings", true, SETTINGS));
-    menu.push(item("Quit Mickey", true, QUIT));
+    menu.push(item(i18n::t("tray.listen_here"), true, LISTEN));
+    menu.push(item(i18n::t("tray.clipboard_history"), true, HISTORY));
+    menu.push(item(i18n::t("tray.settings"), true, SETTINGS));
+    menu.push(item(i18n::t("tray.quit"), true, QUIT));
     Look {
         picture: picture::picture(dot, false),
-        tip: format!("Mickey · {tip}"),
+        tip: format!("{} · {tip}", i18n::t("app.name")),
         menu,
     }
 }
@@ -286,32 +296,36 @@ mod tests {
         }
     }
 
+    /// Tests in this module run with the default language (English), so the
+    /// translated text matches the English catalogue.
+    fn ensure_english() {
+        i18n::set_language(i18n::Lang::En);
+    }
+
     #[test]
     fn a_waiting_update_leads_the_tooltip_and_the_menu() {
+        ensure_english();
         let mut waiting = status(None, true, true);
         assert_eq!(update_label(&waiting), None);
         waiting.update = Some("0.2.2".into());
-        assert_eq!(
-            looks(&waiting).1,
-            "Update to Mickey 0.2.2 · In control: this PC"
-        );
-        assert_eq!(
-            update_label(&waiting).as_deref(),
-            Some("Update to Mickey 0.2.2")
-        );
+        let banner = i18n::tf("update.banner", &[("version", "0.2.2")]);
+        let here_tip = i18n::t("tray.tooltip_here");
+        assert_eq!(looks(&waiting).1, format!("{banner} · {here_tip}"));
+        assert_eq!(update_label(&waiting).as_deref(), Some(banner.as_str()));
     }
 
     #[test]
     fn the_dot_follows_the_keyboard() {
+        ensure_english();
         assert_eq!(looks(&status(None, true, true)).0, Dot::Here);
         assert_eq!(
-            looks(&status(Some(0), false, true)),
-            (Dot::Elsewhere, "In control: Windows".into())
+            looks(&status(Some(0), false, true)).1,
+            i18n::tf("tray.tooltip_elsewhere", &[("name", "Windows")])
         );
         // Another PC's keyboard left for a third PC.
         assert_eq!(
             looks(&status(None, false, true)).1,
-            "In control: another PC"
+            i18n::t("tray.tooltip_another")
         );
         assert_eq!(looks(&status(None, true, false)).0, Dot::Alone);
     }
