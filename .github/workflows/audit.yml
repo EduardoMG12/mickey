@@ -1,8 +1,10 @@
 name: Audit
 
-# Checks Cargo.lock against the RustSec advisory database. It runs on every
-# PR and on main, and also weekly: a new advisory can appear for a crate we
-# already use, without any change on our side.
+# Checks the dependencies (cargo-deny: security advisories, licenses, banned
+# or duplicated crates, where crates come from; settings in deny.toml) and
+# the workflows themselves (zizmor). It runs on every PR and on main, and
+# also weekly: a new advisory can appear for a crate we already use, without
+# any change on our side.
 on:
   pull_request:
   push:
@@ -10,16 +12,38 @@ on:
   schedule:
     - cron: "0 9 * * 1" # Mondays, 09:00 UTC
 
+# Read-only token: these jobs only read the code.
+permissions:
+  contents: read
+
 jobs:
+  # Kept as `audit`: branch protection requires a check with this name.
   audit:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
       - name: Install Rust
         run: |
           rustup toolchain install stable --profile minimal
           rustup default stable
       # Built from source with its own lockfile, so no third-party action or
       # prebuilt binary is trusted.
-      - run: cargo install cargo-audit --locked
-      - run: cargo audit --deny warnings
+      - run: cargo install cargo-deny --locked --version 0.20.2
+      - run: cargo deny check
+
+  workflows:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+      - run: cargo install zizmor --locked --version 1.32.0
+      # Offline: no token needed, and the audits that matter here (permissions,
+      # credentials, injection through ${{ }}) work without the network.
+      - run: zizmor --offline --format github .github/workflows/

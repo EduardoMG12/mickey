@@ -1,0 +1,55 @@
+# cargo-deny's settings: the Audit workflow runs `cargo deny check`.
+# It replaces cargo audit and also checks licenses, banned or duplicated
+# crates, and where crates come from.
+
+[graph]
+# The platforms Mickey ships for; crates only other targets need are skipped.
+targets = ["x86_64-unknown-linux-gnu", "x86_64-pc-windows-gnu", "x86_64-pc-windows-msvc"]
+
+[advisories]
+# Every crate in the tree, not only the direct ones: an unsound or
+# unmaintained crate deep down still ships inside Mickey.
+unsound = "all"
+unmaintained = "all"
+# zvariant, zvariant_derive and zbus_names are unmaintained: merged into
+# zbus 6. They come in through zbus 5, which ksni (the Linux tray icon) still
+# needs in its newest release (0.3.7). Not vulnerabilities. Remove these once
+# ksni moves to zbus 6: https://github.com/EduardoMG12/mickey/issues/296
+ignore = [
+    { id = "RUSTSEC-2026-0370", reason = "zvariant unmaintained, via ksni's zbus 5 (#296)" },
+    { id = "RUSTSEC-2026-0371", reason = "zbus_names unmaintained, via ksni's zbus 5 (#296)" },
+    { id = "RUSTSEC-2026-0372", reason = "zvariant_derive unmaintained, via ksni's zbus 5 (#296)" },
+]
+
+[licenses]
+# Licenses that can be combined with Mickey's GPL-3.0-or-later. A crate
+# with a choice ("Apache-2.0 OR GPL-2.0-only") passes through the allowed one.
+allow = [
+    "0BSD",
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "GPL-3.0-or-later", # Mickey's own crates
+    "ISC",
+    "MIT",
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib",
+    # The fonts egui embeds (epaint_default_fonts).
+    "OFL-1.1",
+    "Ubuntu-font-1.0",
+]
+
+[bans]
+# Two versions of one crate build twice; warn, do not fail: several come in
+# through dependencies we do not control.
+multiple-versions = "warn"
+wildcards = "deny"
+# Mickey's own crates depend on each other by path, never published.
+allow-wildcard-paths = true
+
+[sources]
+# Crates only from crates.io, never from a git repository or another registry.
+unknown-registry = "deny"
+unknown-git = "deny"
