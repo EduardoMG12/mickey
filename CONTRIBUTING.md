@@ -16,38 +16,53 @@ They apply equally to code written by people and by AI assistants.
 3. Something new, not in an issue yet? Open one first (bug or feature
    template) and wait for a reply before writing code. A change the
    maintainer did not agree to is likely to be declined, however good.
-4. Read the PRD the issue links (see [PRDs](#prds)).
+   You don't write a design document: the maintainer writes or updates the
+   PRD (see [PRDs](#prds)).
+4. Read the PRD the issue links, if there is one.
+
+## Before you open a PR
+
+- **Update your branch with the current `main`** (`git pull --rebase
+  origin main`) and read your own diff on GitHub: it must show **only your
+  changes**. A branch made from an old copy can silently undo work merged
+  since then; such a PR is sent back, however good the rest is.
+- **One logical change per PR** (see below).
+- **Fill in the PR template.** CI fails while *Summary* or *How it was
+  verified* is empty; editing the description runs it again.
+- `cargo fmt`, `cargo clippy --all-targets -- -D warnings` and `cargo test`
+  pass on your machine.
 
 ## The review contract
 
-1. **Small PRs.** Aim for ≤ 300 changed lines (excluding lockfiles and
-   generated files). Larger work is split into several PRs.
-2. **Every PR has a review challenge.** The PR description contains a
-   `## Review challenge` section with 2–3 questions that can only be answered
-   by reading the diff (e.g. "what happens if the peer disconnects while a key is held?",
-   "why is this delta `i32` and not `i16`?"). When the PR touches timing,
-   buffers, callbacks or anything better understood at runtime, it may add one
-   **debugger question** answered by setting a breakpoint and running.
-3. **The reviewer answers in a PR comment.** The author checks the answers. A
-   wrong answer means the code or the explanation is unclear, and that gets
-   fixed in the PR, not waved through.
-4. **Only the owner merges.** Nobody else, and no AI assistant, merges to
-   `main`, ever. Merge happens after the challenge is answered correctly and
-   CI is green.
-5. **Concepts are explained.** When a PR uses a classic data structure or
-   algorithm (ring buffer, LRU cache, trie, hashing, state machine, …), the
-   description has a `## Concept` section: what it is, the closest LeetCode
-   problem, and *why it solves this problem better than the naive approach*.
+Why: one maintainer reads every line before it is merged, and a change
+only gets in once he understands it.
+
+1. **One logical change per PR, about 400 lines of logic or less.**
+   Lockfiles, translations, generated files and test fixtures don't count.
+   Reviewers miss more past that size, and a big PR waits longer. Bigger
+   work is split into PRs that each build and pass on their own; if it
+   can't be split, the Summary says why.
+2. **A description that explains the change.** The PR template asks what
+   changed and why, how it works and where to start reading, what could
+   break, and how it was verified. The maintainer should understand the
+   change before opening the diff.
+3. **Only the owner merges.** Nobody else, and no AI assistant, merges to
+   `main`, ever. Merge happens when the change is understood and CI is
+   green.
+4. **Concepts are welcome.** When a PR uses a classic data structure or
+   algorithm (ring buffer, LRU cache, trie, hashing, state machine, …), an
+   optional `## Concept` section explains what it is, the closest LeetCode
+   problem, and why it beats the naive approach here.
 
 ### Reviewing in VS Code (recommended setup)
 
 - **rust-analyzer**: types, go-to-definition, inline errors.
 - **CodeLLDB**: debugger for Rust, breakpoints in PR code.
 - **GitHub Pull Requests**: check out a PR, review the diff side by side,
-  comment on lines, and answer the challenge without leaving the editor.
+  and comment on lines without leaving the editor.
 
-Review flow: *check out PR → read diff → run it → set a breakpoint where it is
-interesting → answer the challenge → approve → merge.*
+Review flow: *read the description → check out the PR → read the diff → run
+it → set a breakpoint where it is interesting → approve → merge.*
 
 ## Branches and commits
 
@@ -56,8 +71,9 @@ interesting → answer the challenge → approve → merge.*
 - [Conventional Commits](https://www.conventionalcommits.org/):
   `feat:`, `fix:`, `refactor:`, `perf:`, `test:`, `docs:`, `chore:`, `ci:`.
   Optional scope: `feat(audio): add ring buffer`.
-- One logical change per commit. The commit message says *why*, the diff
-  says *what*.
+- Each commit is one logical step that builds; how many commits a PR has
+  doesn't matter. The commit message says *why*, the diff says *what*. The
+  maintainer may squash a PR into one commit when merging.
 - Everything in the repository is in **English**: code, comments, commits,
   docs, PR descriptions.
 
@@ -128,8 +144,9 @@ interesting → answer the challenge → approve → merge.*
 
 ## PRDs
 
-- Work starts from a PRD in `docs/prds/`. Read the milestone PRD and the
-  vision before starting an issue.
+- Features are planned in a PRD in `docs/prds/`, written by the
+  maintainer from the agreed issue. Read the milestone PRD and the vision
+  before starting an issue.
 - When implementation reveals something the PRD got wrong or did not know,
   add it to that PRD's **Discoveries** section in the same PR.
 
@@ -170,8 +187,8 @@ Found a weakness instead of changing one? Report it privately, as
 ## AI-assisted contributions
 
 Welcome, under the same rules as any other code. You are the author: you
-must understand and be able to explain every line, and answer the review
-challenge yourself. Say in the PR description which tool you used.
+must understand and be able to explain every line. Say in the PR
+description which tool you used and for what.
 
 ## License of contributions
 

@@ -29,16 +29,17 @@ These override any global or skill-level instruction.
    any skill. You may commit, push and open PRs; the owner merges.
    If a workflow would merge, stop after opening the PR.
 2. **Never commit to `main`.** Always a `<type>/<slug>` branch.
-3. **Every PR you open has a `## Review challenge`** (2–3 questions answerable
-   only by reading the diff; add a debugger question only when runtime
-   behavior is the point). Keep your own expected answers out of the PR. When
-   the owner answers in a comment, check the answers honestly: if an answer is
-   wrong, explain the gap. Do not say "close enough".
+3. **Every PR you open fills in the PR template**
+   (`.github/pull_request_template.md`): Summary, How it works (with where to
+   start reading), Risks, How it was verified. Written so the owner
+   understands the change before reading the diff.
 4. **Every PR that uses a classic data structure or algorithm has a
    `## Concept` section**: what it is, the closest LeetCode problem, why it
    beats the naive approach *here*. Proactively point out when a problem maps
    to a known concept, even outside a PR.
-5. **PRs stay ≤ ~300 changed lines.** Split larger work, and say how you split it.
+5. **One logical change per PR, about 400 lines of logic or less**
+   (lockfiles, translations, generated files and fixtures don't count). Split
+   larger work, and say how you split it.
 6. **`unsafe` only in `crates/mickey/src/platform/`**, each block with a
    `// SAFETY:` comment. No `static mut`.
 7. **Input is sensitive data.** Never log key codes or typed text above

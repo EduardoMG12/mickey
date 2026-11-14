@@ -455,9 +455,9 @@ switcher, the clipboard), each with diagrams.
 
 Mickey is a learning project, and its process is part of the point:
 
-- Every PR is small (≤ ~300 lines) and carries a **review challenge**,
-  questions only someone who actually read (and sometimes debugged) the diff
-  can answer.
+- Every PR is one logical change (about 400 lines of logic or less) with a
+  description that explains what changed, why, how it works and how it was
+  verified, so it can be understood before reading the diff.
 - When a classic algorithm or data structure shows up (state machine, graph,
   set, framing a byte stream, …), the PR explains the concept and the matching
   LeetCode problem.
