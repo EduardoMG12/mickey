@@ -12,14 +12,15 @@ use std::time::Instant;
 
 /// The target's side of a data link, until it closes: `Ask` is answered
 /// with what `read` finds copied here, and content sent here is handed to
-/// `write`, which puts it in this PC's clipboard.
+/// `write`, which puts it in this PC's clipboard, if `may_write` allows it;
+/// when it does not, its error names the sending PC for the log (#436).
 /// Messages of kind 16 and up (the group map, the shared hotkeys) are not
 /// the clipboard's: they go to `other`, with their kind.
 pub fn answer(
     mut link: Link,
     may_read: impl Fn() -> bool,
     read: impl Fn() -> Option<Content>,
-    may_write: impl Fn() -> bool,
+    may_write: impl Fn() -> Result<(), String>,
     write: impl Fn(Content),
     other: impl Fn(u8, &str),
     still_trusted: impl Fn() -> bool,
@@ -49,21 +50,23 @@ pub fn answer(
             }
             // Only from the source whose keyboard is on this PC, which
             // brings its clipboard along; files are not even saved
-            // otherwise.
-            Wire::Content(content) => {
-                if may_write() {
-                    write(content);
-                } else {
-                    eprintln!("mickey: a clipboard from a PC not in control here was refused");
+            // otherwise. A refusal logs who sent it, never what.
+            Wire::Content(content) => match may_write() {
+                Ok(()) => write(content),
+                Err(who) => eprintln!(
+                    "mickey: a clipboard from {who}, a PC not in control here, was refused"
+                ),
+            },
+            Wire::Files(files) => match may_write() {
+                Ok(()) => {
+                    if let Some(paths) = save(files) {
+                        write(Content::Files(paths));
+                    }
                 }
-            }
-            Wire::Files(files) => {
-                if !may_write() {
-                    eprintln!("mickey: files from a PC not in control here were refused");
-                } else if let Some(paths) = save(files) {
-                    write(Content::Files(paths));
+                Err(who) => {
+                    eprintln!("mickey: files from {who}, a PC not in control here, were refused")
                 }
-            }
+            },
             Wire::Nothing => {}
         }
     }
@@ -471,7 +474,7 @@ mod tests {
                 || true,
                 || Some(Content::Text("from the target".into())),
                 // The source's keyboard is here.
-                || true,
+                || Ok(()),
                 |content| target_written.lock().unwrap().push(content),
                 |_, _| {},
                 || true,
@@ -499,5 +502,34 @@ mod tests {
             *written.lock().unwrap(),
             [Content::Text("from the source".into())]
         );
+    }
+
+    #[test]
+    fn a_clipboard_from_a_pc_not_in_control_is_refused() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let written = Arc::new(Mutex::new(Vec::new()));
+        let target_written = Arc::clone(&written);
+        let target = thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            let link = Link::respond(stream, &Identity::generate().unwrap()).unwrap();
+            let _ = answer(
+                link,
+                || false,
+                || None,
+                // The source's keyboard is elsewhere: refused, named.
+                || Err("laptop".into()),
+                |content| target_written.lock().unwrap().push(content),
+                |_, _| {},
+                || true,
+            );
+        });
+        let stream = TcpStream::connect(addr).unwrap();
+        let mut link = Link::initiate(stream, &Identity::generate().unwrap()).unwrap();
+        let sent = Wire::Content(Content::Text("from the source".into()));
+        link.send_bulk(&wire::encode(&sent).unwrap()).unwrap();
+        drop(link);
+        target.join().unwrap();
+        assert!(written.lock().unwrap().is_empty());
     }
 }

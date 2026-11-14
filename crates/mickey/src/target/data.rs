@@ -59,7 +59,13 @@ pub(super) fn serve_clipboard(
                             link,
                             || clipboard::sync::may_read(&grants, from),
                             || keeper.read(),
-                            || clipboard::sync::may_write(&grants, from),
+                            || {
+                                if clipboard::sync::may_write(&grants, from) {
+                                    Ok(())
+                                } else {
+                                    Err(peer_name(from))
+                                }
+                            },
                             |content| keeper.write(content),
                             payload,
                             || trusted.lock_anyway().is_trusted(&by),
@@ -70,6 +76,21 @@ pub(super) fn serve_clipboard(
             });
         }
     });
+}
+
+/// The PC at `from`, named as config.toml knows it; its address if
+/// config.toml does not list it.
+fn peer_name(from: std::net::IpAddr) -> String {
+    config::Config::load()
+        .ok()
+        .flatten()
+        .and_then(|config| {
+            config
+                .peers
+                .into_iter()
+                .find(|peer| peer.address.ip() == from)
+        })
+        .map_or_else(|| from.to_string(), |peer| peer.name)
 }
 
 /// One small message a peer sent on its data link, by `kind`: the group
@@ -106,20 +127,7 @@ fn on_payload(
             let lines = text.to_string();
             let _ = target_news.send(source::TargetNews::Hotkeys { lines, from });
         }
-        group::AUDIO_KEY => {
-            // Named after the PC, as config.toml knows it.
-            let name = config::Config::load()
-                .ok()
-                .flatten()
-                .and_then(|config| {
-                    config
-                        .peers
-                        .into_iter()
-                        .find(|peer| peer.address.ip() == from)
-                })
-                .map_or_else(|| from.to_string(), |peer| peer.name);
-            audio::heard_key(text, from, &name);
-        }
+        group::AUDIO_KEY => audio::heard_key(text, from, &peer_name(from)),
         group::AUDIO => {
             let _ = target_news.send(source::TargetNews::Audio(text.to_string()));
         }
