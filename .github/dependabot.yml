@@ -1,0 +1,19 @@
+# Dependabot opens a PR when a dependency or a pinned action has a newer
+# version, grouped so it is one PR a week per ecosystem, not dozens.
+# Security fixes come as soon as an advisory is published.
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      cargo:
+        patterns: ["*"]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]

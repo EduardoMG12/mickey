@@ -65,10 +65,16 @@ bindings in `platform/` are hand-written).
 - [`ci.yml`](../../.github/workflows/ci.yml): on every PR and on `main`,
   on **Ubuntu and Windows**: `cargo fmt --check`,
   `cargo clippy --all-targets -- -D warnings` (a warning fails the
-  build), `cargo test`. Must be green before the owner merges.
-- [`audit.yml`](../../.github/workflows/audit.yml): `cargo audit` against
-  the RustSec advisory database, on PRs, on `main`, and every Monday (a new
-  advisory can appear with no change on our side).
+  build), `cargo test`, and on Ubuntu `tools/check-unsafe.sh` (`unsafe`
+  only in `platform/`). Must be green before the owner merges.
+- [`audit.yml`](../../.github/workflows/audit.yml): `cargo deny check`
+  (security advisories from the RustSec database, licenses, banned or
+  duplicated crates, where crates come from; settings in `deny.toml`) and
+  `zizmor` (security mistakes in the workflows themselves), on PRs, on
+  `main`, and every Monday (a new advisory can appear with no change on our
+  side).
+- [`dependabot.yml`](../../.github/dependabot.yml): a weekly PR when a
+  dependency or a pinned action has a newer version.
 - [`release.yml`](../../.github/workflows/release.yml): next section.
 
 ## The release, step by step
@@ -130,7 +136,7 @@ exact CI gate: if it passes here, CI's clippy step will too.
 2. What stops a release whose tag says `v0.3.0` while `Cargo.toml` still
    says `0.2.1`?
 3. Why can CI test the secure link and the key path with no keyboard?
-4. Why does `cargo audit` also run on a schedule?
+4. Why does `cargo deny` also run on a schedule?
 
 <details>
 <summary>Answers</summary>

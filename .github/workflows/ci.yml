@@ -5,6 +5,10 @@ on:
   push:
     branches: [main]
 
+# Read-only token: these jobs only read the code.
+permissions:
+  contents: read
+
 jobs:
   check:
     strategy:
@@ -14,6 +18,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
       - name: Install Rust
         run: |
           rustup toolchain install stable --profile minimal --component rustfmt,clippy
@@ -22,5 +28,9 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update -qq && sudo apt-get install -y -qq libpulse-dev
       - run: cargo fmt --check
+      # Hard rule 6: `unsafe` only in crates/mickey/src/platform/.
+      - name: unsafe only in platform/
+        if: runner.os == 'Linux'
+        run: tools/check-unsafe.sh
       - run: cargo clippy --all-targets -- -D warnings
       - run: cargo test
