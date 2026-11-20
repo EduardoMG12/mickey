@@ -1,0 +1,40 @@
+<!doctype html><html><head><meta charset="utf-8">
+<style>html,body{margin:0;background:#1f1f23}</style>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"}}</script>
+</head><body>
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+const params = new URLSearchParams(location.search);
+const SIZE = +(params.get('size') || 320), FRAMES = +(params.get('frames') || 24), CLIP = params.get('clip') || 'Running';
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+renderer.setSize(SIZE, SIZE); renderer.setClearColor(0x1f1f23, 1);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+scene.add(new THREE.HemisphereLight(0xffffff, 0x55555f, 3.2));
+const key = new THREE.DirectionalLight(0xffffff, 2.8); key.position.set(2, 3, 4); scene.add(key);
+const camera = new THREE.PerspectiveCamera(30, 1, 0.01, 100);
+const log = (m) => fetch('/log', { method: 'POST', body: String(m) });
+new GLTFLoader().load('rat.glb', async (gltf) => {
+  const model = gltf.scene; scene.add(model);
+  // Face the camera three-quarters, to show it running.
+  model.rotation.y = -Math.PI / 5;
+  const box = new THREE.Box3().setFromObject(model);
+  const size = box.getSize(new THREE.Vector3()), center = box.getCenter(new THREE.Vector3());
+  const dist = Math.max(size.x, size.y, size.z) / (2 * Math.tan(THREE.MathUtils.degToRad(15))) * 1.15;
+  camera.position.set(center.x, center.y + size.y * 0.05, center.z + dist);
+  camera.lookAt(center);
+  const mixer = new THREE.AnimationMixer(model);
+  const clip = gltf.animations.find(a => a.name === CLIP);
+  mixer.clipAction(clip).play();
+  await log('clip ' + clip.name + ' ' + clip.duration.toFixed(3) + 's');
+  for (let i = 0; i < FRAMES; i++) {
+    mixer.setTime(clip.duration * i / FRAMES);
+    renderer.render(scene, camera);
+    const png = renderer.domElement.toDataURL('image/png');
+    await fetch('/frame?i=' + i, { method: 'POST', body: png });
+  }
+  await log('done');
+}, undefined, (e) => log('error ' + e));
+</script></body></html>

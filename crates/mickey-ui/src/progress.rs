@@ -90,6 +90,8 @@ struct Progress {
     place: Option<crate::place::Corner>,
     /// Set by Cancel; read once the window has closed.
     cancelled: Arc<AtomicBool>,
+    /// The Ratão, running while files come.
+    running: Option<crate::theme::Running>,
 }
 
 impl eframe::App for Progress {
@@ -134,8 +136,6 @@ impl eframe::App for Progress {
                     } else {
                         *done as f32 / *total as f32
                     };
-                    ui.add(egui::ProgressBar::new(fraction).show_percentage());
-                    ui.add_space(4.0);
                     let mut line = format!("{} / {}", units::size(*done), units::size(*total));
                     if let Some(speed) = speed {
                         line += &format!(" · {}/s", units::size(*speed as u64));
@@ -146,8 +146,20 @@ impl eframe::App for Progress {
                             i18n::tf("progress.left", &[("time", &units::time(*left))])
                         );
                     }
-                    ui.label(line);
-                    ui.weak(stage_text(stage));
+                    ui.horizontal(|ui| {
+                        // It runs while files come, not while paused.
+                        if let Some(running) = &self.running
+                            && stage != "paused"
+                        {
+                            running.show(ui, 64.0);
+                        }
+                        ui.vertical(|ui| {
+                            ui.add(egui::ProgressBar::new(fraction).show_percentage());
+                            ui.add_space(4.0);
+                            ui.label(line);
+                            ui.weak(stage_text(stage));
+                        });
+                    });
                     ui.add_space(8.0);
                     ui.horizontal(|ui| {
                         if ui
@@ -265,7 +277,7 @@ pub fn window(who: &str) -> ExitCode {
         viewport: crate::theme::viewport()
             .with_title(i18n::t("progress.window_title"))
             .with_app_id("mickey-progress")
-            .with_inner_size([400.0, 180.0])
+            .with_inner_size([420.0, 200.0])
             .with_resizable(false)
             .with_always_on_top(),
         ..Default::default()
@@ -314,6 +326,7 @@ pub fn window(who: &str) -> ExitCode {
                 state: window_state,
                 place: (!placed_by_compositor).then_some(corner),
                 cancelled: window_cancelled,
+                running: crate::theme::Running::load(&creation.egui_ctx),
             }))
         }),
     );

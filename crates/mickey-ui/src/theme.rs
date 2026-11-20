@@ -165,11 +165,56 @@ pub fn viewport() -> egui::ViewportBuilder {
 
 /// The built-in mascot PNG as RGBA pixels, its width and height.
 fn mascot_rgba() -> Option<(Vec<u8>, u32, u32)> {
-    let mut reader = png::Decoder::new(std::io::Cursor::new(include_bytes!(
-        "../assets/mascot-128.png"
-    )))
-    .read_info()
-    .ok()?;
+    png_rgba(include_bytes!("../assets/mascot-128.png"))
+}
+
+/// The Ratão running, while files come (`assets/ratao-running.png`): the
+/// frames of `assets/mascot/ratao-running.gif` side by side, made from
+/// its 3D model by `assets/mascot/render-ratao.html`. A sprite sheet, as
+/// the PNG decoder is already here and a GIF one is not.
+pub struct Running {
+    sheet: egui::TextureHandle,
+    frames: usize,
+}
+
+impl Running {
+    /// Frames shown a second, as the GIF plays them.
+    const FPS: f64 = 30.0;
+
+    pub fn load(ctx: &egui::Context) -> Option<Running> {
+        let (rgba, width, height) = png_rgba(include_bytes!("../assets/ratao-running.png"))?;
+        let frames = (width / height.max(1)) as usize;
+        let image =
+            egui::ColorImage::from_rgba_unmultiplied([width as usize, height as usize], &rgba);
+        let sheet = ctx.load_texture("ratao-running", image, egui::TextureOptions::LINEAR);
+        (frames > 0).then_some(Running { sheet, frames })
+    }
+
+    /// The frame for now, `size` points square; asks for the next one.
+    pub fn show(&self, ui: &mut egui::Ui, size: f32) {
+        let time = ui.input(|input| input.time);
+        let frame = (time * Self::FPS) as usize % self.frames;
+        let step = 1.0 / self.frames as f32;
+        let uv = egui::Rect::from_min_max(
+            egui::pos2(frame as f32 * step, 0.0),
+            egui::pos2((frame + 1) as f32 * step, 1.0),
+        );
+        // One frame of the sheet: square, not the sheet's long shape.
+        let frame = egui::Image::new(&self.sheet)
+            .uv(uv)
+            .maintain_aspect_ratio(false)
+            .fit_to_exact_size(egui::vec2(size, size));
+        ui.add(frame);
+        ui.ctx()
+            .request_repaint_after(std::time::Duration::from_secs_f64(1.0 / Self::FPS));
+    }
+}
+
+/// An RGBA PNG built in, as pixels, width and height.
+fn png_rgba(bytes: &'static [u8]) -> Option<(Vec<u8>, u32, u32)> {
+    let mut reader = png::Decoder::new(std::io::Cursor::new(bytes))
+        .read_info()
+        .ok()?;
     let mut rgba = vec![0; reader.output_buffer_size()?];
     let info = reader.next_frame(&mut rgba).ok()?;
     if info.color_type != png::ColorType::Rgba {
