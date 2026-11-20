@@ -68,6 +68,12 @@ impl Fetched {
             ..Default::default()
         }
     }
+
+    /// Whether anything of it was written yet: a folder made, a file or a
+    /// part of one.
+    pub fn started(&self) -> bool {
+        !self.finished.is_empty() || !self.parts.is_empty() || !self.claimed.is_empty()
+    }
 }
 
 /// Fetches every file of `offer` into the folder `into`, or what is left of

@@ -125,6 +125,11 @@ impl Transfers {
         if offer.origin == Some(*self.identity.public()) {
             return;
         }
+        // Never from a PC that is not paired: before any folder is made or
+        // any question asked, which such a PC could otherwise cause at will.
+        if !self.trusted.lock_anyway().is_trusted(&offer.key) {
+            return eprintln!("mickey: files offered by a PC that is not paired; not fetched");
+        }
         let this = Arc::clone(self);
         crate::threads::spawn("transfer fetch", move || {
             let key = (offer.key, offer.offer.id);
@@ -135,6 +140,7 @@ impl Transfers {
                 Begin::Resume(into, fetched) => (into, *fetched),
                 Begin::Start => match this.landing(&offer, &who) {
                     Ok(Some(into)) => {
+                        this.fetches.running_in(key, into.clone());
                         let mark = crate::fs::mark::Mark::configured(&who);
                         (into, Fetched::marked(mark))
                     }
@@ -163,6 +169,15 @@ impl Transfers {
             }
             match result {
                 Ok(landed) => this.fetches.done(key, landed),
+                // Nothing arrived (out of reach, a firewall, an offer the
+                // other PC no longer has): nothing to go on with, and the
+                // empty folder goes. Downloads/Mickey itself stays.
+                Err(_) if !fetched.started() => {
+                    this.fetches.forget(key);
+                    if into.starts_with(&this.received) {
+                        let _ = std::fs::remove_dir(&into);
+                    }
+                }
                 Err(_) => this.fetches.broke(key, into, fetched),
             }
         });
@@ -500,5 +515,18 @@ mod tests {
         drop(turn);
         let err = waiting.join().unwrap().unwrap_err();
         assert!(err.contains("cancelled"), "{err}");
+    }
+
+    #[test]
+    fn an_offer_from_a_pc_not_paired_makes_no_folder_and_asks_nothing() {
+        let scratch = Scratch::new("unpaired-offer");
+        let b = pc(&scratch, "b", 1, None, None);
+        // Refused before any thread starts: nothing to wait for.
+        b.fetch(
+            crate::transfer::file_offer::example(None),
+            "127.0.0.1".parse().unwrap(),
+        );
+        assert!(!scratch.0.join("b/received").exists(), "no folder");
+        assert!(b.fetches.waiting().is_empty(), "nothing kept");
     }
 }
