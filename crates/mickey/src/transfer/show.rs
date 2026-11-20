@@ -91,6 +91,9 @@ impl Watcher {
             let stop = window_stop;
             let started = Instant::now();
             let mut window: Option<ChildStdin> = None;
+            // The owner closed it: not opened again while it runs. How it
+            // ends, if it failed or files did not come, still shows.
+            let mut dismissed = false;
             loop {
                 match end.recv_timeout(EVERY) {
                     Ok(how) => {
@@ -107,7 +110,7 @@ impl Watcher {
                     Err(RecvTimeoutError::Disconnected) => return,
                     Err(RecvTimeoutError::Timeout) => {}
                 }
-                if window.is_none() && started.elapsed() >= QUIET_FOR {
+                if window.is_none() && !dismissed && started.elapsed() >= QUIET_FOR {
                     window = open(&who, Some(stop.clone()));
                 }
                 if let Some(input) = &mut window {
@@ -115,6 +118,7 @@ impl Watcher {
                     // The owner closed the window: the transfer goes on.
                     if writeln!(input, "{line}").is_err() {
                         window = None;
+                        dismissed = true;
                     }
                 }
             }

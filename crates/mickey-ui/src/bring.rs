@@ -82,8 +82,13 @@ fn age(item: &Item) -> String {
     }
 }
 
+/// Enter and Esc count only after the window has been up this long.
+const KEYS_AFTER: std::time::Duration = std::time::Duration::from_millis(800);
+
 struct Bring {
     asked: Asked,
+    /// When it appeared.
+    shown: std::time::Instant,
     answer: Rc<Cell<bool>>,
     /// The corner the window still has to move itself to, where the
     /// compositor does not place it (Windows, X11).
@@ -133,8 +138,13 @@ impl eframe::App for Bring {
                     }
                 }
                 ui.add_space(10.0);
+                // Not in its first moment: it appears on its own, over what
+                // the owner types, and an Enter meant for that is no yes.
+                let settled = self.shown.elapsed() >= KEYS_AFTER;
                 let keys = ui.input(|input| {
-                    if input.key_pressed(egui::Key::Enter) {
+                    if !settled {
+                        None
+                    } else if input.key_pressed(egui::Key::Enter) {
                         Some(true)
                     } else if input.key_pressed(egui::Key::Escape) {
                         Some(false)
@@ -176,6 +186,7 @@ pub fn window(asked: Asked) -> ExitCode {
     let answer = Rc::new(Cell::new(false));
     let window = Bring {
         asked,
+        shown: std::time::Instant::now(),
         answer: Rc::clone(&answer),
         place: (!placed_by_compositor).then_some(corner),
     };

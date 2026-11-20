@@ -201,10 +201,12 @@ pub fn user_sid() -> io::Result<String> {
             &mut needed,
         )
     } != 0;
+    // Read before CloseHandle, which may change it.
+    let failed = (!ok).then(io::Error::last_os_error);
     // SAFETY: `token` was opened above and is closed once.
     unsafe { CloseHandle(token) };
-    if !ok {
-        return Err(io::Error::last_os_error());
+    if let Some(err) = failed {
+        return Err(err);
     }
     // SAFETY: on success the buffer starts with a TOKEN_USER, whose first
     // field is the pointer to the SID, which lives inside `buffer`.

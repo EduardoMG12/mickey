@@ -231,9 +231,10 @@ mod imp {
     /// by whoever may change the folder it is in. Inside Program Files,
     /// nobody but administrators can.
     ///
-    /// The task is described in an XML file, written next to `mickey.exe`
-    /// and removed after: there only administrators could swap it before
-    /// `schtasks` reads it, when the task runs as administrator.
+    /// The task is described in an XML file, removed after: as
+    /// administrator in Windows' temp folder, where nobody else can swap
+    /// it before `schtasks` reads it, even when the install folder is the
+    /// user's to change.
     fn create() -> Result<(), String> {
         let exe = std::env::current_exe().map_err(|err| err.to_string())?;
         let dir = exe.parent().ok_or("mickey.exe has no folder")?;
@@ -253,14 +254,32 @@ mod imp {
             .map_err(|err| format!("cannot tell which user the task is for: {err}"))?;
         let ui = exe.with_file_name("mickey-ui.exe");
         let xml = super::task_xml(&user, &ui.display().to_string(), highest);
-        let file = exe.with_file_name("mickey-task.xml");
+        // A new file with a name nobody can guess, never one already there
+        // (a link someone planted). As administrator, in Windows' own temp
+        // folder, where nobody else can change or remove what an
+        // administrator made: the install folder may be the user's to
+        // change, and schtasks, run as administrator, reads it. Otherwise
+        // next to this program: swapping it would give nothing.
+        let random = crate::net::identity::random_bytes()?;
+        let name = format!("mickey-task-{}.xml", crate::hex::encode(&random[..8]));
+        let dir = if crate::platform::acl::elevated() {
+            let root = std::env::var_os("SystemRoot").unwrap_or_else(|| "C:\\Windows".into());
+            std::path::Path::new(&root).join("Temp")
+        } else {
+            dir.to_path_buf()
+        };
+        let file = dir.join(name);
         // schtasks reads UTF-16, with its byte order mark.
         let bytes: Vec<u8> = std::iter::once(0xFEFF)
             .chain(xml.encode_utf16())
             .flat_map(u16::to_le_bytes)
             .collect();
-        std::fs::write(&file, bytes)
-            .map_err(|err| format!("cannot write {}: {err}", file.display()))?;
+        let written = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&file)
+            .and_then(|mut new| std::io::Write::write_all(&mut new, &bytes));
+        written.map_err(|err| format!("cannot write {}: {err}", file.display()))?;
         let path = file.display().to_string();
         let made = run(
             system("schtasks.exe"),
