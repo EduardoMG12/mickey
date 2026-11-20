@@ -91,6 +91,22 @@ impl Link {
         }
     }
 
+    /// Says, once, when the peer closes the connection, without reading
+    /// anything from it: it only looks (a peek), so what the peer sends
+    /// is still there to read. For a question shown while the peer waits,
+    /// which is moot once it has gone (#420).
+    pub fn when_closed(&self) -> io::Result<std::sync::mpsc::Receiver<()>> {
+        let stream = self.stream.try_clone()?;
+        let (closed, when) = std::sync::mpsc::channel();
+        crate::threads::spawn("link watch", move || {
+            // 0 bytes: the peer closed it. Data: it is still there.
+            if matches!(stream.peek(&mut [0u8; 1]), Ok(0) | Err(_)) {
+                let _ = closed.send(());
+            }
+        });
+        Ok(when)
+    }
+
     /// Closes the connection both ways, waking whoever is reading it.
     pub fn shutdown(&self) -> io::Result<()> {
         self.stream.shutdown(std::net::Shutdown::Both)
@@ -712,5 +728,19 @@ mod tests {
         let (got, err) = handle.join().unwrap();
         assert_eq!(got, [KEY]);
         assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+    }
+
+    #[test]
+    fn a_link_says_when_its_peer_closes_it_and_reads_nothing() {
+        use std::time::Duration;
+        let (mut ours, mut theirs) = crate::test_util::link_pair();
+        let closed = ours.when_closed().unwrap();
+        theirs.send_bulk(b"still here").unwrap();
+        std::thread::sleep(Duration::from_millis(200));
+        assert!(closed.try_recv().is_err(), "data is no close");
+        assert_eq!(ours.recv_bulk().unwrap(), b"still here", "the peek kept it");
+        let closed = ours.when_closed().unwrap();
+        drop(theirs);
+        assert!(closed.recv_timeout(Duration::from_secs(2)).is_ok());
     }
 }

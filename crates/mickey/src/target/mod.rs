@@ -202,7 +202,16 @@ pub(super) fn serve_source(
             .and_then(|table| table.name_of(&peer_key))
             .unwrap_or_else(|| peer.ip().to_string());
         let code = link.pairing_code();
-        match trust::ask_once(&peer_key, peer, &code, &who, &|| false) {
+        // The other PC's owner may say no, or wait too long: it closes the
+        // link, and the window here closes too. Nobody here may pair with
+        // a PC that has given up, its code gone from the other screen.
+        let closed = link.when_closed().ok();
+        let gone = || {
+            closed
+                .as_ref()
+                .is_some_and(|closed| closed.try_recv().is_ok())
+        };
+        match trust::ask_once(&peer_key, peer, &code, &who, &gone) {
             Ok(trust::Answer::Paired) => {
                 if let Err(err) = lock().add(peer_key, &peer.to_string()) {
                     eprintln!("mickey: {err}");
@@ -214,7 +223,9 @@ pub(super) fn serve_source(
                 println!("mickey: refused {peer}");
                 return not_paired(link, why);
             }
-            Ok(trust::Answer::Stopped) => return,
+            Ok(trust::Answer::Stopped) => {
+                return println!("mickey: {peer} stopped asking to pair; not paired");
+            }
             Err(err) => {
                 eprintln!("mickey: {err}");
                 return not_paired(link, protocol::NotPairedWhy::Declined);
