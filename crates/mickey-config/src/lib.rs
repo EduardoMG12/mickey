@@ -303,8 +303,6 @@ fn default_scroll_speed() -> i32 {
     DEFAULT_SCROLL_SPEED
 }
 
-/// The PC at `ip`, named as config.toml knows it; its address if
-/// config.toml does not list it, or cannot be read.
 /// The most `[interface] bring_over_gb` may be: past this, nothing would
 /// ever be asked about.
 pub const MAX_BRING_OVER_GB: u64 = 1000;
@@ -314,6 +312,8 @@ pub const MAX_CLEAN_OVER_GB: u64 = 10_000;
 /// Bring would suggest cleaning almost always.
 pub const MAX_CLEAN_BELOW_PERCENT: u64 = 50;
 
+/// The PC at `ip`, named as config.toml knows it; its address if
+/// config.toml does not list it, or cannot be read.
 pub fn peer_name_or_address(ip: std::net::IpAddr) -> String {
     Config::load()
         .ok()

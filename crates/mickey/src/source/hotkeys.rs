@@ -115,9 +115,11 @@ pub(super) fn offer_hotkeys(lines: String, who: &str, wake: &Sender<Wake>) {
 /// config as it is now. Nothing is written unless the new file still reads
 /// as valid hotkeys.
 pub(super) fn take_hotkeys(lines: &str) -> Result<config::Config, String> {
-    let hotkeys = config::Hotkeys::from_lines(lines)?;
+    let mut hotkeys = config::Hotkeys::from_lines(lines)?;
     let path = config::path()?;
     let text = std::fs::read_to_string(&path).map_err(|err| err.to_string())?;
+    // This PC's own, never shared: kept, not lost with the rest (#437).
+    hotkeys.clipboard = config::parse(&text)?.hotkeys.clipboard;
     let new = config::set_hotkeys(&text, &hotkeys)?;
     config::parse(&new)?.hotkeys()?;
     config::write(&path, &new)?;

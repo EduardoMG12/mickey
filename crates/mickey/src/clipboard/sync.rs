@@ -34,9 +34,6 @@ pub fn answer(
     still_trusted: impl Fn() -> bool,
     transfers: Option<&Arc<Transfers>>,
 ) -> io::Result<()> {
-    // What this PC and the source last exchanged: asked again for the same,
-    // this PC answers `Nothing` instead of sending it back (#424).
-    let mut shared: Option<u64> = None;
     loop {
         let bytes = link.recv_bulk()?;
         // Forgotten while connected: nothing more from it.
@@ -57,15 +54,13 @@ pub fn answer(
         match message {
             Wire::Ask | Wire::AskOffer => {
                 let wants_offer = message == Wire::AskOffer;
-                let content = read().filter(|content| !already(shared, content));
-                let reply = match (content, transfers) {
+                // Always what is here, even what the source just sent: on a
+                // hop to a third PC, the source only passes it on.
+                let reply = match (read(), transfers) {
                     (Some(Content::Files(paths)), Some(transfers)) if wants_offer => {
                         offer_or_files(transfers, paths).into()
                     }
-                    (content, _) => content.map_or(Wire::Nothing, |content| {
-                        shared = content.fingerprint();
-                        Wire::Content(content)
-                    }),
+                    (content, _) => content.map_or(Wire::Nothing, Wire::Content),
                 };
                 link.send_bulk(&encode_or_nothing(&reply))?;
             }
@@ -73,10 +68,7 @@ pub fn answer(
             // brings its clipboard along; files are not even saved
             // otherwise. A refusal logs who sent it, never what.
             Wire::Content(content) => match may_write() {
-                Ok(()) => {
-                    shared = content.fingerprint();
-                    write(content);
-                }
+                Ok(()) => write(content),
                 Err(who) => eprintln!(
                     "mickey: a clipboard from {who}, a PC not in control here, was refused"
                 ),
@@ -112,8 +104,8 @@ fn refused_files(who: &str) {
     eprintln!("mickey: files from {who}, a PC not in control here, were refused");
 }
 
-/// Whether `content` is what two PCs last exchanged (`shared`), so the
-/// other one already has it.
+/// Whether `content` is what this PC and a peer last exchanged
+/// (`shared`), so the peer already has it.
 fn already(shared: Option<u64>, content: &Content) -> bool {
     shared.is_some() && content.fingerprint() == shared
 }
@@ -318,11 +310,13 @@ enum Job {
     /// Send this to one peer (the switcher, shown there).
     SendTo(usize, Vec<u8>),
     /// The keyboard went from `from` to `to` (`None`: this PC); the
-    /// `crossing`-th move.
+    /// `crossing`-th move. `asked`: the owner asked for the clipboard
+    /// (#437), so it goes even if `to` seems to have it.
     Moved {
         from: Option<usize>,
         to: Option<usize>,
         crossing: u64,
+        asked: bool,
     },
 }
 
@@ -393,17 +387,27 @@ impl DataLinks {
                         links.retain(|_, link| link.send_bulk(&bytes).is_ok());
                         audio = Some(bytes);
                     }
-                    Job::Moved { from, to, crossing } => {
+                    Job::Moved {
+                        from,
+                        to,
+                        crossing,
+                        asked,
+                    } => {
                         let takers = OfferTakers {
                             transfers: transfers.as_ref(),
                             knows: &knows,
                         };
+                        if asked && let Some(to) = to {
+                            shared.remove(&to);
+                        }
                         // The keyboard moved again since (a quick bounce,
                         // or this thread was busy): this clipboard would
                         // reach a PC the keyboard already left, which
                         // refuses it (#436). The newer crossing carries.
+                        // To this PC it still goes: here nothing refuses
+                        // it, and the newer crossing carries it on.
                         let current = || latest.load(Ordering::SeqCst) == crossing;
-                        if current() {
+                        if to.is_none() || current() {
                             let peers = Peers {
                                 links: &mut links,
                                 shared: &mut shared,
@@ -476,8 +480,22 @@ impl DataLinks {
     }
 
     pub fn moved(&self, from: Option<usize>, to: Option<usize>) {
+        self.carry(from, to, false);
+    }
+
+    /// The owner asked for the clipboard of `from` to come to `to` (#437).
+    pub fn bring(&self, from: Option<usize>, to: Option<usize>) {
+        self.carry(from, to, true);
+    }
+
+    fn carry(&self, from: Option<usize>, to: Option<usize>, asked: bool) {
         let crossing = self.crossings.fetch_add(1, Ordering::SeqCst) + 1;
-        let _ = self.jobs.send(Job::Moved { from, to, crossing });
+        let _ = self.jobs.send(Job::Moved {
+            from,
+            to,
+            crossing,
+            asked,
+        });
     }
 }
 
@@ -521,11 +539,10 @@ impl From<Carried> for Wire {
     }
 }
 
-/// The keyboard went from `from` to `to`: what is copied at `from` is put
-/// at `to`. Files go as an offer when both ends take one.
-/// Carries the clipboard from `from` to `to` (`None`: this PC). It gives
-/// up before putting it anywhere once `current` says the keyboard has
-/// moved again.
+/// The keyboard went from `from` to `to` (`None`: this PC): what is
+/// copied at `from` is put at `to`. Files go as an offer when both ends
+/// take one. It gives up before sending to a peer once `current` says the
+/// keyboard has moved again.
 fn carry(
     keeper: &Keeper,
     mut peers: Peers,
@@ -542,7 +559,7 @@ fn carry(
     let Some(carried) = carried else {
         return;
     };
-    if !current() {
+    if to.is_some() && !current() {
         return;
     }
     match to {
@@ -568,13 +585,18 @@ fn ask_peer(peers: &mut Peers, peer: usize, offers: bool) -> Option<Carried> {
         let answer = wire::decode(&recv_clipboard(link)?).map_err(io::Error::other)?;
         Ok::<_, io::Error>((answer, link.peer_ip()?, *link.peer_key()))
     });
+    // What the peer holds is known again only from a text or an image it
+    // sent: anything else (files, no grant, an error) and it may hold
+    // something new, so the next crossing to it sends, whatever it is.
+    match asked.as_ref().and_then(|answer| match answer {
+        Ok((Wire::Content(content), _, _)) => content.fingerprint(),
+        _ => None,
+    }) {
+        Some(fingerprint) => peers.shared.insert(peer, fingerprint),
+        None => peers.shared.remove(&peer),
+    };
     match asked {
-        Some(Ok((Wire::Content(content), _, _))) => {
-            if let Some(fingerprint) = content.fingerprint() {
-                peers.shared.insert(peer, fingerprint);
-            }
-            Some(Carried::Content(content))
-        }
+        Some(Ok((Wire::Content(content), _, _))) => Some(Carried::Content(content)),
         Some(Ok((Wire::Files(files), _, _))) => {
             save(files).map(|paths| Carried::Content(Content::Files(paths)))
         }
@@ -616,16 +638,16 @@ fn put_here(keeper: &Keeper, transfers: Option<&Arc<Transfers>>, carried: Carrie
 fn send_to_peer(peers: &mut Peers, peer: usize, carried: Carried, started: Instant) {
     /// Over this, how long a send took is logged.
     const LOG_OVER: usize = 64 << 10;
-    if let Carried::Content(content) = &carried {
-        // It was sent there, or came from there.
-        if already(peers.shared.get(&peer).copied(), content) {
-            return;
+    let fingerprint = match &carried {
+        Carried::Content(content) => {
+            // It was sent there, or came from there.
+            if already(peers.shared.get(&peer).copied(), content) {
+                return;
+            }
+            content.fingerprint()
         }
-        match content.fingerprint() {
-            Some(fingerprint) => peers.shared.insert(peer, fingerprint),
-            None => peers.shared.remove(&peer),
-        };
-    }
+        _ => None,
+    };
     let Some(link) = peers.links.get_mut(&peer) else {
         return;
     };
@@ -635,7 +657,13 @@ fn send_to_peer(peers: &mut Peers, peer: usize, carried: Carried, started: Insta
         Carried::NotOffered(_) => "files not offered".to_string(),
     };
     let bytes = encode_or_nothing(&Wire::from(carried));
-    match link.send_bulk(&bytes) {
+    let sent = link.send_bulk(&bytes);
+    // Remembered only once it is there; files can change behind a path.
+    match (&sent, fingerprint) {
+        (Ok(()), Some(fingerprint)) => peers.shared.insert(peer, fingerprint),
+        _ => peers.shared.remove(&peer),
+    };
+    match sent {
         // The kind and size only: the content may be secret.
         Ok(()) if bytes.len() > LOG_OVER => println!(
             "mickey: clipboard ({kind}) sent as {} KB in {} ms",
@@ -914,28 +942,96 @@ mod tests {
         );
     }
 
-    #[test]
-    fn asked_for_what_it_was_just_sent_a_target_answers_nothing() {
-        let (mut link, theirs) = link_pair();
-        let target = thread::spawn(move || {
-            let link = theirs;
-            let held = Mutex::new(None);
+    /// A target that holds `clipboard`, grants every ask, and records what
+    /// it is sent: as `answer` runs for one PC.
+    fn target(clipboard: Arc<Mutex<Option<Content>>>) -> Link {
+        let (ours, theirs) = link_pair();
+        thread::spawn(move || {
+            let (read, written) = (Arc::clone(&clipboard), clipboard);
             let _ = answer(
-                link,
-                || held.lock().unwrap().clone(),
+                theirs,
+                move || read.lock().unwrap().clone(),
                 || Ok(()),
-                |content| *held.lock().unwrap() = Some(content),
+                move |content| *written.lock().unwrap() = Some(content),
                 |_, _| {},
                 || true,
                 None,
             );
         });
-        let mut send = |wire: Wire| link.send_bulk(&wire::encode(&wire).unwrap()).unwrap();
-        send(Wire::Content(Content::Text("same".into())));
-        send(Wire::Ask);
-        let reply = wire::decode(&link.recv_bulk().unwrap()).unwrap();
-        assert_eq!(reply, Wire::Nothing, "the source has it");
-        drop(link);
-        target.join().unwrap();
+        ours
+    }
+
+    fn cross(
+        keeper: &Keeper,
+        links: &mut HashMap<usize, Link>,
+        shared: &mut HashMap<usize, u64>,
+        from: Option<usize>,
+        to: Option<usize>,
+    ) {
+        let knows = HashSet::new();
+        let takers = OfferTakers {
+            transfers: None,
+            knows: &knows,
+        };
+        let peers = Peers { links, shared };
+        carry(keeper, peers, takers, (from, to), || true);
+    }
+
+    /// Waits a moment for what reaches `clipboard` over a link.
+    fn settled(clipboard: &Arc<Mutex<Option<Content>>>) -> Option<Content> {
+        thread::sleep(std::time::Duration::from_millis(200));
+        clipboard.lock().unwrap().clone()
+    }
+
+    #[test]
+    fn a_hop_through_a_pc_that_was_just_sent_it_still_arrives() {
+        let (b, c) = (Arc::new(Mutex::new(None)), Arc::new(Mutex::new(None)));
+        let mut links = HashMap::from([(0, target(Arc::clone(&b))), (1, target(Arc::clone(&c)))]);
+        let mut shared = HashMap::new();
+        let keeper = Keeper::in_memory(Some(Content::Text("copied on A".into())));
+        // A to B, then B to C: B holds what A sent, and passes it on.
+        cross(&keeper, &mut links, &mut shared, None, Some(0));
+        assert_eq!(settled(&b), Some(Content::Text("copied on A".into())));
+        cross(&keeper, &mut links, &mut shared, Some(0), Some(1));
+        assert_eq!(settled(&c), Some(Content::Text("copied on A".into())));
+    }
+
+    #[test]
+    fn a_peer_that_answers_nothing_may_hold_something_new() {
+        let b = Arc::new(Mutex::new(None));
+        let mut links = HashMap::from([(0, target(Arc::clone(&b)))]);
+        let mut shared = HashMap::new();
+        let keeper = Keeper::in_memory(Some(Content::Text("X".into())));
+        cross(&keeper, &mut links, &mut shared, None, Some(0));
+        assert_eq!(settled(&b), Some(Content::Text("X".into())));
+        // Copied on B by B's own keyboard; then B answers nothing (here,
+        // an empty clipboard stands for no grant).
+        *b.lock().unwrap() = None;
+        cross(&keeper, &mut links, &mut shared, Some(0), None);
+        *b.lock().unwrap() = Some(Content::Text("Y, B's own".into()));
+        // X again to B: B may not have it any more, so it goes.
+        cross(&keeper, &mut links, &mut shared, None, Some(0));
+        assert_eq!(settled(&b), Some(Content::Text("X".into())));
+    }
+
+    #[test]
+    fn an_overtaken_crossing_to_this_pc_still_brings_the_clipboard() {
+        let b = Arc::new(Mutex::new(Some(Content::Text("copied on B".into()))));
+        let mut links = HashMap::from([(0, target(Arc::clone(&b)))]);
+        let mut shared = HashMap::new();
+        let keeper = Keeper::in_memory(Some(Content::Text("A's old".into())));
+        let knows = HashSet::new();
+        let takers = OfferTakers {
+            transfers: None,
+            knows: &knows,
+        };
+        let peers = Peers {
+            links: &mut links,
+            shared: &mut shared,
+        };
+        // B to this PC, already overtaken by a newer crossing to C: it
+        // still lands here, so the newer crossing carries it on.
+        carry(&keeper, peers, takers, (Some(0), None), || false);
+        assert_eq!(keeper.read(), Some(Content::Text("copied on B".into())));
     }
 }

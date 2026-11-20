@@ -578,7 +578,7 @@ pub fn run(
             && came_from != focus
             && let Some(data_links) = &data_links
         {
-            data_links.moved(came_from, focus);
+            data_links.bring(came_from, focus);
         }
         let here = in_control.here();
         let waiting_update = updates.as_ref().and_then(update::Updates::waiting);
