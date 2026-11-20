@@ -28,9 +28,16 @@ pub fn start(
     trusted: trust::Shared,
     offers: Arc<Offers>,
 ) {
+    let still = Arc::clone(&trusted);
     let is_trusted = move |key: &[u8; 32]| trusted.lock_anyway().is_trusted(key);
     let answer = move |mut link: Link| {
-        let find = |id| offers.find(id);
+        // Asked again at every fetch: a PC forgotten while its transfer
+        // runs gets nothing more (its next fetch finds no offer).
+        let key = *link.peer_key();
+        let find = |id| {
+            let paired = still.lock_anyway().is_trusted(&key);
+            paired.then(|| offers.find(id)).flatten()
+        };
         if let Err(err) = crate::transfer::send::answer_fetches(&mut link, find) {
             eprintln!("mickey: a transfer ended: {err}");
         }

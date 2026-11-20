@@ -51,7 +51,11 @@ impl Mark {
         {
             let mut stream = path.as_os_str().to_owned();
             stream.push(":Zone.Identifier");
-            let _ = std::fs::write(stream, self.text());
+            // Said once per file, with no name (names never reach the
+            // log): a drive with no streams (FAT, exFAT) cannot keep it.
+            if let Err(err) = std::fs::write(stream, self.text()) {
+                eprintln!("mickey: a received file could not be marked as from another PC: {err}");
+            }
         }
         #[cfg(not(windows))]
         let _ = path;

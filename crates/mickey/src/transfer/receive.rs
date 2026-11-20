@@ -118,6 +118,9 @@ fn fetch_all(link: &mut Link, offer: &Offer, into: &Path, fetched: &mut Fetched)
         let (top, target) = &places[index];
         if !fetched.claimed.contains(top) {
             if top.symlink_metadata().is_ok() {
+                // Taken meanwhile (by the owner, or another transfer): the
+                // name is picked again next time, never failing for ever.
+                fetched.tops.retain(|(_, here)| here != top);
                 return Err(taken());
             }
             fetched.claimed.insert(top.clone());
@@ -125,6 +128,9 @@ fn fetch_all(link: &mut Link, offer: &Offer, into: &Path, fetched: &mut Fetched)
         if let Kind::File { size } = entry.kind {
             let wire_index = u32::try_from(index).map_err(|_| invalid("too many files".into()))?;
             let kept = kept(fetched, index, target, size);
+            // Where the bar stood before this file: its bytes may count
+            // while they come, and then the other PC skip it after all.
+            let before = fetched.progress.lock_anyway().done;
             match fetch_file(link, offer.id, wire_index, size, kept, target, fetched) {
                 Ok(None) => {
                     fetched.summary.files += 1;
@@ -134,7 +140,7 @@ fn fetch_all(link: &mut Link, offer: &Offer, into: &Path, fetched: &mut Fetched)
                 Ok(Some(why)) => {
                     // Dealt with: what it would have taken counts as done.
                     let mut progress = fetched.progress.lock_anyway();
-                    let done = progress.done.saturating_add(size - kept.unwrap_or(0));
+                    let done = before.saturating_add(size - kept.unwrap_or(0));
                     progress.advance(done, std::time::Instant::now());
                     drop(progress);
                     fetched.summary.skipped.push((entry.path.clone(), why));
@@ -150,6 +156,12 @@ fn fetch_all(link: &mut Link, offer: &Offer, into: &Path, fetched: &mut Fetched)
                         fetched.parts.insert(index);
                     } else {
                         fetched.parts.remove(&index);
+                    }
+                    // A copied file whose name was taken meanwhile gets
+                    // another name next time, never failing for ever.
+                    if err.kind() == io::ErrorKind::AlreadyExists && target == top {
+                        fetched.claimed.remove(top);
+                        fetched.tops.retain(|(_, here)| here != top);
                     }
                     return Err(err);
                 }
@@ -674,6 +686,60 @@ mod tests {
             b"the owner's"
         );
         assert!(!scratch.0.join("into").join("a.txt.mickey-part").exists());
+        // Next time it picks another name, and arrives: never stuck.
+        let listing = offer::list(&[scratch.0.join("from/a.txt")]).unwrap();
+        let (mut fetching, mut serving) = link_pair();
+        let server =
+            thread::spawn(move || send::answer_fetches(&mut serving, only(listing, id)).unwrap());
+        fetch(&mut fetching, &offer, &scratch.0.join("into"), &mut fetched).unwrap();
+        drop(fetching);
+        server.join().unwrap();
+        assert_eq!(
+            std::fs::read(scratch.0.join("into").join("a (2).txt")).unwrap(),
+            b"from the other PC"
+        );
+        assert_eq!(
+            std::fs::read(scratch.0.join("into").join("a.txt")).unwrap(),
+            b"the owner's"
+        );
+    }
+
+    #[test]
+    fn bytes_of_a_file_skipped_after_all_count_once() {
+        let scratch = sides("skipped-late");
+        let (mut fetching, mut serving) = link_pair();
+        let file = |path: &str| Entry {
+            path: path.into(),
+            kind: Kind::File { size: 4 },
+        };
+        let offer = Offer {
+            id: 1,
+            entries: vec![file("a.bin"), file("b.bin")],
+            left_out: Vec::new(),
+        };
+        // Sends a.bin's bytes, then says it changed meanwhile, then hangs
+        // up before b.bin.
+        let sender = thread::spawn(move || {
+            serving.recv_bulk().unwrap();
+            let send = |link: &mut Link, message| link.send_bulk(&wire::encode(&message)).unwrap();
+            send(&mut serving, Message::File { index: 0, size: 4 });
+            serving.send_stream(&b"abcd"[..], 4).unwrap();
+            send(
+                &mut serving,
+                Message::Skip {
+                    index: 0,
+                    why: Why::Changed,
+                },
+            );
+        });
+        let mut fetched = Fetched::default();
+        assert!(fetch(&mut fetching, &offer, &scratch.0.join("into"), &mut fetched).is_err());
+        sender.join().unwrap();
+        assert_eq!(
+            fetched.progress.lock_anyway().done,
+            4,
+            "a.bin once, not twice"
+        );
     }
 
     #[test]
