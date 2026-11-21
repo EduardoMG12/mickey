@@ -17,6 +17,12 @@ const MAX_TARGET: usize = 16;
 /// shorter, and a jittery network makes it shrink, miss, and grow again,
 /// a crackle every few seconds.
 const CALM: u32 = 2000;
+/// Datagrams it must always have held over a calm stretch to aim at one
+/// fewer: a margin left, not a stretch where it nearly ran dry.
+const SPARE: usize = 2;
+/// At a start, what is kept beyond the target: a burst of the network is
+/// played, a pile-up is not (6 datagrams, 30 ms).
+const START_SLACK: usize = 6;
 
 /// What to play for one 5 ms turn.
 #[derive(Debug, PartialEq, Eq)]
@@ -27,6 +33,14 @@ pub enum Turn {
 }
 
 pub struct Jitter {
+    /// Turns that found nothing though sound was going (clicks), and
+    /// datagrams thrown away to catch up, since it began (for `Drift`).
+    pub gaps: u64,
+    pub dropped: u64,
+    /// Whether it ever started: only the first start cuts a pile-up.
+    started: bool,
+    /// The least it held, in datagrams, since the calm stretch began.
+    low: usize,
     /// `slots[counter % SLOTS]` holds that datagram until it plays.
     slots: Vec<Option<(u64, Box<[u8; PCM_BYTES]>)>>,
     /// The counter to play next; `None` until the buffer first fills.
@@ -40,6 +54,10 @@ pub struct Jitter {
 impl Default for Jitter {
     fn default() -> Jitter {
         Jitter {
+            gaps: 0,
+            dropped: 0,
+            started: false,
+            low: usize::MAX,
             slots: (0..SLOTS).map(|_| None).collect(),
             next: None,
             target: MIN_TARGET,
@@ -58,7 +76,9 @@ impl Jitter {
             }
             // Far ahead (the sender started over, or a long gap): start
             // again from it rather than wait through the gap.
-            if counter >= next + SLOTS as u64 {
+            // Counters come from the network: sums never past u64.
+            if counter >= next.saturating_add(SLOTS as u64) {
+                self.dropped += self.held() as u64;
                 self.restart();
             }
         }
@@ -67,23 +87,35 @@ impl Jitter {
 
     /// The next 5 ms to play; called by the sound card's clock.
     pub fn pull(&mut self) -> Turn {
-        let Some(next) = self.next.or_else(|| self.ready()) else {
+        let next = match self.next {
+            Some(next) => Some(next),
+            None => self.start(),
+        };
+        let Some(next) = next else {
             return Turn::Silence;
         };
-        self.next = Some(next + 1);
+        self.next = Some(next.saturating_add(1));
         match self.take(next) {
             Some(pcm) => {
                 self.calm += 1;
-                if self.calm >= CALM && self.target > MIN_TARGET && self.held() >= self.target {
-                    // Calm: hold one fewer, by skipping one ahead.
-                    self.target -= 1;
+                self.low = self.low.min(self.held());
+                if self.calm >= CALM {
+                    // Calm, and never near empty: aim at one fewer. Shrinking
+                    // into where datagrams run late only made it miss, grow
+                    // and shrink again, a click every few seconds. Nothing
+                    // is skipped either (a click): the player plays a hair
+                    // faster until it holds that (`rate`).
+                    if self.target > MIN_TARGET && self.low >= SPARE {
+                        self.target -= 1;
+                    }
                     self.calm = 0;
-                    self.take(next + 1);
-                    self.next = Some(next + 2);
+                    self.low = usize::MAX;
                 }
                 Turn::Sound(pcm)
             }
             None => {
+                self.gaps += 1;
+                self.low = usize::MAX;
                 // Missing when its turn came: hold one more from now on.
                 self.target = (self.target + 1).min(MAX_TARGET);
                 self.calm = 0;
@@ -107,11 +139,44 @@ impl Jitter {
         self.target * 5
     }
 
-    /// Once `target` datagrams are in hand, the oldest is the first to play.
-    fn ready(&self) -> Option<u64> {
-        (self.held() >= self.target)
-            .then(|| self.oldest())
+    /// What it holds now, in ms of sound.
+    pub fn held_ms(&self) -> usize {
+        self.held() * 5
+    }
+
+    /// Once `target` datagrams are in hand, where to start. The first time:
+    /// the newest `target + START_SLACK` of them, as older ones piled up
+    /// while the sound card was opening (a third of a second on Windows)
+    /// would only be delay; they go before anything plays, so no click.
+    fn start(&mut self) -> Option<u64> {
+        if self.held() < self.target {
+            return None;
+        }
+        // Only the stream's first start: later, after the buffer ran dry
+        // (a sound card that asks in bursts, a late network), what came is
+        // just in time, and cutting it would lose sound.
+        if std::mem::replace(&mut self.started, true) {
+            return self.oldest();
+        }
+        let newest = self.newest()?;
+        let keep = (self.target + START_SLACK) as u64;
+        // Counters come from the network: never past u64.
+        let first = newest.saturating_add(1).saturating_sub(keep);
+        for slot in &mut self.slots {
+            if slot.as_ref().is_some_and(|(counter, _)| *counter < first) {
+                *slot = None;
+                self.dropped += 1;
+            }
+        }
+        self.oldest()
+    }
+
+    fn newest(&self) -> Option<u64> {
+        self.slots
+            .iter()
             .flatten()
+            .map(|(counter, _)| *counter)
+            .max()
     }
 
     fn held(&self) -> usize {
@@ -184,10 +249,19 @@ mod tests {
     #[test]
     fn a_lost_datagram_is_5_ms_of_silence_and_the_buffer_grows() {
         let mut jitter = Jitter::default();
-        for counter in (0..10).filter(|&c| c != 4) {
+        // Two in hand, then one comes for each one played, as in a stream.
+        let mut sent = (0..12).filter(|&c| c != 4);
+        for counter in sent.by_ref().take(2) {
             jitter.push(counter, pcm(counter));
         }
-        let played: Vec<_> = (0..10).map(|_| heard(jitter.pull())).collect();
+        let played: Vec<_> = (0..10)
+            .map(|_| {
+                if let Some(counter) = sent.next() {
+                    jitter.push(counter, pcm(counter));
+                }
+                heard(jitter.pull())
+            })
+            .collect();
         assert_eq!(played[3], Some(3));
         assert_eq!(played[4], None, "the lost one");
         assert_eq!(played[5], Some(5), "and on at once");
@@ -254,5 +328,58 @@ mod tests {
         jitter.push(5001, pcm(5001));
         let played: Vec<_> = (0..3).map(|_| heard(jitter.pull())).collect();
         assert!(played.contains(&Some((5000 % 256) as u8)), "{played:?}");
+    }
+
+    #[test]
+    fn what_piled_up_before_the_first_sound_is_never_delay() {
+        let mut jitter = Jitter::default();
+        // 60 datagrams (300 ms) arrived while the sound card opened.
+        for counter in 0..60 {
+            jitter.push(counter, [counter as u8; PCM_BYTES]);
+        }
+        // It starts with the newest eight (40 ms), not 300 ms behind.
+        assert_eq!(jitter.pull(), Turn::Sound(Box::new([52; PCM_BYTES])));
+        assert_eq!(jitter.held_ms(), 35);
+        assert_eq!(jitter.dropped, 52);
+    }
+
+    #[test]
+    fn running_dry_later_cuts_nothing() {
+        let mut jitter = Jitter::default();
+        jitter.push(0, [0; PCM_BYTES]);
+        jitter.push(1, [1; PCM_BYTES]);
+        jitter.pull();
+        jitter.pull();
+        // Dry; then a burst comes in, all just in time: all of it plays.
+        jitter.pull();
+        for counter in 2..14 {
+            jitter.push(counter, [counter as u8; PCM_BYTES]);
+        }
+        jitter.pull();
+        assert_eq!(jitter.dropped, 0);
+        assert_eq!(jitter.gaps, 1, "the turn that found nothing");
+    }
+
+    #[test]
+    fn a_calm_stretch_that_ran_near_empty_keeps_the_aim() {
+        let mut jitter = Jitter {
+            target: 4,
+            ..Jitter::default()
+        };
+        // Barely enough all along: one in hand after each turn.
+        let mut counter = 0;
+        for _ in 0..4 {
+            jitter.push(counter, pcm(counter));
+            counter += 1;
+        }
+        for _ in 0..2 {
+            jitter.pull();
+        }
+        for _ in 0..(CALM as usize * 3) {
+            jitter.pull();
+            jitter.push(counter, pcm(counter));
+            counter += 1;
+        }
+        assert_eq!(jitter.delay_ms(), 20, "never lower than it held");
     }
 }

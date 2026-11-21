@@ -11,12 +11,16 @@
 //!   this PC's mode is not *Here*: it takes the sound off the speakers
 //!   (mode *Listener*), records, seals and sends. Silence is not sent.
 
+mod drift;
 pub mod jitter;
+mod rate;
 pub mod sound;
 pub mod speakers;
 pub mod wire;
 
+use crate::audio::drift::Drift;
 use crate::audio::jitter::{Jitter, Turn};
+use crate::audio::rate::Rate;
 use crate::audio::sound::{Player, Recorder};
 use crate::audio::wire::{Opener, PCM_BYTES, Sealer, StreamKey};
 use mickey_config::SoundMode;
@@ -160,6 +164,9 @@ fn play(name: &str, from: IpAddr, sound: &Receiver<(u64, [u8; PCM_BYTES])>) {
         Err(err) => return eprintln!("mickey: {err}"),
     };
     let mut jitter = Jitter::default();
+    // Played a hair faster or slower, so the delay holds (`rate`).
+    let mut rate = Rate::default();
+    let mut drift = Drift::default();
     let mut heard = Instant::now();
     let mut volume = volume_of(from);
     let mut volume_read = Instant::now();
@@ -169,6 +176,7 @@ fn play(name: &str, from: IpAddr, sound: &Receiver<(u64, [u8; PCM_BYTES])>) {
             match sound.try_recv() {
                 Ok((counter, pcm)) => {
                     jitter.push(counter, pcm);
+                    drift.heard(counter);
                     heard = Instant::now();
                 }
                 Err(TryRecvError::Empty) => break,
@@ -182,10 +190,21 @@ fn play(name: &str, from: IpAddr, sound: &Receiver<(u64, [u8; PCM_BYTES])>) {
             );
             return;
         }
-        let pcm = match jitter.pull() {
-            Turn::Sound(pcm) => *pcm,
-            Turn::Silence => silence,
-        };
+        // Aiming at the buffer's own target, and the 5 ms `rate` keeps.
+        let aim = jitter.delay_ms() as f64 + 5.0;
+        let held = jitter.held_ms() as f64 + rate.held_ms();
+        let speed = rate.speed_for(held, aim);
+        while !rate.ready(speed) {
+            match jitter.pull() {
+                Turn::Sound(pcm) => rate.feed(&pcm),
+                Turn::Silence => rate.feed(&silence),
+            }
+        }
+        let pcm = rate.take(speed);
+        drift.turn(held as usize, Instant::now());
+        if let Some(report) = drift.report(Instant::now()) {
+            say_how_it_goes(name, &jitter, &report);
+        }
         // Waits for room: the sound card's clock paces this loop.
         if volume_read.elapsed() > VOLUME_AGAIN {
             volume = volume_of(from);
@@ -195,6 +214,22 @@ fn play(name: &str, from: IpAddr, sound: &Receiver<(u64, [u8; PCM_BYTES])>) {
             return eprintln!("mickey: {err}");
         }
     }
+}
+
+/// A minute's news of a stream: what the buffer held, its clicks and
+/// drops, and how the clocks run. Numbers only (hard rule 7).
+fn say_how_it_goes(name: &str, jitter: &Jitter, report: &drift::Report) {
+    let ppm = |ppm: Option<f64>| ppm.map_or_else(|| "?".to_string(), |ppm| format!("{ppm:+.0}"));
+    let (least, average, most) = report.held;
+    println!(
+        "mickey: sound from {name}: buffer {least}/{average}/{most} ms (least/average/most; aims at {} ms), {} gaps, {} dropped; clocks against this PC's: its {} ppm, this sound card {} ppm, apart {} ppm",
+        jitter.delay_ms(),
+        jitter.gaps,
+        jitter.dropped,
+        ppm(report.sender_ppm),
+        ppm(report.card_ppm),
+        ppm(report.drift_ppm()),
+    );
 }
 
 /// This PC sending its sound to the listener; stops when dropped.
@@ -257,18 +292,35 @@ fn send(
     let socket =
         UdpSocket::bind(SocketAddr::from(([0, 0, 0, 0], 0))).map_err(|err| err.to_string())?;
     let mut sealer = Sealer::new(stream);
+    // A minute's count, said in the log (PRD 0012): what was sent against
+    // the 12 000 datagrams a minute of sound is, and what failed.
+    let (mut minute, mut sent, mut failed, mut silent) = (Instant::now(), 0u32, 0u32, 0u32);
     while !stop.load(Ordering::Relaxed) {
         if key_given.elapsed() > KEY_AGAIN {
             give_key(&key);
             key_given = Instant::now();
         }
+        if minute.elapsed() >= drift::EVERY {
+            if sent > 0 {
+                println!(
+                    "mickey: sound to {to}: {sent} datagrams in {} s ({} a minute is all sound), {failed} could not be sent, {silent} silent left out",
+                    minute.elapsed().as_secs(),
+                    drift::EVERY.as_millis() / 5
+                );
+            }
+            (minute, sent, failed, silent) = (Instant::now(), 0, 0, 0);
+        }
         let Some(pcm) = recorder.read()? else {
             continue;
         };
         if pcm.iter().all(|&byte| byte == 0) {
+            silent += 1;
             continue;
         }
-        let _ = socket.send_to(&sealer.seal(&pcm), to);
+        match socket.send_to(&sealer.seal(&pcm), to) {
+            Ok(_) => sent += 1,
+            Err(_) => failed += 1,
+        }
     }
     Ok(())
 }

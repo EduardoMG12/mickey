@@ -171,3 +171,25 @@ speakers stay silent the whole time.
 - **Record with a small buffer.** `parec`'s default buffer held a second
   of audio back; `--latency-msec=20` was needed for timely data. The
   backend asks for small fragments (5 ms) for the same reason.
+- **The two sound clocks, and the delay** (2026-11-20, measured with a
+  steady tone, laptop on Linux/PipeWire and desktop on Windows 10, both
+  ways; each listener now logs a minute's report).
+  - The clocks ran 80 to 250 ppm apart. Without a correction, the buffer
+    filled or ran dry with time.
+  - The real fault was larger: sound arrived **90 to 315 ms** late. While
+    Windows opened its sound card (about a third of a second), datagrams
+    piled up, and the buffer only gave one back every 10 s, and never at
+    its least target. A stream's first start now drops the pile-up before
+    anything plays.
+  - The listener now plays at most 0.2% faster or slower to hold its aim
+    (`audio/rate.rs`, linear resampling, 100 ppm per ms off the aim), as
+    PipeWire's ROC and RTP modules do. The delay then held at about
+    25 ms on Linux and 25 to 40 ms on Windows, whose sound card asks in
+    bursts, with no datagram dropped.
+  - Lowering the aim after a calm stretch used to skip a datagram, a
+    click, and then aimed too low and missed again: a click every few
+    seconds. It now lowers the aim only after a stretch that always had
+    room, without a skip.
+  - The sender was fine throughout: 11 992 of 12 000 datagrams a minute,
+    none failed. Its Wi-Fi now and then paused for over 250 ms, which ends
+    a stream (*went quiet*).
