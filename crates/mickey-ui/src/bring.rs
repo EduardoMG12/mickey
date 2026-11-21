@@ -67,19 +67,20 @@ fn age(item: &Item) -> String {
     if item.incomplete {
         return i18n::t("bring.item_incomplete").to_string();
     }
-    let arrived = i18n::tf(
-        "bring.item_arrived",
-        &[("days", &item.arrived_days.to_string())],
-    );
-    if item.changed_days >= item.arrived_days {
-        format!("{arrived}, {}", i18n::t("bring.item_never_changed"))
-    } else {
-        let changed = item.changed_days.to_string();
-        format!(
-            "{arrived}, {}",
-            i18n::tf("bring.item_changed", &[("days", &changed)])
-        )
-    }
+    let arrived = match item.arrived_days {
+        0 => i18n::t("bring.item_arrived_today").to_string(),
+        1 => i18n::t("bring.item_arrived_yesterday").to_string(),
+        days => i18n::tf("bring.item_arrived", &[("days", &days.to_string())]),
+    };
+    let changed = match item.changed_days {
+        _ if item.changed_days >= item.arrived_days => {
+            i18n::t("bring.item_never_changed").to_string()
+        }
+        0 => i18n::t("bring.item_changed_today").to_string(),
+        1 => i18n::t("bring.item_changed_yesterday").to_string(),
+        days => i18n::tf("bring.item_changed", &[("days", &days.to_string())]),
+    };
+    format!("{arrived}, {changed}")
 }
 
 struct Bring {

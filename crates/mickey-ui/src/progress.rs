@@ -94,6 +94,13 @@ struct Progress {
     running: Option<crate::theme::Running>,
 }
 
+/// The window's size, while files come.
+const SIZE: [f32; 2] = [420.0, 230.0];
+/// The most files that did not come shown at once; more scroll, in
+/// whatever room the buttons below leave (the window does not grow: not
+/// every compositor lets it).
+const SKIPPED_SHOWN: usize = 4;
+
 impl eframe::App for Progress {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         if let Some(corner) = self.place
@@ -197,8 +204,13 @@ impl eframe::App for Progress {
                         ui.add_space(4.0);
                         let count = skipped.len().to_string();
                         ui.label(i18n::tf("progress.skipped", &[("count", &count)]));
+                        // In whatever room the buttons below leave: egui's
+                        // own least height (64) would push them out.
+                        let room = ui.clip_rect().bottom() - ui.cursor().top() - 48.0;
+                        let shown = room.clamp(22.0, 22.0 * SKIPPED_SHOWN as f32);
                         egui::ScrollArea::vertical()
-                            .max_height(90.0)
+                            .min_scrolled_height(shown)
+                            .max_height(shown)
                             .show(ui, |ui| {
                                 for (why, name) in skipped {
                                     let why = match why.as_str() {
@@ -277,7 +289,7 @@ pub fn window(who: &str) -> ExitCode {
         viewport: crate::theme::viewport()
             .with_title(i18n::t("progress.window_title"))
             .with_app_id("mickey-progress")
-            .with_inner_size([420.0, 200.0])
+            .with_inner_size(SIZE)
             .with_resizable(false)
             .with_always_on_top(),
         ..Default::default()
