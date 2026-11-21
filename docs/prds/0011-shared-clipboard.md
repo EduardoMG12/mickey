@@ -91,22 +91,35 @@ recent copies.
 - **Noticing copies** without polling: Wayland's selection events,
   Windows' clipboard counter; X11 and GNOME compare the text once a
   second (their image copies reach the history only when they cross).
-- **GNOME on Wayland** offers no clipboard protocol to other programs:
-  there Mickey sees only what X11 apps copy.
-  **The Clipboard portal is the way in** (spike #497, 2026-11-19, GNOME
-  46 on Ubuntu 24.04, xdg-desktop-portal 1.18.4). It works on the
-  RemoteDesktop session Mickey already opens on GNOME.
-  - The owner approves it once: *Remember This Selection* gives a
-    `restore_token`, and the next start shows no dialog.
-  - **Writing works.** Nautilus pastes files offered as
-    `x-special/gnome-copied-files` (`copy\nfile:///…`) as well as
-    `text/uri-list`.
-  - **Noticing copies works** (`SelectionOwnerChanged`).
-  - **Reading is not confirmed yet.** The Python prototype failed passing
-    the file descriptor.
-  - Building it is #522: first a Rust spike for reading, with `ashpd`'s
-    `clipboard` feature, and for a session that asks for the clipboard
-    alone.
+- **GNOME on Wayland** offers no clipboard protocol to Wayland programs,
+  but **XWayland does the job, both ways** (measured 2026-11-20, GNOME 46
+  on Ubuntu 24.04, in the `tools/distro-test` VM). GNOME hands the
+  clipboard to X11 programs, focused or not, as CopyQ relies on, and
+  Mickey's service gets `DISPLAY` and `XAUTHORITY` from GNOME's session.
+  With `arboard`, what Mickey already uses:
+  - text written there pasted in GNOME Text Editor, and a file list
+    pasted in Nautilus;
+  - a file copied in Nautilus, and new text copied in GNOME Text Editor
+    (both Wayland apps), were read in the background, with GPaste
+    stopped.
+  The earlier note that Mickey "sees only what X11 apps copy" (#258) was
+  never measured, and is wrong on GNOME 46.
+  **The Clipboard portal works too, but is not needed** (spike #497 in
+  Python, 2026-11-19; a Rust spike and a working build for #522,
+  2026-11-20, `ashpd` 0.13), and it costs every GNOME owner a dialog:
+  - the owner approves it in the RemoteDesktop dialog, once, with a
+    restore token;
+  - writing works (Nautilus needs `x-special/gnome-copied-files` as well
+    as `text/uri-list`), and so does reading (`SelectionRead`, text and
+    `text/uri-list`);
+  - a session for the clipboard alone cannot start: GNOME keeps Share
+    disabled until *Allow Remote Interaction* is on;
+  - a restore token kept from a session without the clipboard is
+    restored silently, still without it: adding the clipboard later means
+    asking every existing owner once more;
+  - `ashpd` 0.13 reads `SelectionOwnerChanged` wrong (no types, owner
+    unknown); asking for each type in turn works.
+  It stays the way in should GNOME ever run without XWayland.
 - **The history is this PC's**: it includes what arrived from other PCs,
   but not copies made on another PC that never crossed. Showing the other
   PCs' histories is left for later.

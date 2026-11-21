@@ -334,11 +334,10 @@ Mickey's log says what it is doing (never which keys you press):
   turn it on in *Extensions* and log in again. Mickey works without it:
   `mickey status` says where the keyboard is, and `mickey settings` opens
   the settings window.
-- **The clipboard on GNOME (Wayland)** only sees what X11 apps copy: GNOME
-  offers other programs no way to follow the clipboard. With **GPaste** and
-  its GNOME Shell extension on (`gpaste-2` and
-  `gnome-shell-extension-gpaste` on Debian and Ubuntu, then log in again),
-  Mickey reads the copied text through it, from every app.
+- **The clipboard on GNOME (Wayland)** goes through XWayland, which GNOME
+  starts when Mickey asks: if it is turned off, the clipboard does not
+  cross there. Image copies made on GNOME reach the history only when they
+  cross, as on X11.
 - **The `input` group** lets every program you run read the keyboard, not
   only Mickey; desktop portals are the long-term fix (#178).
 - **Local network only:** no relay over the internet.
