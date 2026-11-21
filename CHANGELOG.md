@@ -26,8 +26,7 @@ only: no arrows or emoji, which Mickey's font may not have.
   they arrive checked, and Ctrl+V pastes them once they are all there.
   Over 1 GB a small window asks first whether to bring them, into
   Downloads/Mickey; where it appears, and the 1 GB, are in Settings >
-  General. Links
-  inside a folder are left out. A transfer that takes a while shows its
+  General. Links inside a folder are left out. A transfer that takes a while shows its
   progress in the same corner, with Cancel. With a firewall on, let in
   TCP 4244.
 - What you copied arrives on the other PC faster: each crossing no longer

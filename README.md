@@ -84,6 +84,13 @@ lan-mouse, built from scratch to be understood line by line.
 </p>
 <p align="center"><sub>The <b>switcher</b>: one card per PC, shown on the screen you are looking at.</sub></p>
 
+## Releases
+
+What changed in each version, newest first, is in
+[**CHANGELOG.md**](CHANGELOG.md), the same text Mickey shows once after
+an update. Each release's page, with pictures of what is new, is on
+[**Releases**](https://github.com/EduardoMG12/mickey/releases).
+
 ## Install
 
 Download the latest release from the repository's

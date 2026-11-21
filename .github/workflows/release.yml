@@ -134,6 +134,9 @@ jobs:
           printf '%s\n' "$RELEASE_SIGNING_KEY" > "$key"
           source/tools/release-key/sign.sh "$key" SHA256SUMS
           rm -f "$key"
+          # What is new, with pictures (#529); the list of pull requests
+          # follows it.
+          source/tools/release-notes.sh "$GITHUB_REF_NAME" "$GITHUB_REPOSITORY" > notes.md
           gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
-            --title "Mickey $GITHUB_REF_NAME" --generate-notes \
+            --title "Mickey $GITHUB_REF_NAME" --notes-file notes.md --generate-notes \
             mickey-linux-x86_64.tar.gz mickey_*.deb mickey-*.rpm Mickey-Setup-*.exe SHA256SUMS SHA256SUMS.sig
