@@ -25,6 +25,8 @@ pub fn maybe_show() {
     }
     if let Err(err) = crate::window::open(&["secret-kept".as_ref(), off.as_os_str()]) {
         eprintln!("mickey: cannot say a secret stayed here: {err}");
+        // Not shown: the next secret tries again.
+        SHOWN.store(false, Ordering::Relaxed);
     }
 }
 

@@ -20,8 +20,8 @@ pub fn window(off: PathBuf) -> ExitCode {
             .with_always_on_top()
             // Shown just after the keyboard crossed, while the owner may be
             // typing: it must not take their keys (a Space ticked "Don't show
-            // again" while testing it). Windows only; Wayland and X11 ignore
-            // it, and the marks are only read on Windows yet.
+            // again" while testing it). Windows only: Wayland and X11 ignore
+            // it, so the box below also never keeps the keyboard.
             .with_active(false),
         ..Default::default()
     };
@@ -59,7 +59,12 @@ impl eframe::App for SecretKept {
             ui.add_space(8.0);
             ui.label(i18n::t("secret_kept.body"));
             ui.add_space(8.0);
-            ui.checkbox(&mut self.never, i18n::t("secret_kept.never"));
+            let never = ui.checkbox(&mut self.never, i18n::t("secret_kept.never"));
+            // Only a click ticks it: a Space typed for another window must
+            // not.
+            if never.has_focus() {
+                ui.memory_mut(|memory| memory.surrender_focus(never.id));
+            }
             ui.add_space(8.0);
             ui.horizontal(|ui| {
                 // No Enter shortcut: a key meant for another window must
