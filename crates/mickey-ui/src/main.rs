@@ -15,6 +15,7 @@ mod mickey;
 mod pair;
 mod place;
 mod progress;
+mod secret_kept;
 mod settings;
 mod snap;
 mod theme;
@@ -246,6 +247,9 @@ fn main() -> ExitCode {
     }
     if args.first().map(String::as_str) == Some("whats-new") {
         return whats_new::window();
+    }
+    if args.first().map(String::as_str) == Some("secret-kept") {
+        return secret_kept::window();
     }
     if let [command, who, why] = args.as_slice()
         && command == "not-paired"

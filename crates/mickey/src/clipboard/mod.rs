@@ -8,6 +8,7 @@
 
 pub mod history;
 pub mod received;
+pub mod secret_notice;
 pub mod sync;
 pub mod watch;
 pub mod wire;
@@ -200,7 +201,11 @@ impl Keeper {
     /// marked it secret, unless this PC lets secrets go (#425).
     pub fn read_to_share(&self) -> Option<Content> {
         let (content, secret) = self.read_marked()?;
-        to_share(Some(content), secret, keep_secrets())
+        let shared = to_share(Some(content), secret, keep_secrets());
+        if shared.is_none() {
+            secret_notice::once();
+        }
+        shared
     }
 
     /// What is copied now, and whether its app marked it secret.

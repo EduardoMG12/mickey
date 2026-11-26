@@ -285,6 +285,13 @@ not_keys_double = "Foram teclas em conjunto; toca duas vezes numa tecla aqui."
 double_in_chord = "Isso foi um toque duplo; pertence à linha Toque duplo."
 could_not_record = "Não foi possível gravar: {err}"
 
+[secret_kept]
+window_title = "Mickey: uma palavra-passe ficou aqui"
+heading = "Uma palavra-passe ficou neste computador"
+body = "O que copiou foi marcado como secreto pela aplicação (um gestor de palavras-passe), e as suas definições não deixam segredos ir para outros computadores. Pode mudar isso em Definições > Geral."
+ok = "OK"
+settings = "Abrir definições"
+
 [whats_new]
 window_title = "Mickey {version}: novidades"
 heading = "O que há de novo no Mickey {version}"

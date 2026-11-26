@@ -284,6 +284,13 @@ not_keys_double = "That was keys together; tap one key twice here."
 double_in_chord = "That was a double tap; it belongs in the Double tap row."
 could_not_record = "Could not record: {err}"
 
+[secret_kept]
+window_title = "Mickey: a password stayed here"
+heading = "A password stayed on this PC"
+body = "What you copied was marked secret by its app (a password manager), and your settings keep secrets from going to other PCs. You can change that in Settings > General."
+ok = "OK"
+settings = "Open settings"
+
 [whats_new]
 window_title = "Mickey {version}: what's new"
 heading = "What's new in Mickey {version}"
