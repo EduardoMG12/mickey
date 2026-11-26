@@ -289,6 +289,7 @@ could_not_record = "Não foi possível gravar: {err}"
 window_title = "Mickey: uma palavra-passe ficou aqui"
 heading = "Uma palavra-passe ficou neste computador"
 body = "O que copiou foi marcado como secreto pela aplicação (um gestor de palavras-passe), e as suas definições não deixam segredos ir para outros computadores. Pode mudar isso em Definições > Geral."
+never = "Não mostrar novamente"
 ok = "OK"
 settings = "Abrir definições"
 

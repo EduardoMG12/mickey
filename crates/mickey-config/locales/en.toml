@@ -288,6 +288,7 @@ could_not_record = "Could not record: {err}"
 window_title = "Mickey: a password stayed here"
 heading = "A password stayed on this PC"
 body = "What you copied was marked secret by its app (a password manager), and your settings keep secrets from going to other PCs. You can change that in Settings > General."
+never = "Don't show again"
 ok = "OK"
 settings = "Open settings"
 

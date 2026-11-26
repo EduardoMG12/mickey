@@ -203,7 +203,7 @@ impl Keeper {
         let (content, secret) = self.read_marked()?;
         let shared = to_share(Some(content), secret, keep_secrets());
         if shared.is_none() {
-            secret_notice::once();
+            secret_notice::maybe_show();
         }
         shared
     }

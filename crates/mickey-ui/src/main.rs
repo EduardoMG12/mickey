@@ -248,8 +248,10 @@ fn main() -> ExitCode {
     if args.first().map(String::as_str) == Some("whats-new") {
         return whats_new::window();
     }
-    if args.first().map(String::as_str) == Some("secret-kept") {
-        return secret_kept::window();
+    if let [command, off] = args.as_slice()
+        && command == "secret-kept"
+    {
+        return secret_kept::window(off.into());
     }
     if let [command, who, why] = args.as_slice()
         && command == "not-paired"

@@ -288,6 +288,7 @@ could_not_record = "Não foi possível gravar: {err}"
 window_title = "Mickey: uma senha ficou aqui"
 heading = "Uma senha ficou neste PC"
 body = "O que você copiou foi marcado como secreto pelo app (um gerenciador de senhas), e suas configurações não deixam segredos irem para outros PCs. Dá para mudar isso em Configurações > Geral."
+never = "Não mostrar mais"
 ok = "OK"
 settings = "Abrir configurações"
 
