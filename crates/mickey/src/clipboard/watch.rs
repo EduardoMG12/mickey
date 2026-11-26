@@ -7,6 +7,11 @@
 //! - elsewhere (X11, GNOME): the text is compared once a second.
 //!
 //! Each change is a `()` on the channel; the caller reads the clipboard.
+//!
+//! On Wayland it also notes whether the copy carries the secret mark
+//! password managers add there (#425): `x-kde-passwordManagerHint` among
+//! the types it offers (KeePassXC, KDE Wallet). `arboard` never shows
+//! those types, so `copied_secret` is the only place it is known.
 
 use std::sync::mpsc::Sender;
 use std::thread;
@@ -32,6 +37,23 @@ pub fn start(
         poll_text(changed, text);
         "the text, once a second"
     }
+}
+
+/// Whether the current copy carries the secret mark (#425), on Wayland
+/// with data-control (Hyprland, Sway, KDE); `false` elsewhere (X11,
+/// GNOME), where Mickey cannot see the mark.
+#[cfg(target_os = "linux")]
+pub fn copied_secret() -> bool {
+    wayland::SECRET.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Follows the copies only to know whether each is marked secret, when
+/// nothing else watches them (Mickey's history off). Quietly nothing if
+/// the compositor has no data-control.
+#[cfg(target_os = "linux")]
+pub fn follow_secret_marks() {
+    let (changed, _unread) = std::sync::mpsc::channel();
+    let _ = wayland::start(changed);
 }
 
 #[cfg(windows)]
@@ -70,14 +92,21 @@ fn poll_text(changed: Sender<()>, text: impl Fn() -> Option<String> + Send + 'st
 
 #[cfg(target_os = "linux")]
 mod wayland {
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::mpsc::Sender;
     use wayland_client::protocol::{wl_registry, wl_seat::WlSeat};
-    use wayland_client::{Connection, Dispatch, QueueHandle, event_created_child};
+    use wayland_client::{Connection, Dispatch, Proxy, QueueHandle, event_created_child};
     use wayland_protocols_wlr::data_control::v1::client::{
         zwlr_data_control_device_v1::{self, ZwlrDataControlDeviceV1},
         zwlr_data_control_manager_v1::ZwlrDataControlManagerV1,
-        zwlr_data_control_offer_v1::ZwlrDataControlOfferV1,
+        zwlr_data_control_offer_v1::{self, ZwlrDataControlOfferV1},
     };
+
+    /// The type password managers offer with a password they copy.
+    const SECRET_HINT: &str = "x-kde-passwordManagerHint";
+
+    /// Whether the current selection offered `SECRET_HINT`.
+    pub static SECRET: AtomicBool = AtomicBool::new(false);
 
     struct Watch {
         seat: Option<WlSeat>,
@@ -148,6 +177,12 @@ mod wayland {
             _: &QueueHandle<Watch>,
         ) {
             if let zwlr_data_control_device_v1::Event::Selection { id } = event {
+                // Its types came before it became the selection.
+                let marked = id
+                    .as_ref()
+                    .and_then(|offer| offer.data::<AtomicBool>())
+                    .is_some_and(|marked| marked.load(Ordering::Relaxed));
+                SECRET.store(marked, Ordering::Relaxed);
                 if let Some(old) = std::mem::replace(&mut watch.offer, id) {
                     old.destroy();
                 }
@@ -155,13 +190,45 @@ mod wayland {
             }
         }
 
+        // Each offer carries whether it offered `SECRET_HINT`.
         event_created_child!(Watch, ZwlrDataControlDeviceV1, [
-            zwlr_data_control_device_v1::EVT_DATA_OFFER_OPCODE => (ZwlrDataControlOfferV1, ()),
+            zwlr_data_control_device_v1::EVT_DATA_OFFER_OPCODE => (ZwlrDataControlOfferV1, AtomicBool::new(false)),
         ]);
+    }
+
+    impl Dispatch<ZwlrDataControlOfferV1, AtomicBool> for Watch {
+        fn event(
+            _: &mut Watch,
+            _: &ZwlrDataControlOfferV1,
+            event: zwlr_data_control_offer_v1::Event,
+            marked: &AtomicBool,
+            _: &Connection,
+            _: &QueueHandle<Watch>,
+        ) {
+            // The mark's value ("secret") is not read: only password
+            // managers offer this type, and reading it would take a pipe.
+            if let zwlr_data_control_offer_v1::Event::Offer { mime_type } = event
+                && mime_type == SECRET_HINT
+            {
+                marked.store(true, Ordering::Relaxed);
+            }
+        }
     }
 
     // Nothing to do with these objects' own events.
     wayland_client::delegate_noop!(Watch: ignore WlSeat);
     wayland_client::delegate_noop!(Watch: ignore ZwlrDataControlManagerV1);
-    wayland_client::delegate_noop!(Watch: ignore ZwlrDataControlOfferV1);
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod tests {
+    /// Run by hand on Hyprland, Sway or KDE, after copying a password in
+    /// KeePassXC: says whether the copy carries the secret mark.
+    #[test]
+    #[ignore = "reads this session's clipboard"]
+    fn says_whether_the_copy_is_marked_secret() {
+        super::follow_secret_marks();
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        println!("marked secret: {}", super::copied_secret());
+    }
 }

@@ -136,6 +136,9 @@ enum Job {
 impl Keeper {
     pub fn start() -> Result<Keeper, String> {
         let mut board = Clipboard::open()?;
+        // The mark is only seen by following the copies (#425).
+        #[cfg(target_os = "linux")]
+        watch::follow_secret_marks();
         let (jobs, todo) = std::sync::mpsc::channel();
         crate::threads::spawn("clipboard", move || {
             for job in todo {
@@ -237,12 +240,15 @@ fn to_share(content: Option<Content>, secret: bool, keep: bool) -> Option<Conten
     content
 }
 
-/// Whether the app that copied marked it secret (#425): the marks Windows'
-/// own clipboard history obeys. Not read on Linux yet.
+/// Whether the app that copied marked it secret (#425): on Windows the
+/// marks its own clipboard history obeys, on Wayland KDE's hint
+/// (`watch`). Not seen on X11 or GNOME.
 fn copied_secret() -> bool {
     #[cfg(windows)]
     return crate::platform::secret_marks::copied_secret();
-    #[cfg(not(windows))]
+    #[cfg(target_os = "linux")]
+    return watch::copied_secret();
+    #[cfg(not(any(windows, target_os = "linux")))]
     false
 }
 

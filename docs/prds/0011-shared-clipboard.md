@@ -64,7 +64,7 @@ recent copies.
 - [x] Files (up to 60 MB per crossing, no folders yet; any size and folders in [0015](0015-file-transfer.md)).
 - [x] Option to leave the history to an existing manager (`[clipboard] history = false`, #134).
 - [x] Option to turn sharing off (`[clipboard] share = "off"`, #437).
-- [ ] Copies marked secret stay on their PC and out of the history (`[clipboard] keep_secrets`, on by default, #425). *(Windows done; the Linux mark, `x-kde-passwordManagerHint`, is a later PR.)*
+- [ ] Copies marked secret stay on their PC and out of the history (`[clipboard] keep_secrets`, on by default, #425). *(Windows, and Linux on Wayland with data-control: Hyprland, Sway, KDE. Not GNOME or X11.)*
 - [ ] Option to share only on a hotkey (#437, a later PR).
 
 ## Non-Goals
@@ -164,8 +164,11 @@ recent copies.
     not secret, the other two secret. A mark that cannot be read counts as
     secret.
   - Linux: KeePassXC and KDE Wallet add `x-kde-passwordManagerHint` with
-    `secret`; `arboard` does not show the types a copy offers, so this needs
-    the data-control offer (`clipboard/watch.rs`) and comes in a later PR.
-    Bitwarden marks nothing on Linux.
+    `secret`. `arboard` does not show the types a copy offers, so the
+    data-control watcher (`clipboard/watch.rs`) notes whether each new
+    selection offered that type, and now runs even with Mickey's history
+    off. Only the type is checked, not its value (reading it needs a pipe,
+    and only password managers offer it). GNOME and X11 give no such
+    events: the mark is not seen there. Bitwarden marks nothing on Linux.
   - Text copied from a web page or a `.env` file carries no mark: telling it
     is a secret would take guessing from the content, left out on purpose.
