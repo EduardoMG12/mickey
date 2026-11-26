@@ -23,7 +23,7 @@ pub fn start(
     text: impl Fn() -> Option<String> + Send + 'static,
 ) -> &'static str {
     #[cfg(target_os = "linux")]
-    if wayland::start(changed.clone()).is_ok() {
+    if wayland::start(changed.clone(), false).is_ok() {
         return "Wayland selection events";
     }
     #[cfg(windows)]
@@ -42,18 +42,28 @@ pub fn start(
 /// Whether the current copy carries the secret mark (#425), on Wayland
 /// with data-control (Hyprland, Sway, KDE); `false` elsewhere (X11,
 /// GNOME), where Mickey cannot see the mark.
+///
+/// It comes from this watcher's own connection, not from the one that
+/// reads the copy: a copy read in the instant before the watcher hears of
+/// it reads as unmarked. That is the time to dispatch one event, far less
+/// than the time from a copy to a crossing.
 #[cfg(target_os = "linux")]
 pub fn copied_secret() -> bool {
     wayland::SECRET.load(std::sync::atomic::Ordering::Relaxed)
 }
 
-/// Follows the copies only to know whether each is marked secret, when
-/// nothing else watches them (Mickey's history off). Quietly nothing if
-/// the compositor has no data-control.
+/// Follows the copies to know whether each is marked secret: the only
+/// watcher that says so, whatever else watches (Mickey's history has its
+/// own), so two never disagree. Says so when it cannot: then marks are not
+/// seen, and a password copied here can cross.
 #[cfg(target_os = "linux")]
 pub fn follow_secret_marks() {
     let (changed, _unread) = std::sync::mpsc::channel();
-    let _ = wayland::start(changed);
+    if let Err(err) = wayland::start(changed, true) {
+        println!(
+            "mickey: copies marked secret cannot be told apart on this desktop ({err}); they are shared like any copy"
+        );
+    }
 }
 
 #[cfg(windows)]
@@ -115,9 +125,13 @@ mod wayland {
         /// new copy replaces it, or offers would pile up.
         offer: Option<ZwlrDataControlOfferV1>,
         changed: Sender<()>,
+        /// Whether this watcher keeps `SECRET` (only one does).
+        marks: bool,
     }
 
-    pub fn start(changed: Sender<()>) -> Result<(), String> {
+    /// Watches the selection; `marks` says whether this watcher keeps
+    /// `SECRET` up to date.
+    pub fn start(changed: Sender<()>, marks: bool) -> Result<(), String> {
         let connection = Connection::connect_to_env().map_err(|err| err.to_string())?;
         let mut queue = connection.new_event_queue();
         let handle = queue.handle();
@@ -127,6 +141,7 @@ mod wayland {
             manager: None,
             offer: None,
             changed,
+            marks,
         };
         queue.roundtrip(&mut watch).map_err(|err| err.to_string())?;
         let (Some(seat), Some(manager)) = (&watch.seat, &watch.manager) else {
@@ -135,6 +150,11 @@ mod wayland {
         manager.get_data_device(seat, &handle, ());
         crate::threads::spawn("clip watch", move || {
             while queue.blocking_dispatch(&mut watch).is_ok() {}
+            if watch.marks {
+                println!(
+                    "mickey: stopped following the copies; copies marked secret are shared like any copy from now on"
+                );
+            }
         });
         Ok(())
     }
@@ -182,7 +202,9 @@ mod wayland {
                     .as_ref()
                     .and_then(|offer| offer.data::<AtomicBool>())
                     .is_some_and(|marked| marked.load(Ordering::Relaxed));
-                SECRET.store(marked, Ordering::Relaxed);
+                if watch.marks {
+                    SECRET.store(marked, Ordering::Relaxed);
+                }
                 if let Some(old) = std::mem::replace(&mut watch.offer, id) {
                     old.destroy();
                 }
