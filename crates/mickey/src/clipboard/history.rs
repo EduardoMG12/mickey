@@ -132,7 +132,7 @@ impl History {
 pub type Shared = Arc<Mutex<History>>;
 
 /// Keeps every copy made on this PC, as `clipboard::watch` notices them, until
-/// Mickey ends. Returns the history to ask.
+/// Mickey ends, but for those marked secret. Returns the history to ask.
 pub fn record(keeper: crate::clipboard::Keeper) -> Shared {
     let history = Shared::default();
     let (changed, changes) = std::sync::mpsc::channel();
@@ -142,7 +142,9 @@ pub fn record(keeper: crate::clipboard::Keeper) -> Shared {
     let kept = Arc::clone(&history);
     crate::threads::spawn("history", move || {
         for () in changes {
-            if let Some(content) = keeper.read() {
+            // A copy its app marked secret is kept out of the history, as
+            // the mark asks and Windows' own history does (#425).
+            if let Some((content, false)) = keeper.read_marked() {
                 kept.lock_anyway().add(content, SystemTime::now());
             }
         }

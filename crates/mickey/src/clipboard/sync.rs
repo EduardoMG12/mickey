@@ -573,12 +573,15 @@ fn carry(
     }
 }
 
-/// What is copied on this PC; copied files as an offer, with `transfers`.
+/// What is copied on this PC, but a copy marked secret (#425); copied
+/// files as an offer, with `transfers`.
 fn read_here(keeper: &Keeper, transfers: Option<&Arc<Transfers>>) -> Option<Carried> {
-    keeper.read().map(|content| match (content, transfers) {
-        (Content::Files(paths), Some(transfers)) => offer_or_files(transfers, paths),
-        (content, _) => Carried::Content(content),
-    })
+    keeper
+        .read_to_share()
+        .map(|content| match (content, transfers) {
+            (Content::Files(paths), Some(transfers)) => offer_or_files(transfers, paths),
+            (content, _) => Carried::Content(content),
+        })
 }
 
 /// What is copied on `peer`, asked over its data link; copied files as an

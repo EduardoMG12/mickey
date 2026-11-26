@@ -16,6 +16,8 @@ pub mod log_file;
 pub mod netif;
 #[cfg(windows)]
 pub mod output;
+#[cfg(windows)]
+pub mod secret_marks;
 #[cfg(target_os = "linux")]
 pub mod signals;
 #[cfg(any(target_os = "linux", windows))]

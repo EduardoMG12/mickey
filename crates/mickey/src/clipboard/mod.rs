@@ -3,7 +3,8 @@
 //! Sway, KDE), X11 otherwise, and Windows, all through `arboard`.
 //!
 //! What is copied may be a password: it is never printed or logged, only
-//! its kind and size.
+//! its kind and size. One its app marks as secret is not even shared
+//! (#425, `[clipboard] keep_secrets`).
 
 pub mod history;
 pub mod received;
@@ -125,6 +126,8 @@ pub struct Keeper(std::sync::mpsc::Sender<Job>);
 
 enum Job {
     Read(std::sync::mpsc::Sender<Option<Content>>),
+    /// The content, and whether its app marked it secret (#425).
+    ReadMarked(std::sync::mpsc::Sender<Option<(Content, bool)>>),
     ReadText(std::sync::mpsc::Sender<Option<String>>),
     Write(Content),
 }
@@ -138,6 +141,10 @@ impl Keeper {
                 match job {
                     Job::Read(answer) => {
                         let _ = answer.send(board.read());
+                    }
+                    Job::ReadMarked(answer) => {
+                        let secret = copied_secret();
+                        let _ = answer.send(board.read().map(|content| (content, secret)));
                     }
                     Job::ReadText(answer) => {
                         let _ = answer.send(text(&mut board.0));
@@ -165,6 +172,9 @@ impl Keeper {
                     Job::Read(answer) => {
                         let _ = answer.send(held.clone());
                     }
+                    Job::ReadMarked(answer) => {
+                        let _ = answer.send(held.clone().map(|content| (content, false)));
+                    }
                     Job::ReadText(answer) => {
                         let text = match &held {
                             Some(Content::Text(text)) => Some(text.clone()),
@@ -186,6 +196,20 @@ impl Keeper {
         wait.recv().ok().flatten()
     }
 
+    /// What is copied now, to send to another PC: nothing if its app
+    /// marked it secret, unless this PC lets secrets go (#425).
+    pub fn read_to_share(&self) -> Option<Content> {
+        let (content, secret) = self.read_marked()?;
+        to_share(Some(content), secret, keep_secrets())
+    }
+
+    /// What is copied now, and whether its app marked it secret.
+    pub fn read_marked(&self) -> Option<(Content, bool)> {
+        let (answer, wait) = std::sync::mpsc::channel();
+        self.0.send(Job::ReadMarked(answer)).ok()?;
+        wait.recv().ok().flatten()
+    }
+
     /// Only the text, if any: cheap, never an image.
     pub fn read_text(&self) -> Option<String> {
         let (answer, wait) = std::sync::mpsc::channel();
@@ -196,6 +220,34 @@ impl Keeper {
     pub fn write(&self, content: Content) {
         let _ = self.0.send(Job::Write(content));
     }
+}
+
+/// `content`, unless it is `secret` and secrets are to `keep` here. Says
+/// so when it keeps one, never what it was.
+fn to_share(content: Option<Content>, secret: bool, keep: bool) -> Option<Content> {
+    if secret && keep && content.is_some() {
+        println!("mickey: the copy was marked secret by its app, so it stays on this PC");
+        return None;
+    }
+    content
+}
+
+/// Whether the app that copied marked it secret (#425): the marks Windows'
+/// own clipboard history obeys. Not read on Linux yet.
+fn copied_secret() -> bool {
+    #[cfg(windows)]
+    return crate::platform::secret_marks::copied_secret();
+    #[cfg(not(windows))]
+    false
+}
+
+/// `[clipboard] keep_secrets` as config.toml says now; on if it cannot be
+/// read, as a secret must not leave because a file is broken.
+fn keep_secrets() -> bool {
+    mickey_config::Config::load()
+        .ok()
+        .flatten()
+        .is_none_or(|config| config.clipboard.keep_secrets)
 }
 
 /// The copied text: from GPaste on GNOME Wayland when it runs, else
@@ -268,6 +320,19 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn a_copy_marked_secret_stays_here_unless_this_pc_lets_it_go() {
+        let copied = || Some(Content::Text("hunter2".into()));
+        assert_eq!(to_share(copied(), true, true), None);
+        assert_eq!(
+            to_share(copied(), true, false),
+            copied(),
+            "keep_secrets = false"
+        );
+        assert_eq!(to_share(copied(), false, true), copied(), "not marked");
+        assert_eq!(to_share(None, true, true), None);
+    }
 
     #[test]
     fn debug_never_shows_the_content() {

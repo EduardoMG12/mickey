@@ -52,6 +52,8 @@ pub struct Form {
     pub share: Share,
     /// Windows: files from another PC marked as from the Internet.
     pub warn_received: bool,
+    /// A copy marked secret by its app stays on this PC (#425).
+    pub keep_secrets: bool,
     /// Ask GitHub once a day for a newer Mickey (PRD 0013).
     pub check_updates: bool,
     /// Who listens (PRD 0012): a PC's public key; `None`, nobody.
@@ -115,6 +117,7 @@ impl Form {
             history: config.clipboard.history,
             share: config.clipboard.share,
             warn_received: config.clipboard.warn_received,
+            keep_secrets: config.clipboard.keep_secrets,
             check_updates: config.updates.check,
             listener: config.audio.listener.clone(),
             mode: config.audio.mode,
@@ -259,7 +262,11 @@ impl Form {
             out += "\n[audio]\n";
             out += &audio.to_lines();
         }
-        if self.history.is_some() || self.share != Share::Auto || self.warn_received {
+        if self.history.is_some()
+            || self.share != Share::Auto
+            || self.warn_received
+            || !self.keep_secrets
+        {
             out += "\n[clipboard]\n";
         }
         match self.history {
@@ -281,6 +288,9 @@ impl Form {
         }
         if self.warn_received {
             out += "warn_received = true    # Windows: files from other PCs marked as from the Internet\n";
+        }
+        if !self.keep_secrets {
+            out += "keep_secrets = false    # copies marked secret go to other PCs too\n";
         }
         if !self.check_updates {
             out += "\n[updates]\ncheck = false    # never ask GitHub for a newer Mickey\n";
@@ -318,7 +328,7 @@ mod tests {
     #[test]
     fn what_the_form_writes_parses_back_to_the_same_form() {
         let original = config::parse(
-            "[[peer]]\nname = \"Windows \\\"main\\\"\"\naddress = \"192.0.2.10:4242\"\nhotkey = \"AltGr+RightShift+1\"\nposition = [-1920, 0]\nkey = \"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"\n\n[hotkeys]\nhome = \"AltGr+RightShift+H\"\n\n[interface]\nswitcher_position = \"top-left\"\nbring_over_gb = 5\nclean_over_gb = 40\nclean_below_percent = 20\n\n[clipboard]\nhistory = false\nshare = \"off\"\n\n[updates]\ncheck = false\n\n[audio]\nlistener = \"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"\nmode = \"both\"\n\n[this_pc]\ncontrolled = false\nshare_hotkeys = false\nname = \"Desk\"\n\n[touchpad]\nspeed = 30\nscroll_speed = 10\nforward = false\ntap = \"on\"\nnatural_scroll = \"off\"\n",
+            "[[peer]]\nname = \"Windows \\\"main\\\"\"\naddress = \"192.0.2.10:4242\"\nhotkey = \"AltGr+RightShift+1\"\nposition = [-1920, 0]\nkey = \"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"\n\n[hotkeys]\nhome = \"AltGr+RightShift+H\"\n\n[interface]\nswitcher_position = \"top-left\"\nbring_over_gb = 5\nclean_over_gb = 40\nclean_below_percent = 20\n\n[clipboard]\nhistory = false\nshare = \"off\"\nkeep_secrets = false\n\n[updates]\ncheck = false\n\n[audio]\nlistener = \"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"\nmode = \"both\"\n\n[this_pc]\ncontrolled = false\nshare_hotkeys = false\nname = \"Desk\"\n\n[touchpad]\nspeed = 30\nscroll_speed = 10\nforward = false\ntap = \"on\"\nnatural_scroll = \"off\"\n",
         )
         .unwrap();
         let form = Form::from_config(&original);
@@ -336,6 +346,10 @@ mod tests {
             reread.clipboard.share,
             Share::Off,
             "turning sharing off survives a save"
+        );
+        assert!(
+            !reread.clipboard.keep_secrets,
+            "letting secrets go survives a save"
         );
         assert!(
             !reread.updates.check,
