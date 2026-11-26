@@ -91,6 +91,23 @@ impl Clipboard {
         })
     }
 
+    /// What is copied now, and whether its app marked it secret. The mark
+    /// and the content are read one after the other: a copy made in
+    /// between would cross without its mark. So both are read again until
+    /// nothing was copied meanwhile, and a clipboard that never holds still
+    /// counts as secret.
+    fn read_marked(&mut self) -> Option<(Content, bool)> {
+        for _ in 0..3 {
+            let before = changes();
+            let secret = copied_secret();
+            let content = self.read();
+            if changes() == before {
+                return content.map(|content| (content, secret));
+            }
+        }
+        self.read().map(|content| (content, true))
+    }
+
     pub fn write(&mut self, content: &Content) -> Result<(), String> {
         let done = match content {
             Content::Text(text) => self.0.set_text(text.as_str()),
@@ -147,8 +164,7 @@ impl Keeper {
                         let _ = answer.send(board.read());
                     }
                     Job::ReadMarked(answer) => {
-                        let secret = copied_secret();
-                        let _ = answer.send(board.read().map(|content| (content, secret)));
+                        let _ = answer.send(board.read_marked());
                     }
                     Job::ReadText(answer) => {
                         let _ = answer.send(text(&mut board.0));
@@ -204,7 +220,9 @@ impl Keeper {
     /// marked it secret, unless this PC lets secrets go (#425).
     pub fn read_to_share(&self) -> Option<Content> {
         let (content, secret) = self.read_marked()?;
-        let shared = to_share(Some(content), secret, keep_secrets());
+        // config.toml only when it matters: not on every crossing.
+        let keep = secret && keep_secrets();
+        let shared = to_share(Some(content), secret, keep);
         if shared.is_none() {
             secret_notice::maybe_show();
         }
@@ -250,6 +268,15 @@ fn copied_secret() -> bool {
     return watch::copied_secret();
     #[cfg(not(any(windows, target_os = "linux")))]
     false
+}
+
+/// A number that changes with every copy, where the system keeps one
+/// (Windows); 0 elsewhere.
+fn changes() -> u32 {
+    #[cfg(windows)]
+    return crate::platform::windows::clipboard_sequence();
+    #[cfg(not(windows))]
+    0
 }
 
 /// `[clipboard] keep_secrets` as config.toml says now; on if it cannot be
