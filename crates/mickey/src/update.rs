@@ -300,14 +300,42 @@ pub fn install_latest() -> Result<String, String> {
     }
     #[cfg(target_os = "macos")]
     {
-        let _ = path;
-        Err("self-update on macOS is not implemented yet".into())
+        let script = unpack(&path)?;
+        Ok(format!(
+            "Mickey {latest} is downloaded and its signature checked. To install it, run:\n{}",
+            script.display()
+        ))
     }
 }
 
+/// macOS: unpacks the verified tarball and runs its `install.sh --update` in a
+/// child shell; `install.sh --update` restarts the LaunchAgent via `kickstart -k`.
 #[cfg(target_os = "macos")]
-fn install(_archive: &std::path::Path) -> Result<(), String> {
-    Err("self-update on macOS is not implemented yet".into())
+fn install(tarball: &std::path::Path) -> Result<(), String> {
+    let script = unpack(tarball)?;
+    Command::new("/bin/sh")
+        .arg(&script)
+        .arg("--update")
+        .spawn()
+        .map_err(|err| format!("cannot start the installer: {err}"))?;
+    Ok(())
+}
+
+/// Unpacks a verified macOS release next to it; its `install.sh`.
+#[cfg(target_os = "macos")]
+fn unpack(tarball: &std::path::Path) -> Result<std::path::PathBuf, String> {
+    let dir = tarball.parent().ok_or("the download has no folder")?;
+    let unpacked = Command::new("/usr/bin/tar")
+        .arg("-xzf")
+        .arg(tarball)
+        .arg("-C")
+        .arg(dir)
+        .status()
+        .map_err(|err| format!("cannot run tar: {err}"))?;
+    if !unpacked.success() {
+        return Err("cannot unpack the release".into());
+    }
+    Ok(dir.join("mickey-macos-aarch64").join("install.sh"))
 }
 
 /// Windows: runs the installer silently (`/S`) as administrator; Windows

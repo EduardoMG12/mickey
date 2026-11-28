@@ -4,7 +4,7 @@
 
 use crate::input::keymap::MouseButton;
 use crate::monitors::Monitor;
-use std::ffi::c_void;
+use std::ffi::{c_char, c_void};
 use std::io;
 
 /// Marks every event Mickey injects (`kCGEventSourceUserData`), so a macOS
@@ -65,6 +65,18 @@ unsafe extern "C" {
 unsafe extern "C" {
     /// CoreFoundation `Boolean` (`unsigned char`), not Rust `bool`.
     fn AXIsProcessTrusted() -> u8;
+}
+
+#[link(name = "AppKit", kind = "framework")]
+unsafe extern "C" {}
+
+#[link(name = "objc")]
+unsafe extern "C" {
+    fn objc_getClass(name: *const c_char) -> *mut c_void;
+    fn sel_registerName(name: *const c_char) -> *mut c_void;
+    fn objc_autoreleasePoolPush() -> *mut c_void;
+    fn objc_autoreleasePoolPop(pool: *mut c_void);
+    fn objc_msgSend();
 }
 
 #[link(name = "CoreGraphics", kind = "framework")]
@@ -135,6 +147,38 @@ impl Drop for CfEvent {
         // SAFETY: `self.0` is a valid non-null `CGEventRef` created by one of
         // the `CGEventCreate*` functions and not yet released.
         unsafe { CFRelease(self.0.cast()) };
+    }
+}
+
+/// Current `NSPasteboard.generalPasteboard.changeCount`, bumped by macOS on
+/// every clipboard write so Mickey can watch for copies cheaply without
+/// reading clipboard contents.
+pub fn clipboard_sequence() -> isize {
+    type MsgSendId = unsafe extern "C" fn(*mut c_void, *mut c_void) -> *mut c_void;
+    type MsgSendIsize = unsafe extern "C" fn(*mut c_void, *mut c_void) -> isize;
+    // SAFETY: `NSPasteboard`, `generalPasteboard`, and `changeCount` are static
+    // NUL-terminated C strings; on ARM64 macOS `objc_msgSend` uses the standard
+    // C ABI for pointer and `NSInteger` (`isize`) returns; the autorelease pool
+    // drains any temporary ObjC objects created on the polling thread.
+    unsafe {
+        let pool = objc_autoreleasePoolPush();
+        let cls = objc_getClass(c"NSPasteboard".as_ptr());
+        if cls.is_null() {
+            objc_autoreleasePoolPop(pool);
+            return 0;
+        }
+        let sel_general = sel_registerName(c"generalPasteboard".as_ptr());
+        let sel_count = sel_registerName(c"changeCount".as_ptr());
+        let send_id: MsgSendId = std::mem::transmute(objc_msgSend as *const ());
+        let pb = send_id(cls, sel_general);
+        let count = if pb.is_null() {
+            0
+        } else {
+            let send_isize: MsgSendIsize = std::mem::transmute(objc_msgSend as *const ());
+            send_isize(pb, sel_count)
+        };
+        objc_autoreleasePoolPop(pool);
+        count
     }
 }
 

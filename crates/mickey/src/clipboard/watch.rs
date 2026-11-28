@@ -3,7 +3,8 @@
 //!
 //! - Wayland (Hyprland, Sway, KDE): the compositor tells data-control
 //!   clients about every new selection;
-//! - Windows: a counter the system bumps on every change, cheap to read;
+//! - Windows and macOS: a counter the system bumps on every change
+//!   (`GetClipboardSequenceNumber` / `NSPasteboard.changeCount`), cheap to read;
 //! - elsewhere (X11, GNOME): the text is compared once a second.
 //!
 //! Each change is a `()` on the channel; the caller reads the clipboard.
@@ -32,7 +33,13 @@ pub fn start(
         windows_counter(changed);
         "the Windows clipboard counter"
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "macos")]
+    {
+        let _ = text;
+        macos_counter(changed);
+        "the macOS pasteboard change counter"
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
     {
         poll_text(changed, text);
         "the text, once a second"
@@ -83,7 +90,24 @@ fn windows_counter(changed: Sender<()>) {
     });
 }
 
-#[cfg(not(windows))]
+#[cfg(target_os = "macos")]
+fn macos_counter(changed: Sender<()>) {
+    crate::threads::spawn("clip watch", move || {
+        let mut last = crate::platform::macos::clipboard_sequence();
+        loop {
+            thread::sleep(Duration::from_millis(250));
+            let now = crate::platform::macos::clipboard_sequence();
+            if now != last {
+                last = now;
+                if changed.send(()).is_err() {
+                    return;
+                }
+            }
+        }
+    });
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
 fn poll_text(changed: Sender<()>, text: impl Fn() -> Option<String> + Send + 'static) {
     crate::threads::spawn("clip watch", move || {
         let mut last = text();

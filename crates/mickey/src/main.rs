@@ -63,12 +63,54 @@ fn main() {
                 .map_err(|arg| format!("argument is not valid UTF-8: {}", arg.display()))
         })
         .collect::<Result<Vec<String>, String>>()
-        .and_then(|args| cli::parse(&args))
+        .and_then(parse_args)
         .and_then(dispatch);
     if let Err(err) = result {
         eprintln!("mickey: {err}");
         std::process::exit(1);
     }
+}
+
+fn parse_args(args: Vec<String>) -> Result<cli::Command, String> {
+    #[cfg(target_os = "macos")]
+    {
+        // Finder / Spotlight launch `Mickey.app/Contents/MacOS/mickey` with no
+        // arguments (or a legacy `-psn_*` argument) and no controlling TTY.
+        let filtered: Vec<String> = args
+            .into_iter()
+            .filter(|arg| !arg.starts_with("-psn_"))
+            .collect();
+        if filtered.is_empty() && launched_as_app() {
+            return Ok(cli::Command::Run);
+        }
+        cli::parse(&filtered)
+    }
+    #[cfg(not(target_os = "macos"))]
+    cli::parse(&args)
+}
+
+#[cfg(target_os = "macos")]
+fn launched_as_app() -> bool {
+    use std::io::IsTerminal;
+    if std::io::stdin().is_terminal() {
+        return false;
+    }
+    let Ok(exe) = std::env::current_exe().and_then(std::fs::canonicalize) else {
+        return false;
+    };
+    is_app_bundle_exe(&exe)
+}
+
+#[cfg(target_os = "macos")]
+fn is_app_bundle_exe(exe: &std::path::Path) -> bool {
+    let mut parts = exe.components().rev();
+    let _bin = parts.next();
+    let macos = parts.next().and_then(|c| c.as_os_str().to_str());
+    let contents = parts.next().and_then(|c| c.as_os_str().to_str());
+    let bundle = parts.next().and_then(|c| c.as_os_str().to_str());
+    macos == Some("MacOS")
+        && contents == Some("Contents")
+        && bundle.is_some_and(|name| name.ends_with(".app"))
 }
 
 fn dispatch(command: cli::Command) -> Result<(), String> {
@@ -83,4 +125,23 @@ fn dispatch(command: cli::Command) -> Result<(), String> {
         return platform::macos_tray::run_with_app(move || run::run(command));
     }
     run::run(command)
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod tests {
+    use super::is_app_bundle_exe;
+    use std::path::Path;
+
+    #[test]
+    fn recognizes_macos_app_bundle_executable_path() {
+        assert!(is_app_bundle_exe(Path::new(
+            "/Users/alice/Applications/Mickey.app/Contents/MacOS/mickey"
+        )));
+        assert!(!is_app_bundle_exe(Path::new(
+            "/Users/alice/.local/bin/mickey"
+        )));
+        assert!(!is_app_bundle_exe(Path::new(
+            "/Users/alice/Mickey/Contents/MacOS/mickey"
+        )));
+    }
 }
