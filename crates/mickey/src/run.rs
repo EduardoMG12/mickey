@@ -327,7 +327,7 @@ fn run_from_config() -> Result<(), String> {
     // Before any thread starts: a thread started earlier would not block
     // the stop signals, and one sent to it would end Mickey at once,
     // leaving the sound off the speakers.
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     platform::signals::on_stop(|| {
         let _ = speakers::clean_up();
     })

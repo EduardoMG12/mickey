@@ -112,6 +112,8 @@ fn release_key(text: &str) -> Option<[u8; 32]> {
 fn asset(version: &str) -> String {
     if cfg!(windows) {
         format!("Mickey-Setup-{version}.exe")
+    } else if cfg!(target_os = "macos") {
+        "mickey-macos-aarch64.tar.gz".into()
     } else {
         "mickey-linux-x86_64.tar.gz".into()
     }
@@ -296,6 +298,16 @@ pub fn install_latest() -> Result<String, String> {
             "Installing Mickey {latest}: confirm Windows' administrator prompt. Mickey then starts by itself."
         ))
     }
+    #[cfg(target_os = "macos")]
+    {
+        let _ = path;
+        Err("self-update on macOS is not implemented yet".into())
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn install(_archive: &std::path::Path) -> Result<(), String> {
+    Err("self-update on macOS is not implemented yet".into())
 }
 
 /// Windows: runs the installer silently (`/S`) as administrator; Windows

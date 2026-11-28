@@ -432,19 +432,33 @@ pub fn run(
     let mut arrange_unsent: std::collections::HashSet<String> = std::collections::HashSet::new();
     loop {
         for (index, link) in back.try_iter() {
-            // A peer is one PC, known by its key: another trusted PC that
-            // took over its address gets nothing meant for it (#184).
+            // Preserve an existing trusted identity even if another paired
+            // PC takes over its address (#184).
             match peers[index].key {
                 Some(key) if key != *link.peer_key() => {
-                    println!(
-                        "mickey: {} answered with another PC's key; refused. If it was reinstalled, remove it in the settings and connect again",
-                        peers[index].name
-                    );
-                    peers[index].new_key = true;
-                    continue;
+                    let peer = &peers[index];
+                    let replace = peer.link.is_none()
+                        && !peers
+                            .iter()
+                            .any(|other| other.key.as_ref() == Some(link.peer_key()))
+                        && shared.trusted.lock_anyway().can_replace_key(
+                            &key,
+                            link.peer_key(),
+                            peer.address.ip(),
+                        );
+                    if !replace || !save_key(&peer.name, link.peer_key()) {
+                        println!(
+                            "mickey: {} answered with another PC's key; refused. If it was reinstalled, remove it in the settings and connect again",
+                            peers[index].name
+                        );
+                        peers[index].new_key = true;
+                        continue;
+                    }
                 }
                 Some(_) => {}
-                None => save_key(&peers[index].name, link.peer_key()),
+                None => {
+                    save_key(&peers[index].name, link.peer_key());
+                }
             }
             read_peer(index, &link, &pong_sender, start);
             if let Some(data_links) = &data_links {
@@ -928,7 +942,6 @@ pub fn run(
             Err(RecvTimeoutError::Timeout) => {}
             Err(RecvTimeoutError::Disconnected) => break,
         }
-        drop(act);
         // At once, not after a restart: every PC no longer trusted (the one
         // forgotten, and those it introduced) is dropped and listed as never
         // paired, so Connect pairs it again with a code instead of saying it

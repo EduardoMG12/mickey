@@ -225,12 +225,22 @@ mod endpoint {
     pub struct Listener(UnixListener);
 
     impl Endpoint {
-        /// `$XDG_RUNTIME_DIR/mickey/control.sock`.
+        /// `$XDG_RUNTIME_DIR/mickey/control.sock` on Linux, falling back to
+        /// `$TMPDIR/mickey/control.sock` on macOS where `XDG_RUNTIME_DIR` is
+        /// normally unset.
         pub fn default() -> Result<Endpoint, String> {
             let runtime = std::env::var_os("XDG_RUNTIME_DIR")
                 .map(PathBuf::from)
-                .filter(|dir| dir.is_absolute())
-                .ok_or("XDG_RUNTIME_DIR is not set, so there is no control socket")?;
+                .filter(|dir| dir.is_absolute());
+            #[cfg(target_os = "macos")]
+            let runtime = runtime.or_else(|| {
+                std::env::var_os("TMPDIR")
+                    .map(PathBuf::from)
+                    .filter(|dir| dir.is_absolute())
+                    .or_else(|| Some(std::env::temp_dir()))
+            });
+            let runtime =
+                runtime.ok_or("XDG_RUNTIME_DIR is not set, so there is no control socket")?;
             Ok(Endpoint::at(runtime.join("mickey").join("control.sock")))
         }
 

@@ -7,7 +7,10 @@
 //! `cargo test fuzz` runs a short pass on every build; the long pass is
 //! `MICKEY_FUZZ=2000000 cargo test --release fuzz -- --ignored`.
 //! No crate needed: a small xorshift generator, seeded, so a failure
-//! repeats.
+//! repeats. The seed is fixed unless `MICKEY_FUZZ_SEED` is set: the weekly
+//! CI run (`.github/workflows/fuzz.yml`) sets a new one each time, so it
+//! tries inputs no earlier run tried, and a failure names the seed that
+//! brings it back.
 
 use crate::audio::jitter::Jitter;
 use crate::audio::wire::{Opener, PCM_BYTES, Sealer, StreamKey};
@@ -84,7 +87,7 @@ fn mangle(rng: &mut Rng, seed: &[u8]) -> Vec<u8> {
 /// Runs `decode` on mangled seeds and on random bytes, `rounds` times, and
 /// fails on a panic or a slow answer, naming the input.
 fn hammer(name: &str, rounds: usize, seeds: &[Vec<u8>], mut decode: impl FnMut(&[u8])) {
-    let mut rng = Rng(0x9e37_79b9_7f4a_7c15 ^ name.len() as u64);
+    let mut rng = Rng(seeded(0x9e37_79b9_7f4a_7c15 ^ name.len() as u64));
     let mut slowest = Duration::ZERO;
     for round in 0..rounds {
         let input = if round % 4 == 0 || seeds.is_empty() {
@@ -99,16 +102,40 @@ fn hammer(name: &str, rounds: usize, seeds: &[Vec<u8>], mut decode: impl FnMut(&
         let took = started.elapsed();
         assert!(
             outcome.is_ok(),
-            "{name}: panicked on round {round}, input {input:02x?}"
+            "{name}: panicked on round {round}{}, input {input:02x?}",
+            seed_note()
         );
         assert!(
             took < SLOW,
-            "{name}: {took:?} on round {round}, input of {} bytes",
+            "{name}: {took:?} on round {round}{}, input of {} bytes",
+            seed_note(),
             input.len()
         );
         slowest = slowest.max(took);
     }
     println!("{name}: {rounds} inputs, slowest {slowest:?}");
+}
+
+/// `MICKEY_FUZZ_SEED`, when it is set to a number.
+fn seed_from_env() -> Option<u64> {
+    std::env::var("MICKEY_FUZZ_SEED").ok()?.parse().ok()
+}
+
+/// `base` mixed with `MICKEY_FUZZ_SEED`; `base` alone without it. Never 0:
+/// xorshift started at 0 stays at 0.
+fn seeded(base: u64) -> u64 {
+    match seed_from_env().map(|seed| base ^ seed) {
+        Some(mixed) if mixed != 0 => mixed,
+        _ => base,
+    }
+}
+
+/// ", MICKEY_FUZZ_SEED=n" for a failure message, so the run can be
+/// repeated; empty when the fixed seed was used.
+fn seed_note() -> String {
+    seed_from_env()
+        .map(|seed| format!(", MICKEY_FUZZ_SEED={seed}"))
+        .unwrap_or_default()
 }
 
 fn rounds(short: usize) -> usize {
@@ -282,7 +309,7 @@ fn audio() {
     );
     // Counters from a peer that lies: far ahead, far behind, the extremes.
     let mut jitter = Jitter::default();
-    let mut rng = Rng(42);
+    let mut rng = Rng(seeded(42));
     for _ in 0..rounds(20_000) {
         let counter = match rng.below(4) {
             0 => u64::MAX - rng.below(4) as u64,

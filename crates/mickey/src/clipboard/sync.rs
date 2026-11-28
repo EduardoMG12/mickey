@@ -933,7 +933,6 @@ mod tests {
         cross(None, Some(0));
         keeper.write(Content::Text("copied on A again".into()));
         cross(None, Some(0));
-        drop(cross);
         drop(links);
         b.join().unwrap();
         assert_eq!(

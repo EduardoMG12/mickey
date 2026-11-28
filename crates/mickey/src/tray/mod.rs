@@ -2,12 +2,13 @@
 //! tooltip naming the PC in control, and a menu to move the keyboard, open
 //! the settings or quit. On Linux it is a StatusNotifierItem (Waybar's
 //! tray, KDE, GNOME with the AppIndicator extension), through `ksni`; on
-//! Windows an icon in the notification area (`platform::tray`).
+//! Windows an icon in the notification area (`platform::tray`); on macOS a
+//! Menu Bar item (`NSStatusItem`, `platform::macos_tray`).
 
 pub mod picture;
 
 use crate::control::Status;
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 use crate::threads::LockAnyway;
 use mickey_config::i18n;
 use picture::Dot;
@@ -183,16 +184,16 @@ impl Tray {
 #[cfg(windows)]
 pub struct Tray(crate::platform::tray::Icon);
 
-/// Menu ids on Windows: 1 is this PC, 2 and up the peers in order.
-#[cfg(windows)]
+/// Menu ids on Windows and macOS: 1 is this PC, 2 and up the peers in order.
+#[cfg(any(windows, target_os = "macos"))]
 const SETTINGS: u32 = 1000;
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 const QUIT: u32 = 1001;
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 const HISTORY: u32 = 1002;
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 const LISTEN: u32 = 1003;
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 const UPDATE: u32 = 1004;
 
 #[cfg(windows)]
@@ -256,6 +257,65 @@ fn keep_in_sight() {
 #[cfg(windows)]
 fn look(status: &Status) -> crate::platform::tray::Look {
     use crate::platform::tray::{Look, MenuItem};
+    let (dot, tip) = looks(status);
+    let item = |label: &str, enabled: bool, id: u32| MenuItem {
+        label: label.to_string(),
+        enabled,
+        id,
+    };
+    let mut menu = Vec::new();
+    if let Some(label) = update_label(status) {
+        menu.push(item(&label, true, UPDATE));
+        menu.push(item("", true, 0));
+    }
+    menu.push(item(i18n::t("tray.this_pc"), true, 1));
+    for (index, (name, online)) in status.peers.iter().enumerate() {
+        menu.push(item(name, *online, index as u32 + 2));
+    }
+    menu.push(item("", true, 0));
+    menu.push(item(i18n::t("tray.listen_here"), true, LISTEN));
+    menu.push(item(i18n::t("tray.clipboard_history"), true, HISTORY));
+    menu.push(item(i18n::t("tray.settings"), true, SETTINGS));
+    menu.push(item(i18n::t("tray.quit"), true, QUIT));
+    Look {
+        picture: picture::picture(dot, false),
+        tip: format!("{} · {tip}", i18n::t("app.name")),
+        menu,
+    }
+}
+
+#[cfg(target_os = "macos")]
+pub struct Tray(crate::platform::macos_tray::Icon);
+
+#[cfg(target_os = "macos")]
+impl Tray {
+    pub fn start(status: Status, clicks: Sender<Click>) -> Result<Tray, String> {
+        let clicks = std::sync::Mutex::new(clicks);
+        let picked = move |id: u32| {
+            let click = match id {
+                SETTINGS => Click::Settings,
+                HISTORY => Click::History,
+                LISTEN => Click::ListenHere,
+                UPDATE => Click::Update,
+                QUIT => Click::Quit,
+                1 => Click::Home,
+                peer => Click::Go(peer as usize - 2),
+            };
+            let _ = clicks.lock_anyway().send(click);
+        };
+        crate::platform::macos_tray::Icon::start(macos_look(&status), Box::new(picked))
+            .map(Tray)
+            .map_err(|err| format!("no menu bar icon: {err}"))
+    }
+
+    pub fn show(&self, status: &Status) {
+        self.0.show(macos_look(status));
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn macos_look(status: &Status) -> crate::platform::macos_tray::Look {
+    use crate::platform::macos_tray::{Look, MenuItem};
     let (dot, tip) = looks(status);
     let item = |label: &str, enabled: bool, id: u32| MenuItem {
         label: label.to_string(),

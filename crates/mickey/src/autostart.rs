@@ -1,8 +1,9 @@
 //! Starting Mickey with the system: `mickey autostart on|off|status`, the
 //! switch behind "Start Mickey when this PC starts" in the settings. It
 //! turns on and off what the installers set up (packaging/): a systemd user
-//! service on Linux, a logon task on Windows. When Mickey was copied by
-//! hand, `on` makes the same thing, pointing at this `mickey`.
+//! service on Linux, a logon task on Windows, a LaunchAgent on macOS. When
+//! Mickey was copied by hand, `on` makes the same thing, pointing at this
+//! `mickey`.
 
 use std::process::Command;
 
@@ -22,6 +23,10 @@ pub fn start() -> Result<(), String> {
     imp::start()
 }
 
+#[cfg_attr(
+    not(any(target_os = "linux", windows, target_os = "macos")),
+    allow(dead_code)
+)]
 fn run(program: impl AsRef<std::ffi::OsStr>, args: &[&str]) -> Result<(), String> {
     let program = program.as_ref();
     let shown = std::path::Path::new(program).display().to_string();
@@ -360,6 +365,199 @@ mod imp {
     }
 }
 
+/// LaunchAgent plist for macOS: starts `exe run` at login and restarts on
+/// failure while staying stopped after a clean exit (`mickey quit`).
+#[cfg_attr(
+    not(any(target_os = "macos", test)),
+    expect(dead_code, reason = "macOS only")
+)]
+fn launch_agent_plist(label: &str, exe: &str, log: &str) -> String {
+    let escape = |text: &str| {
+        text.replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
+    };
+    let (label, exe, log) = (escape(label), escape(exe), escape(log));
+    format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>{label}</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>{exe}</string>
+    <string>run</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
+  <key>ProcessType</key>
+  <string>Interactive</string>
+  <key>StandardOutPath</key>
+  <string>{log}</string>
+  <key>StandardErrorPath</key>
+  <string>{log}</string>
+</dict>
+</plist>
+"#
+    )
+}
+
+#[cfg(target_os = "macos")]
+mod imp {
+    use super::{launch_agent_plist, run};
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+    use std::path::{Path, PathBuf};
+
+    const LABEL: &str = "io.github.eduardomg12.mickey";
+    const LAUNCHCTL: &str = "/bin/launchctl";
+    const ID: &str = "/usr/bin/id";
+
+    fn home() -> Result<PathBuf, String> {
+        std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .ok_or_else(|| "HOME is not set".into())
+    }
+
+    fn plist_path() -> Result<PathBuf, String> {
+        Ok(home()?
+            .join("Library/LaunchAgents")
+            .join(format!("{LABEL}.plist")))
+    }
+
+    fn log_path() -> Result<PathBuf, String> {
+        Ok(home()?.join("Library/Logs/mickey.log"))
+    }
+
+    fn domain() -> Result<String, String> {
+        let output = std::process::Command::new(ID)
+            .arg("-u")
+            .output()
+            .map_err(|err| format!("{ID}: {err}"))?;
+        if !output.status.success() {
+            return Err("cannot determine current user id".into());
+        }
+        let uid = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        Ok(format!("gui/{uid}"))
+    }
+
+    /// Write the plist via a freshly created `0644` temp file and rename it
+    /// into place so we never follow a planted symlink and launchd never sees
+    /// a group-writable plist.
+    fn write_plist_atomic(path: &Path, content: &str) -> Result<(), String> {
+        let dir = path.parent().ok_or("bad plist path")?;
+        std::fs::create_dir_all(dir).map_err(|err| err.to_string())?;
+        let random = crate::net::identity::random_bytes()?;
+        let tmp = dir.join(format!(".{LABEL}.{}.tmp", crate::hex::encode(&random[..8])));
+        let written = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o644)
+            .open(&tmp)
+            .and_then(|mut file| file.write_all(content.as_bytes()));
+        if let Err(err) = written {
+            let _ = std::fs::remove_file(&tmp);
+            return Err(format!("cannot write {}: {err}", tmp.display()));
+        }
+        if let Err(err) = std::fs::rename(&tmp, path) {
+            let _ = std::fs::remove_file(&tmp);
+            return Err(format!("cannot install {}: {err}", path.display()));
+        }
+        Ok(())
+    }
+
+    pub fn set(on: bool) -> Result<(), String> {
+        let path = plist_path()?;
+        let domain = domain()?;
+        let service = format!("{domain}/{LABEL}");
+        if on {
+            let exe = std::env::current_exe().map_err(|err| err.to_string())?;
+            let log = log_path()?;
+            if let Some(dir) = log.parent() {
+                let _ = std::fs::create_dir_all(dir);
+            }
+            let plist = launch_agent_plist(LABEL, &exe.to_string_lossy(), &log.to_string_lossy());
+            write_plist_atomic(&path, &plist)?;
+            // Enabled only: it starts at the next login, not now, beside the
+            // Mickey already running (matching Linux and Windows).
+            if let Err(err) = run(LAUNCHCTL, &["enable", &service]) {
+                let _ = std::fs::remove_file(&path);
+                return Err(err);
+            }
+            Ok(())
+        } else {
+            // Disabled only: removing the plist and marking the label disabled
+            // prevents the next login from starting Mickey without killing a
+            // running instance.
+            let _ = run(LAUNCHCTL, &["disable", &service]);
+            match std::fs::remove_file(&path) {
+                Ok(()) => Ok(()),
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                Err(err) => Err(err.to_string()),
+            }
+        }
+    }
+
+    pub fn is_on() -> bool {
+        plist_path().is_ok_and(|path| path.is_file())
+    }
+
+    pub fn start() -> Result<(), String> {
+        let domain = domain()?;
+        let service = format!("{domain}/{LABEL}");
+        // Without `-k`, `kickstart` starts a loaded agent only if it is not
+        // already running, matching `systemctl --user start`.
+        if run(LAUNCHCTL, &["kickstart", &service]).is_ok() {
+            return Ok(());
+        }
+        let path = plist_path()?;
+        if !path.is_file() {
+            return Err(
+                "autostart is off; run `mickey autostart on` first or start `mickey run` directly"
+                    .into(),
+            );
+        }
+        run(LAUNCHCTL, &["bootstrap", &domain, &path.to_string_lossy()])
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::write_plist_atomic;
+        use std::os::unix::fs::{PermissionsExt, symlink};
+
+        #[test]
+        fn atomic_plist_write_replaces_symlink_and_is_not_group_writable() {
+            let random = crate::net::identity::random_bytes().unwrap();
+            let dir = std::env::temp_dir().join(format!(
+                "mickey-autostart-test-{}",
+                crate::hex::encode(&random[..8])
+            ));
+            std::fs::create_dir_all(&dir).unwrap();
+            let target = dir.join("decoy");
+            std::fs::write(&target, "untouched").unwrap();
+            let plist = dir.join("test.plist");
+            symlink(&target, &plist).unwrap();
+
+            write_plist_atomic(&plist, "<plist/>").unwrap();
+
+            assert_eq!(std::fs::read_to_string(&target).unwrap(), "untouched");
+            assert_eq!(std::fs::read_to_string(&plist).unwrap(), "<plist/>");
+            let meta = std::fs::symlink_metadata(&plist).unwrap();
+            assert!(meta.file_type().is_file());
+            assert_eq!(meta.permissions().mode() & 0o022, 0);
+
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -387,5 +585,18 @@ mod tests {
         assert!(xml.contains("ana&lt;/UserId&gt;&lt;RunLevel&gt;x"));
         assert!(xml.contains("C:\\a&amp;b\\mickey-ui.exe"));
         assert_eq!(xml.matches("<RunLevel>").count(), 1);
+    }
+
+    #[test]
+    fn the_macos_launch_agent_escapes_paths_and_runs_mickey_run() {
+        let plist = launch_agent_plist(
+            "io.github.eduardomg12.mickey",
+            "/Users/a&b/bin/mickey",
+            "/Users/a&b/Library/Logs/mickey.log",
+        );
+        assert!(plist.contains("<string>io.github.eduardomg12.mickey</string>"));
+        assert!(plist.contains("<string>/Users/a&amp;b/bin/mickey</string>"));
+        assert!(plist.contains("<string>run</string>"));
+        assert!(plist.contains("<key>SuccessfulExit</key>"));
     }
 }

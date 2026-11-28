@@ -273,7 +273,8 @@ mod tests {
         assert_eq!(listing.offer(1).left_out.len(), MAX_LEFT_OUT);
     }
 
-    #[cfg(unix)]
+    // Needs a case-sensitive filesystem (APFS on macOS folds Foto.jpg and foto.jpg).
+    #[cfg(target_os = "linux")]
     #[test]
     fn names_windows_refuses_and_case_twins_are_skipped() {
         let scratch = Scratch::new("names");
@@ -287,7 +288,8 @@ mod tests {
         assert_eq!(why, [Why::BadName, Why::SameNameOtherCase]);
     }
 
-    #[cfg(unix)]
+    // Needs a filesystem that permits non-UTF-8 filenames (APFS rejects them with EILSEQ).
+    #[cfg(target_os = "linux")]
     #[test]
     fn a_name_that_is_not_utf8_is_skipped() {
         use std::os::unix::ffi::OsStrExt;

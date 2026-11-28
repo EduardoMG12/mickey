@@ -15,7 +15,7 @@ pub struct Space {
 }
 
 /// The room on the disk that holds `path` (which must exist).
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 pub fn of(path: &Path) -> io::Result<Space> {
     use std::os::unix::ffi::OsStrExt;
     let path = std::ffi::CString::new(path.as_os_str().as_bytes())
@@ -27,11 +27,14 @@ pub fn of(path: &Path) -> io::Result<Space> {
     if unsafe { libc::statvfs(path.as_ptr(), &mut stats) } != 0 {
         return Err(io::Error::last_os_error());
     }
-    let block = stats.f_frsize;
-    Ok(Space {
-        available: stats.f_bavail.saturating_mul(block),
-        total: stats.f_blocks.saturating_mul(block),
-    })
+    // Darwin's `fsblkcnt_t` is `u32`, while Linux's is `u64`.
+    #[allow(clippy::unnecessary_cast)]
+    let block = stats.f_frsize as u64;
+    #[allow(clippy::unnecessary_cast)]
+    let available = (stats.f_bavail as u64).saturating_mul(block);
+    #[allow(clippy::unnecessary_cast)]
+    let total = (stats.f_blocks as u64).saturating_mul(block);
+    Ok(Space { available, total })
 }
 
 #[cfg(windows)]

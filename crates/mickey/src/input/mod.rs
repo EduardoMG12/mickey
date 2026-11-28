@@ -10,6 +10,9 @@ pub mod held;
 pub mod hotkey;
 #[cfg_attr(not(windows), allow(dead_code))]
 pub mod keymap;
+// Used by the macOS target and source backends in the follow-up PRs (#423).
+#[allow(dead_code)]
+pub mod keymap_macos;
 pub mod record;
 #[cfg(target_os = "linux")]
 pub mod touchpad;
@@ -28,6 +31,10 @@ use std::sync::mpsc::Sender;
 pub use linux::Input;
 #[cfg(target_os = "linux")]
 pub use linux::cursor_now;
+#[cfg(target_os = "macos")]
+pub use macos::Input;
+#[cfg(target_os = "macos")]
+pub use macos::cursor_now;
 #[cfg(windows)]
 pub use windows::Input;
 #[cfg(windows)]
@@ -255,6 +262,48 @@ mod windows {
                 vertical,
                 horizontal,
             }),
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+mod macos {
+    use super::*;
+    use std::marker::PhantomData;
+
+    pub struct Input;
+
+    pub struct Grabbed<'a> {
+        _input: PhantomData<&'a Input>,
+    }
+
+    pub fn cursor_now() -> Option<(i32, i32)> {
+        crate::platform::macos::cursor_pos()
+    }
+
+    impl Input {
+        pub fn open(_touchpad: &config::Touchpad) -> Result<Input, String> {
+            Err("macOS input capture is not implemented yet".into())
+        }
+
+        pub fn start<T: From<InputEvent> + Send + 'static>(
+            &self,
+            _events: Sender<T>,
+            _touchpad: &config::Touchpad,
+        ) -> Result<(), String> {
+            Err("macOS input capture is not implemented yet".into())
+        }
+
+        pub fn any_key_down(&self) -> bool {
+            false
+        }
+
+        pub fn button_down(&self) -> bool {
+            false
+        }
+
+        pub fn grab(&self) -> Result<Grabbed<'_>, String> {
+            Err("macOS input grab is not implemented yet".into())
         }
     }
 }

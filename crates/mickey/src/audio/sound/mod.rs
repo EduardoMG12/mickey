@@ -12,9 +12,13 @@ pub use linux::{Player, Recorder};
 mod windows;
 #[cfg(windows)]
 pub use windows::{Player, Recorder};
+#[cfg(target_os = "macos")]
+mod macos;
+#[cfg(target_os = "macos")]
+pub use macos::{Player, Recorder};
 
 /// `pcm` with every sample scaled by `volume` (0.0 to 1.0): each PC's own
-/// volume, applied here so it is the same on Linux and Windows.
+/// volume, applied here so it is the same on Linux, Windows and macOS.
 pub fn at_volume(pcm: &[u8; PCM_BYTES], volume: f32) -> [u8; PCM_BYTES] {
     let volume = volume.clamp(0.0, 1.0);
     let mut out = [0u8; PCM_BYTES];
