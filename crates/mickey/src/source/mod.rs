@@ -728,7 +728,7 @@ pub fn run(
                 }
             }
             Action::Ungrab => {
-                #[cfg(windows)]
+                #[cfg(any(windows, target_os = "macos"))]
                 if let Some(grab) = grabbed.as_mut() {
                     grab.landing = home_at;
                 }
@@ -1146,10 +1146,10 @@ pub fn run(
             println!("{}", mickey_config::i18n::t("messages.quitting"));
             return Ok(());
         }
-        // On Windows the hook thread places it as it lets the mouse go
-        // (`Grabbed::landing`): placed from here, motion swallowed before
-        // could land after it and pull the cursor back (#554).
-        #[cfg(not(windows))]
+        // On Windows and macOS the hook/grab guard places it as it lets the
+        // mouse go (`Grabbed::landing`): placed from here, motion swallowed
+        // before could land after it and pull the cursor back (#554).
+        #[cfg(not(any(windows, target_os = "macos")))]
         if let Some((x, y)) = home_at
             && let Err(err) = crate::input::emit::place(x, y)
         {

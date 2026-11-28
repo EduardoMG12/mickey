@@ -1,6 +1,7 @@
 //! The source's keyboard and mouse, per platform (PRD 0008): evdev devices
-//! on Linux, low-level hooks on Windows. `mickey source` only uses this
-//! interface, so the focus, hotkey and switcher work the same on both.
+//! on Linux, low-level hooks on Windows, `CGEventTap` on macOS. `mickey source`
+//! only uses this interface, so the focus, hotkey and switcher work the same
+//! everywhere.
 
 #[cfg(target_os = "linux")]
 pub mod capture;
@@ -10,8 +11,7 @@ pub mod held;
 pub mod hotkey;
 #[cfg_attr(not(windows), allow(dead_code))]
 pub mod keymap;
-// Used by the macOS target and source backends in the follow-up PRs (#423).
-#[allow(dead_code)]
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub mod keymap_macos;
 pub mod record;
 #[cfg(target_os = "linux")]
@@ -269,41 +269,102 @@ mod windows {
 #[cfg(target_os = "macos")]
 mod macos {
     use super::*;
+    use crate::input::keymap_macos;
+    use crate::platform::macos as plat;
+    use crate::platform::macos_hooks::{self, TapEvent};
     use std::marker::PhantomData;
+
+    /// evdev codes for left, right, middle, back and forward.
+    const BUTTONS: [u16; 5] = [0x110, 0x111, 0x112, 0x113, 0x114];
 
     pub struct Input;
 
+    /// While this lives, the event tap suppresses local input and freezes the
+    /// local cursor. Dropping it always restores cursor association.
     pub struct Grabbed<'a> {
+        /// Where the cursor goes when the grab ends: where it came back
+        /// across an edge, if it did (#554).
+        pub landing: Option<(i32, i32)>,
         _input: PhantomData<&'a Input>,
     }
 
+    impl Drop for Grabbed<'_> {
+        fn drop(&mut self) {
+            macos_hooks::set_swallow(false, self.landing);
+        }
+    }
+
     pub fn cursor_now() -> Option<(i32, i32)> {
-        crate::platform::macos::cursor_pos()
+        plat::cursor_pos()
     }
 
     impl Input {
         pub fn open(_touchpad: &config::Touchpad) -> Result<Input, String> {
-            Err("macOS input capture is not implemented yet".into())
+            let ax = plat::accessibility_trusted();
+            let listen = macos_hooks::input_monitoring_trusted();
+            if !ax || !listen {
+                return Err(format!(
+                    "macOS input capture requires Accessibility ({ax}) and Input Monitoring ({listen}) \
+                     permissions; enable Mickey (or your terminal) in System Settings > Privacy & Security"
+                ));
+            }
+            println!("{}", mickey_config::i18n::t("capture.capturing_hooks"));
+            Ok(Input)
         }
 
         pub fn start<T: From<InputEvent> + Send + 'static>(
             &self,
-            _events: Sender<T>,
+            events: Sender<T>,
             _touchpad: &config::Touchpad,
         ) -> Result<(), String> {
-            Err("macOS input capture is not implemented yet".into())
+            let (raw_sender, raw) = std::sync::mpsc::channel();
+            macos_hooks::start(raw_sender)
+                .map_err(|err| format!("cannot install the macOS event tap: {err}"))?;
+            crate::threads::spawn("input translate", move || {
+                for event in raw {
+                    if let Some(event) = translate(event)
+                        && events.send(T::from(event)).is_err()
+                    {
+                        return;
+                    }
+                }
+            });
+            Ok(())
         }
 
         pub fn any_key_down(&self) -> bool {
-            false
+            macos_hooks::any_key_down()
         }
 
         pub fn button_down(&self) -> bool {
-            false
+            macos_hooks::button_down()
         }
 
         pub fn grab(&self) -> Result<Grabbed<'_>, String> {
-            Err("macOS input grab is not implemented yet".into())
+            macos_hooks::set_swallow(true, None);
+            Ok(Grabbed {
+                landing: None,
+                _input: PhantomData,
+            })
+        }
+    }
+
+    fn translate(event: TapEvent) -> Option<InputEvent> {
+        match event {
+            TapEvent::Key { vk, pressed } => {
+                keymap_macos::evdev_code(vk).map(|code| InputEvent::Key { code, pressed })
+            }
+            TapEvent::Button { button, pressed } => BUTTONS
+                .get(usize::from(button))
+                .map(|&code| InputEvent::Button { code, pressed }),
+            TapEvent::Delta { dx, dy } => Some(InputEvent::Motion { dx, dy }),
+            TapEvent::Wheel {
+                vertical,
+                horizontal,
+            } => Some(InputEvent::Scroll {
+                vertical,
+                horizontal,
+            }),
         }
     }
 }

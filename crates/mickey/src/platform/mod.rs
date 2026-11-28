@@ -17,6 +17,8 @@ pub mod macos;
 #[cfg(target_os = "macos")]
 pub mod macos_audio;
 #[cfg(target_os = "macos")]
+pub mod macos_hooks;
+#[cfg(target_os = "macos")]
 pub mod macos_tray;
 #[cfg(any(windows, target_os = "macos"))]
 pub mod netif;

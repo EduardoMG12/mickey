@@ -329,6 +329,8 @@ fn run_from_config() -> Result<(), String> {
     // leaving the sound off the speakers.
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     platform::signals::on_stop(|| {
+        #[cfg(target_os = "macos")]
+        platform::macos_hooks::release_grab();
         let _ = speakers::clean_up();
     })
     .map_err(|err| format!("cannot wait for stop signals: {err}"))?;
