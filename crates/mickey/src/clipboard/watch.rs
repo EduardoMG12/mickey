@@ -155,9 +155,16 @@ mod wayland {
         STARTED.get_or_init(connect).clone()
     }
 
-    /// `changed` gets a `()` for every copy from now on.
+    /// `changed` gets a `()` for every copy from now on, and one at once
+    /// when a copy was already heard of: the selection there when Mickey
+    /// started is announced as soon as the connection opens, often before
+    /// the history listens.
     pub fn listen(changed: Sender<()>) {
-        LISTENERS.lock_anyway().push(changed);
+        let mut listeners = LISTENERS.lock_anyway();
+        if SELECTIONS.load(Ordering::SeqCst) > 0 {
+            let _ = changed.send(());
+        }
+        listeners.push(changed);
     }
 
     fn connect() -> Result<(), String> {
@@ -178,10 +185,10 @@ mod wayland {
         manager.get_data_device(seat, &handle, ());
         crate::threads::spawn("clip watch", move || {
             while !watch.finished && queue.blocking_dispatch(&mut watch).is_ok() {}
-            // Whatever it last held no longer says anything.
-            SECRET.store(false, Ordering::SeqCst);
+            // `SECRET` keeps the last copy's mark: a password copied just
+            // before still stays here.
             println!(
-                "mickey: stopped following the copies; copies marked secret are shared like any copy from now on"
+                "mickey: stopped following the copies; new copies marked secret are shared like any copy from now on"
             );
         });
         Ok(())
