@@ -383,9 +383,8 @@ pub(super) fn report_latency(peer: &Peer) {
     }
 }
 
-/// Writes `key` into the peer's block in config.toml, the first time it
-/// connects (#184).
-pub(super) fn save_key(name: &str, key: &[u8; 32]) {
+/// Writes `key` into the peer's block in config.toml.
+pub(super) fn save_key(name: &str, key: &[u8; 32]) -> bool {
     let saved = config::path().and_then(|path| {
         let text = config::read_text(&path)?;
         let text = config::set_key(&text, name, &crate::hex::encode(key))?;
@@ -393,7 +392,9 @@ pub(super) fn save_key(name: &str, key: &[u8; 32]) {
     });
     if let Err(err) = saved {
         eprintln!("mickey: cannot remember {name}'s key: {err}");
+        return false;
     }
+    true
 }
 
 #[cfg(test)]

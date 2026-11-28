@@ -207,15 +207,15 @@ fn networks() -> Vec<Ipv4Addr> {
         .unwrap_or_default()
 }
 
-/// Windows: from each adapter's address and mask.
-#[cfg(windows)]
+/// Windows and macOS: from each adapter's address and mask.
+#[cfg(any(windows, target_os = "macos"))]
 fn networks() -> Vec<Ipv4Addr> {
     broadcasts_of(&crate::platform::netif::networks())
 }
 
 /// The broadcast address of each address and mask, leaving out loopback
 /// and masks that make no network (0, or all ones).
-#[cfg_attr(not(windows), allow(dead_code))]
+#[cfg_attr(not(any(windows, target_os = "macos")), allow(dead_code))]
 fn broadcasts_of(networks: &[(Ipv4Addr, Ipv4Addr)]) -> Vec<Ipv4Addr> {
     let mut found = Vec::new();
     for &(address, mask) in networks {

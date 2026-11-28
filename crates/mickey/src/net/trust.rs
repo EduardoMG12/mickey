@@ -140,6 +140,23 @@ impl TrustedPeers {
         self.peers.iter().any(|(trusted, _)| trusted == key)
     }
 
+    /// A stale binding can use a replacement only after the old key lost
+    /// trust and the replacement was paired directly at this address.
+    pub fn can_replace_key(
+        &self,
+        old: &[u8; 32],
+        replacement: &[u8; 32],
+        address: std::net::IpAddr,
+    ) -> bool {
+        !self.is_trusted(old)
+            && self.peers.iter().any(|(key, note)| {
+                key == replacement
+                    && note
+                        .parse::<std::net::SocketAddr>()
+                        .is_ok_and(|paired_at| paired_at.ip() == address)
+            })
+    }
+
     /// Adds `key` and saves the list. `note` is informational, e.g. the
     /// address the peer was paired from.
     pub fn add(&mut self, key: [u8; 32], note: &str) -> Result<(), String> {
@@ -443,6 +460,27 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn a_stale_binding_requires_a_direct_pairing_at_the_same_ip() {
+        let old = [1; 32];
+        let replacement = [2; 32];
+        let address = "192.0.2.10".parse().unwrap();
+        let mut trusted = TrustedPeers {
+            path: PathBuf::new(),
+            peers: vec![(replacement, "192.0.2.10:59511".into())],
+        };
+        assert!(trusted.can_replace_key(&old, &replacement, address));
+        assert!(!trusted.can_replace_key(&old, &[3; 32], address));
+        assert!(!trusted.can_replace_key(&old, &replacement, "192.0.2.11".parse().unwrap()));
+
+        trusted.peers.push((old, "192.0.2.10:4242".into()));
+        assert!(!trusted.can_replace_key(&old, &replacement, address));
+
+        trusted.peers.pop();
+        trusted.peers[0].1 = "192.0.2.10:4242 via another-peer".into();
+        assert!(!trusted.can_replace_key(&old, &replacement, address));
     }
 
     #[test]

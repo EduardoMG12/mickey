@@ -1,0 +1,40 @@
+name: Fuzz
+
+# The long fuzzing pass (crates/mickey/src/fuzz.rs): every decoder that
+# reads bytes from the network gets millions of mangled and random inputs.
+# Every PR already runs the short pass with a fixed seed, which tries the
+# same inputs each time; this run picks a new seed every week, so each run
+# explores inputs no earlier one did. A failure prints the seed: run
+# `MICKEY_FUZZ_SEED=<seed> MICKEY_FUZZ=20000000 cargo test --release fuzz
+# -- --ignored` to get it back.
+on:
+  schedule:
+    - cron: "0 10 * * 1" # Mondays, 10:00 UTC
+  workflow_dispatch:
+
+# Read-only token: this job only reads the code.
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    # Measured: 200,000 inputs per decoder take 2.5 s on a laptop, so
+    # 20,000,000 take a few minutes; this leaves room for a slow runner.
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+      - name: PulseAudio's headers (shared audio, PRD 0012)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq libpulse-dev
+      - name: Long pass with a new seed
+        run: |
+          seed=$(od -An -N8 -tu8 /dev/urandom | tr -d ' ')
+          echo "MICKEY_FUZZ_SEED=$seed"
+          MICKEY_FUZZ_SEED=$seed MICKEY_FUZZ=20000000 \
+            cargo test --release -p mickey fuzz -- --ignored --nocapture

@@ -4,7 +4,7 @@
 
 [graph]
 # The platforms Mickey ships for; crates only other targets need are skipped.
-targets = ["x86_64-unknown-linux-gnu", "x86_64-pc-windows-gnu", "x86_64-pc-windows-msvc"]
+targets = ["x86_64-unknown-linux-gnu", "x86_64-pc-windows-gnu", "x86_64-pc-windows-msvc", "aarch64-apple-darwin"]
 
 [advisories]
 # Every crate in the tree, not only the direct ones: an unsound or

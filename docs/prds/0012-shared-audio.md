@@ -173,7 +173,9 @@ speakers stay silent the whole time.
   backend asks for small fragments (5 ms) for the same reason.
 - **The two sound clocks, and the delay** (2026-11-20, measured with a
   steady tone, laptop on Linux/PipeWire and desktop on Windows 10, both
-  ways; each listener now logs a minute's report).
+  ways; each listener now logs a minute's report). Prompted by Thiago
+  (@zednaked), who pointed out that two machines' sound clocks never
+  agree and suggested adaptive resampling on the listener (#561).
   - The clocks ran 80 to 250 ppm apart. Without a correction, the buffer
     filled or ran dry with time.
   - The real fault was larger: sound arrived **90 to 315 ms** late. While

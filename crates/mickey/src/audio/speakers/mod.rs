@@ -12,3 +12,7 @@ pub use linux::{clean_up, divert};
 mod windows;
 #[cfg(windows)]
 pub use windows::{clean_up, divert};
+#[cfg(target_os = "macos")]
+mod macos;
+#[cfg(target_os = "macos")]
+pub use macos::{clean_up, divert};

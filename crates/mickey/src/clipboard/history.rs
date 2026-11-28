@@ -247,6 +247,13 @@ mod imp {
     }
 }
 
+#[cfg(target_os = "macos")]
+mod imp {
+    pub fn another_manager() -> Option<String> {
+        None
+    }
+}
+
 #[cfg(test)]
 mod tests {
     /// Run by hand: says which clipboard manager this PC runs, if any.
