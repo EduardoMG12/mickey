@@ -170,5 +170,15 @@ recent copies.
     off. Only the type is checked, not its value (reading it needs a pipe,
     and only password managers offer it). GNOME and X11 give no such
     events: the mark is not seen there. Bitwarden marks nothing on Linux.
+  - Linux, one connection (2026-11-28): the history first had its own
+    data-control connection, and the mark came from a second one. Nothing
+    ordered the two, so the history could hear of a KeePassXC copy before
+    the mark was stored, read the previous copy's `false` and keep the
+    password. Now one connection stores the mark, counts the copy, then
+    tells every listener; the count lets a reader notice a copy that
+    arrived while it read, and the mark is read on both sides of the
+    content. Checked on Hyprland with `wl-copy`: 20 marked and 20 plain
+    copies in a row, each listener read the right mark, four runs out of
+    four.
   - Text copied from a web page or a `.env` file carries no mark: telling it
     is a secret would take guessing from the content, left out on purpose.

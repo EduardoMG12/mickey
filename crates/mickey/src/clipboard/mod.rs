@@ -95,12 +95,15 @@ impl Clipboard {
     /// and the content are read one after the other: a copy made in
     /// between would cross without its mark. So both are read again until
     /// nothing was copied meanwhile, and a clipboard that never holds still
-    /// counts as secret.
+    /// counts as secret. The mark is read on both sides of the content: on
+    /// Wayland it arrives on another connection, and may land while the
+    /// content is read.
     fn read_marked(&mut self) -> Option<(Content, bool)> {
         for _ in 0..3 {
             let before = changes();
             let secret = copied_secret();
             let content = self.read();
+            let secret = secret || copied_secret();
             if changes() == before {
                 return content.map(|content| (content, secret));
             }
@@ -270,12 +273,14 @@ fn copied_secret() -> bool {
     false
 }
 
-/// A number that changes with every copy, where the system keeps one
-/// (Windows); 0 elsewhere.
+/// A number that changes with every copy: the system's on Windows, the
+/// watcher's count on Wayland; 0 elsewhere.
 fn changes() -> u32 {
     #[cfg(windows)]
     return crate::platform::windows::clipboard_sequence();
-    #[cfg(not(windows))]
+    #[cfg(target_os = "linux")]
+    return watch::selections();
+    #[cfg(not(any(windows, target_os = "linux")))]
     0
 }
 

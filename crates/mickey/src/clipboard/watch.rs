@@ -12,6 +12,11 @@
 //! password managers add there (#425): `x-kde-passwordManagerHint` among
 //! the types it offers (KeePassXC, KDE Wallet). `arboard` never shows
 //! those types, so `copied_secret` is the only place it is known.
+//!
+//! One Wayland connection does both: it stores the mark, then tells every
+//! watcher about the copy. With two connections (one for the mark, one
+//! for the history) nothing ordered them, and the history could read the
+//! previous copy's mark and keep a password.
 
 use std::sync::mpsc::Sender;
 use std::thread;
@@ -23,7 +28,8 @@ pub fn start(
     text: impl Fn() -> Option<String> + Send + 'static,
 ) -> &'static str {
     #[cfg(target_os = "linux")]
-    if wayland::start(changed.clone(), false).is_ok() {
+    if wayland::start().is_ok() {
+        wayland::listen(changed);
         return "Wayland selection events";
     }
     #[cfg(windows)]
@@ -43,23 +49,28 @@ pub fn start(
 /// with data-control (Hyprland, Sway, KDE); `false` elsewhere (X11,
 /// GNOME), where Mickey cannot see the mark.
 ///
-/// It comes from this watcher's own connection, not from the one that
-/// reads the copy: a copy read in the instant before the watcher hears of
-/// it reads as unmarked. That is the time to dispatch one event, far less
-/// than the time from a copy to a crossing.
+/// It comes from the watcher's connection, not from the one that reads
+/// the copy: a copy read in the instant before the watcher hears of it
+/// reads as unmarked. That is the time to dispatch one event, far less
+/// than the time from a copy to a crossing; `selections` lets a reader
+/// notice a copy that arrived while it read.
 #[cfg(target_os = "linux")]
 pub fn copied_secret() -> bool {
-    wayland::SECRET.load(std::sync::atomic::Ordering::Relaxed)
+    wayland::SECRET.load(std::sync::atomic::Ordering::SeqCst)
 }
 
-/// Follows the copies to know whether each is marked secret: the only
-/// watcher that says so, whatever else watches (Mickey's history has its
-/// own), so two never disagree. Says so when it cannot: then marks are not
-/// seen, and a password copied here can cross.
+/// How many copies the watcher has heard of; 0 when it does not run.
+#[cfg(target_os = "linux")]
+pub fn selections() -> u32 {
+    wayland::SELECTIONS.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+/// Starts following the copies, to know whether each is marked secret.
+/// Says so when it cannot: then marks are not seen, and a password copied
+/// here can cross.
 #[cfg(target_os = "linux")]
 pub fn follow_secret_marks() {
-    let (changed, _unread) = std::sync::mpsc::channel();
-    if let Err(err) = wayland::start(changed, true) {
+    if let Err(err) = wayland::start() {
         println!(
             "mickey: copies marked secret cannot be told apart on this desktop ({err}); they are shared like any copy"
         );
@@ -102,8 +113,10 @@ fn poll_text(changed: Sender<()>, text: impl Fn() -> Option<String> + Send + 'st
 
 #[cfg(target_os = "linux")]
 mod wayland {
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use crate::threads::LockAnyway;
+    use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
     use std::sync::mpsc::Sender;
+    use std::sync::{Mutex, OnceLock};
     use wayland_client::protocol::{wl_registry, wl_seat::WlSeat};
     use wayland_client::{Connection, Dispatch, Proxy, QueueHandle, event_created_child};
     use wayland_protocols_wlr::data_control::v1::client::{
@@ -118,20 +131,36 @@ mod wayland {
     /// Whether the current selection offered `SECRET_HINT`.
     pub static SECRET: AtomicBool = AtomicBool::new(false);
 
+    /// Bumped after `SECRET` on every new selection.
+    pub static SELECTIONS: AtomicU32 = AtomicU32::new(0);
+
+    /// Told about every copy, after `SECRET` holds its mark.
+    static LISTENERS: Mutex<Vec<Sender<()>>> = Mutex::new(Vec::new());
+
+    /// The one connection's outcome: it is opened on the first `start`.
+    static STARTED: OnceLock<Result<(), String>> = OnceLock::new();
+
     struct Watch {
         seat: Option<WlSeat>,
         manager: Option<ZwlrDataControlManagerV1>,
         /// The current selection's offer; the old one is destroyed when a
         /// new copy replaces it, or offers would pile up.
         offer: Option<ZwlrDataControlOfferV1>,
-        changed: Sender<()>,
-        /// Whether this watcher keeps `SECRET` (only one does).
-        marks: bool,
+        /// The compositor ended the data-control device (`finished`).
+        finished: bool,
     }
 
-    /// Watches the selection; `marks` says whether this watcher keeps
-    /// `SECRET` up to date.
-    pub fn start(changed: Sender<()>, marks: bool) -> Result<(), String> {
+    /// Follows the selection, on one connection however many ask.
+    pub fn start() -> Result<(), String> {
+        STARTED.get_or_init(connect).clone()
+    }
+
+    /// `changed` gets a `()` for every copy from now on.
+    pub fn listen(changed: Sender<()>) {
+        LISTENERS.lock_anyway().push(changed);
+    }
+
+    fn connect() -> Result<(), String> {
         let connection = Connection::connect_to_env().map_err(|err| err.to_string())?;
         let mut queue = connection.new_event_queue();
         let handle = queue.handle();
@@ -140,8 +169,7 @@ mod wayland {
             seat: None,
             manager: None,
             offer: None,
-            changed,
-            marks,
+            finished: false,
         };
         queue.roundtrip(&mut watch).map_err(|err| err.to_string())?;
         let (Some(seat), Some(manager)) = (&watch.seat, &watch.manager) else {
@@ -149,12 +177,12 @@ mod wayland {
         };
         manager.get_data_device(seat, &handle, ());
         crate::threads::spawn("clip watch", move || {
-            while queue.blocking_dispatch(&mut watch).is_ok() {}
-            if watch.marks {
-                println!(
-                    "mickey: stopped following the copies; copies marked secret are shared like any copy from now on"
-                );
-            }
+            while !watch.finished && queue.blocking_dispatch(&mut watch).is_ok() {}
+            // Whatever it last held no longer says anything.
+            SECRET.store(false, Ordering::SeqCst);
+            println!(
+                "mickey: stopped following the copies; copies marked secret are shared like any copy from now on"
+            );
         });
         Ok(())
     }
@@ -196,19 +224,26 @@ mod wayland {
             _: &Connection,
             _: &QueueHandle<Watch>,
         ) {
-            if let zwlr_data_control_device_v1::Event::Selection { id } = event {
-                // Its types came before it became the selection.
-                let marked = id
-                    .as_ref()
-                    .and_then(|offer| offer.data::<AtomicBool>())
-                    .is_some_and(|marked| marked.load(Ordering::Relaxed));
-                if watch.marks {
-                    SECRET.store(marked, Ordering::Relaxed);
+            match event {
+                zwlr_data_control_device_v1::Event::Selection { id } => {
+                    // Its types came before it became the selection.
+                    let marked = id
+                        .as_ref()
+                        .and_then(|offer| offer.data::<AtomicBool>())
+                        .is_some_and(|marked| marked.load(Ordering::Relaxed));
+                    // The mark first, then the news: whoever hears of the
+                    // copy reads this copy's mark, never the previous one.
+                    SECRET.store(marked, Ordering::SeqCst);
+                    SELECTIONS.fetch_add(1, Ordering::SeqCst);
+                    if let Some(old) = std::mem::replace(&mut watch.offer, id) {
+                        old.destroy();
+                    }
+                    LISTENERS
+                        .lock_anyway()
+                        .retain(|changed| changed.send(()).is_ok());
                 }
-                if let Some(old) = std::mem::replace(&mut watch.offer, id) {
-                    old.destroy();
-                }
-                let _ = watch.changed.send(());
+                zwlr_data_control_device_v1::Event::Finished => watch.finished = true,
+                _ => {}
             }
         }
 
@@ -252,5 +287,37 @@ mod tests {
         super::follow_secret_marks();
         std::thread::sleep(std::time::Duration::from_millis(300));
         println!("marked secret: {}", super::copied_secret());
+    }
+
+    /// Run by hand on Hyprland or Sway (it replaces this session's copy,
+    /// with `wl-copy`): whoever hears of a copy already reads its mark.
+    /// Before #566's follow-up the history had its own connection and
+    /// could read the previous copy's mark.
+    #[test]
+    #[ignore = "replaces this session's clipboard"]
+    fn a_listener_reads_the_mark_of_the_copy_it_hears_of() {
+        use std::process::Command;
+        use std::time::Duration;
+        super::follow_secret_marks();
+        let (changed, changes) = std::sync::mpsc::channel();
+        super::wayland::listen(changed);
+        let copy = |args: &[&str]| {
+            // The selection already there when the watcher starts is news
+            // too; only this copy's counts.
+            std::thread::sleep(Duration::from_millis(100));
+            while changes.try_recv().is_ok() {}
+            let done = Command::new("wl-copy").args(args).status().unwrap();
+            assert!(done.success());
+            changes.recv_timeout(Duration::from_secs(2)).unwrap();
+            super::copied_secret()
+        };
+        for _ in 0..20 {
+            assert!(copy(&[
+                "--type",
+                "x-kde-passwordManagerHint",
+                "mickey test"
+            ]));
+            assert!(!copy(&["mickey test, not secret"]));
+        }
     }
 }
