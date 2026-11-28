@@ -1,19 +1,19 @@
-//! macOS shared audio playback (`AudioQueue`) and capture placeholder
-//! (system audio capture via CoreAudio Process Taps follows in a separate PR).
+//! macOS shared audio playback (`AudioQueue`) and system-audio capture
+//! (`AudioHardwareCreateProcessTap`, macOS 14.2+).
 
 use super::at_volume;
 use crate::audio::wire::PCM_BYTES;
-use crate::platform::macos_audio::AudioQueuePlayer;
+use crate::platform::macos_audio::{AudioQueuePlayer, TapRecorder};
 
-pub struct Recorder;
+pub struct Recorder(TapRecorder);
 
 impl Recorder {
-    pub fn open(_diverted: bool) -> Result<Recorder, String> {
-        Err("shared audio capture on macOS is not implemented yet".into())
+    pub fn open(diverted: bool) -> Result<Recorder, String> {
+        TapRecorder::open(diverted).map(Recorder)
     }
 
     pub fn read(&mut self) -> Result<Option<[u8; PCM_BYTES]>, String> {
-        Err("shared audio capture on macOS is not implemented yet".into())
+        self.0.read()
     }
 }
 
