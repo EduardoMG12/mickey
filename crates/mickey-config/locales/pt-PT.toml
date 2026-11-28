@@ -142,6 +142,8 @@ history_auto = "Automático: apenas quando nenhum outro gestor de área de trans
 history_always = "Guardar sempre"
 history_never = "Nunca: outro gestor mantém o histórico"
 history_hint = "Outros gestores: cliphist, CopyQ, Klipper, GPaste, Win+V do Windows. A área de transferência é partilhada de qualquer forma. Aplica-se após reiniciar."
+keep_secrets = "Manter palavras-passe neste computador"
+keep_secrets_hint = "Uma cópia que a aplicação marca como secreta não vai para outro computador. O histórico da área de transferência do Mickey deixa-a sempre de fora; desligado, ela vai para outros computadores como qualquer cópia, e eles guardam-na como qualquer cópia. Os gestores de palavras-passe marcam as que copiam: o KeePassXC no Windows e no Linux, a aplicação de ambiente de trabalho do Bitwarden no Windows. Uma palavra-passe copiada de uma página ou de um ficheiro de texto, como um .env, não tem marca e é partilhada como qualquer cópia. Por agora as marcas são lidas no Windows."
 warn_received = "Avisar antes de abrir ficheiros de outros computadores (Windows)"
 warn_received_hint = "Marca-os como vindos da Internet, e o SmartScreen e o Office avisam. Desligado, ficam marcados como da sua rede local; o Defender verifica-os na mesma."
 check_updates = "Verificar se há um Mickey mais recente uma vez por dia"
@@ -282,6 +284,14 @@ recorded_double = "Gravado: toque duplo em {key}"
 not_keys_double = "Foram teclas em conjunto; toca duas vezes numa tecla aqui."
 double_in_chord = "Isso foi um toque duplo; pertence à linha Toque duplo."
 could_not_record = "Não foi possível gravar: {err}"
+
+[secret_kept]
+window_title = "Mickey: uma palavra-passe ficou aqui"
+heading = "Uma palavra-passe ficou neste computador"
+body = "O que copiou foi marcado como secreto pela aplicação (um gestor de palavras-passe), e as suas definições não deixam segredos ir para outros computadores. Pode mudar isso em Definições > Geral."
+never = "Não mostrar novamente"
+ok = "OK"
+settings = "Abrir definições"
 
 [whats_new]
 window_title = "Mickey {version}: novidades"

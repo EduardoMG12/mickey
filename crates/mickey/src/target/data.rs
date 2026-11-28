@@ -98,7 +98,7 @@ pub(super) fn serve_clipboard(
                             // Only right after the keyboard left this PC (#185).
                             || {
                                 clipboard::sync::may_read(&grants, from)
-                                    .then(|| keeper.read())
+                                    .then(|| keeper.read_to_share())
                                     .flatten()
                             },
                             || {

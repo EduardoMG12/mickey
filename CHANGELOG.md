@@ -11,6 +11,11 @@ only: no arrows or emoji, which Mickey's font may not have.
 
 ## Unreleased
 
+- Passwords stay on the PC where you copied them: a copy your password
+  manager marks as secret (KeePassXC, Bitwarden's desktop app) no longer
+  goes to other PCs, nor into the clipboard history. On Windows for now;
+  turn it off in Settings > General. Thanks to @wendelmax for the idea.
+
 - Coming back across a screen edge, the cursor stays where it came in:
   it could jump back to where it had left (thanks, EliasNote).
 - Files copied on another PC now arrive in Downloads/Mickey, where you

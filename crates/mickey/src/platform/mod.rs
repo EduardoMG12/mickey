@@ -22,6 +22,8 @@ pub mod macos_tray;
 pub mod netif;
 #[cfg(windows)]
 pub mod output;
+#[cfg(windows)]
+pub mod secret_marks;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub mod signals;
 #[cfg(any(target_os = "linux", target_os = "macos", windows))]

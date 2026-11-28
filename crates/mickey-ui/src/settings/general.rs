@@ -185,6 +185,9 @@ impl Settings {
         }
         ui.weak(i18n::t("general.history_hint"));
         ui.add_space(12.0);
+        ui.checkbox(&mut form.keep_secrets, i18n::t("general.keep_secrets"));
+        ui.weak(i18n::t("general.keep_secrets_hint"));
+        ui.add_space(12.0);
         ui.checkbox(&mut form.warn_received, i18n::t("general.warn_received"));
         ui.weak(i18n::t("general.warn_received_hint"));
         ui.add_space(12.0);

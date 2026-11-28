@@ -12,8 +12,9 @@ every PC. Decided with the owner on 2026-10-22:
   and X11) and on Windows; working *with* a clipboard manager the owner
   already has (cliphist, CopyQ, Klipper) comes later.
 - **Text, images and files**, in that order.
-- **Everything travels**, passwords included, always encrypted and only
-  between paired PCs.
+- **Everything travels**, always encrypted and only between paired PCs,
+  but for a copy its app marks as secret (a password manager's), which
+  stays on its PC unless the owner says otherwise (#425).
 - **When it travels** is chosen for performance (below).
 
 Done means: copy text or a screenshot on the Windows PC, cross to the
@@ -63,6 +64,7 @@ recent copies.
 - [x] Files (up to 60 MB per crossing, no folders yet; any size and folders in [0015](0015-file-transfer.md)).
 - [x] Option to leave the history to an existing manager (`[clipboard] history = false`, #134).
 - [x] Option to turn sharing off (`[clipboard] share = "off"`, #437).
+- [ ] Copies marked secret stay on their PC and out of the history (`[clipboard] keep_secrets`, on by default, #425). *(Windows done; the Linux mark, `x-kde-passwordManagerHint`, is a later PR.)*
 - [ ] Option to share only on a hotkey (#437, a later PR).
 
 ## Non-Goals
@@ -149,3 +151,21 @@ recent copies.
     shared hotkeys, which an older Mickey would refuse. Its default is
     skipped where a config.toml already gives those keys to something
     else.
+- **Secret marks** (2026-11-25, #425, the idea from @wendelmax). Password
+  managers mark the passwords they copy so clipboard histories leave them
+  out; Mickey now leaves them out of its history, and does not send them to
+  another PC unless `[clipboard] keep_secrets = false`.
+  - Windows: `ExcludeClipboardContentFromMonitorProcessing` there at all,
+    or `CanIncludeInClipboardHistory` set to 0 (KeePassXC, Bitwarden's
+    desktop app), the marks Win+V obeys. Read with `RegisterClipboardFormatW`
+    and `IsClipboardFormatAvailable`, and the number with `GetClipboardData`
+    (`platform/secret_marks.rs`). Checked on Windows 10 with a copy of each
+    kind made in PowerShell: plain text and `CanIncludeInClipboardHistory = 1`
+    not secret, the other two secret. A mark that cannot be read counts as
+    secret.
+  - Linux: KeePassXC and KDE Wallet add `x-kde-passwordManagerHint` with
+    `secret`; `arboard` does not show the types a copy offers, so this needs
+    the data-control offer (`clipboard/watch.rs`) and comes in a later PR.
+    Bitwarden marks nothing on Linux.
+  - Text copied from a web page or a `.env` file carries no mark: telling it
+    is a secret would take guessing from the content, left out on purpose.

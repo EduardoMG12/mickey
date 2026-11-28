@@ -168,7 +168,7 @@ fn default_listen() -> SocketAddr {
 }
 
 /// `[clipboard]`.
-#[derive(Debug, Clone, Default, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Clipboard {
     /// Keep a history of the copies on this PC. `false` leaves it to
@@ -189,6 +189,23 @@ pub struct Clipboard {
     /// still scans them (PRD 0015).
     #[serde(default)]
     pub warn_received: bool,
+    /// A copy its app marks as secret (a password manager's) never leaves
+    /// this PC (#425). On by default: a password copied here must not
+    /// reach another PC because the keyboard went there.
+    #[serde(default = "yes")]
+    pub keep_secrets: bool,
+}
+
+/// Not derived: `keep_secrets` is on when `[clipboard]` is not there too.
+impl Default for Clipboard {
+    fn default() -> Clipboard {
+        Clipboard {
+            history: None,
+            share: Share::default(),
+            warn_received: false,
+            keep_secrets: true,
+        }
+    }
 }
 
 /// `[clipboard] share`: when the clipboard crosses with the keyboard.
@@ -781,6 +798,19 @@ mod tests {
             parse("[clipboard]\nshare = \"never\"\n").is_err(),
             "an unknown mode is an error, not auto"
         );
+    }
+
+    #[test]
+    fn secrets_stay_here_unless_this_pc_says_otherwise() {
+        assert!(Config::empty().clipboard.keep_secrets);
+        assert!(
+            parse("[clipboard]\nhistory = true\n")
+                .unwrap()
+                .clipboard
+                .keep_secrets
+        );
+        let config = parse("[clipboard]\nkeep_secrets = false\n").unwrap();
+        assert!(!config.clipboard.keep_secrets);
     }
 
     #[test]
